@@ -1,0 +1,1 @@
+Safety mode note: keep mock mode on until manual testing is ready.
