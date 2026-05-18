@@ -1,8 +1,12 @@
 import { promises as fs } from "fs";
+import os from "os";
 import path from "path";
 import type { GenerationTask, TaskStatus } from "./types";
 
-const dataDir = path.join(process.cwd(), ".local-data");
+const isVercel = Boolean(process.env.VERCEL);
+const dataDir = isVercel
+  ? path.join(os.tmpdir(), "seedance-black-studio")
+  : path.join(process.cwd(), ".local-data");
 const taskFile = path.join(dataDir, "tasks.json");
 
 async function ensureStore() {
