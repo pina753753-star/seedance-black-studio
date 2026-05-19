@@ -12,6 +12,7 @@ export default function handler(req, res) {
       SUPABASE_URL: supabaseUrl ? supabaseUrl.replace(/^https:\/\//, '').slice(0, 10) + '...' : null,
       SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey ? serviceRoleKey.slice(0, 8) + '...' : null
     },
+    source: 'vercel-env-check',
     checkedAt: new Date().toISOString()
   });
 }
