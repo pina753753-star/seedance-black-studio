@@ -38,3 +38,101 @@ window.FLOWVID_AUTH = {
     setTimeout(addButton, 0);
   }
 })();
+
+(function autoSaveCompletedVeoResults() {
+  function findVideoUri(obj) {
+    if (!obj || typeof obj !== 'object') return '';
+    if (obj.video && obj.video.uri) return obj.video.uri;
+    if (obj.uri && String(obj.uri).includes('/files/')) return obj.uri;
+    for (const key of Object.keys(obj)) {
+      const found = findVideoUri(obj[key]);
+      if (found) return found;
+    }
+    return '';
+  }
+
+  function findOperationName(obj) {
+    if (!obj || typeof obj !== 'object') return '';
+    if (obj.operationName) return obj.operationName;
+    if (obj.name && String(obj.name).includes('/operations/')) return obj.name;
+    for (const key of Object.keys(obj)) {
+      const found = findOperationName(obj[key]);
+      if (found) return found;
+    }
+    return '';
+  }
+
+  function readJsonFromStatus(el) {
+    if (!el) return null;
+    const text = (el.textContent || '').trim();
+    if (!text.startsWith('{')) return null;
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function saveFromStatus(el) {
+    const data = readJsonFromStatus(el);
+    if (!data || data.done !== true) return;
+
+    const videoUri = findVideoUri(data);
+    const operationName = findOperationName(data);
+    if (!videoUri || !operationName) return;
+
+    const storageKey = `flowvidSavedVideo:${operationName}`;
+    if (localStorage.getItem(storageKey) === 'saved') return;
+    localStorage.setItem(storageKey, 'saving');
+
+    const payload = {
+      operationName,
+      videoUri,
+      response: data,
+      userEmail: (document.getElementById('adminEmail')?.textContent || '').trim() || 'hinaran53@gmail.com',
+      provider: 'veo',
+      model: document.getElementById('model')?.value || data.model || 'models/veo-3.0-fast-generate-001',
+      prompt: document.getElementById('prompt')?.value || null,
+      aspectRatio: document.getElementById('aspectRatio')?.value || null,
+      durationSeconds: 5,
+      creditCost: 128,
+      status: 'completed'
+    };
+
+    try {
+      const response = await fetch('/api/generated-videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || '保存に失敗しました');
+      localStorage.setItem(storageKey, 'saved');
+      el.textContent = `${JSON.stringify(data, null, 2)}\n\n✅ generated_videos に保存しました`;
+    } catch (error) {
+      localStorage.removeItem(storageKey);
+      el.textContent = `${JSON.stringify(data, null, 2)}\n\n⚠️ DB保存エラー：${error.message || String(error)}`;
+    }
+  }
+
+  function observeStatus(id) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.flowvidAutoSaveObserver === '1') return;
+    el.dataset.flowvidAutoSaveObserver = '1';
+    const observer = new MutationObserver(() => saveFromStatus(el));
+    observer.observe(el, { childList: true, characterData: true, subtree: true });
+    saveFromStatus(el);
+  }
+
+  function start() {
+    if (!/\/admin\.html$/.test(window.location.pathname)) return;
+    observeStatus('veoStatus');
+    observeStatus('resultStatus');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(start, 300));
+  } else {
+    setTimeout(start, 300);
+  }
+})();
