@@ -21,10 +21,15 @@ export default async function handler(req, res) {
       data = text;
     }
 
-    const modelNames = Array.isArray(data?.models)
-      ? data.models.map((model) => model.name || '').filter(Boolean)
-      : [];
-    const videoRelatedModels = modelNames.filter((name) => /veo|video/i.test(name));
+    const models = Array.isArray(data?.models) ? data.models : [];
+    const modelNames = models.map((model) => model.name || '').filter(Boolean);
+    const videoRelatedModels = models
+      .filter((model) => /veo|video/i.test(model.name || ''))
+      .map((model) => ({
+        name: model.name,
+        displayName: model.displayName || null,
+        supportedGenerationMethods: model.supportedGenerationMethods || []
+      }));
 
     return res.status(response.ok ? 200 : 500).json({
       ok: response.ok,
