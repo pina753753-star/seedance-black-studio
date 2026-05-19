@@ -23,10 +23,14 @@ export default async function handler(req, res) {
     const prompt = String(body.prompt || '').trim();
     const model = String(body.model || 'models/veo-3.0-fast-generate-001').trim();
     const aspectRatio = String(body.aspectRatio || '9:16').trim();
-    const personGeneration = String(body.personGeneration || 'allow_adult').trim();
 
     if (!prompt) {
       return res.status(400).json({ ok: false, error: 'prompt is required' });
+    }
+
+    const parameters = { aspectRatio };
+    if (body.personGeneration) {
+      parameters.personGeneration = String(body.personGeneration).trim();
     }
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:predictLongRunning?key=${encodeURIComponent(googleApiKey)}`;
@@ -39,10 +43,7 @@ export default async function handler(req, res) {
             prompt
           }
         ],
-        parameters: {
-          aspectRatio,
-          personGeneration
-        }
+        parameters
       })
     });
 
