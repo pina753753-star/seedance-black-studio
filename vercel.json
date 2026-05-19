@@ -1,0 +1,8 @@
+{
+  "buildCommand": "echo \"Static HTML site - no build required\"",
+  "outputDirectory": ".",
+  "installCommand": "echo \"No install required for static deployment\"",
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" }
+  ]
+}
