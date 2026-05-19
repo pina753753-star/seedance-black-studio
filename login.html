@@ -26,14 +26,14 @@
           <button type="button" class="ghost" id="appleBtn" disabled>Appleで続ける（後で対応）</button>
           <button type="button" class="ghost" disabled>電話番号で続ける（無料生成解放時）</button>
           <div class="message" id="message"></div>
-          <div class="notice">本番ログインはSupabase Authで接続します。今は設定ファイルにURLとanon keyを入れる直前の状態です。</div>
+          <div class="notice">メールログインはSupabase Authで接続します。管理者メールで作成したアカウントは管理者ログインでも使えます。</div>
         </form>
       </div>
     </section>
     <p class="note">勝手な課金を防ぐため、本番ではログイン・クレジット残高・生成確認を通してからAPIに送信します。</p>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./auth-config.js"></script>
+  <script src="./auth-config.js?v=3844d5ea2"></script>
   <script>
     let mode='login';
     const loginTab=document.getElementById('loginTab');
@@ -51,7 +51,7 @@
     function setMode(next){mode=next;loginTab.classList.toggle('active',mode==='login');signupTab.classList.toggle('active',mode==='signup');submitBtn.textContent=mode==='login'?'ログインする':'アカウント作成';password.autocomplete=mode==='login'?'current-password':'new-password';}
     loginTab.onclick=()=>setMode('login');
     signupTab.onclick=()=>setMode('signup');
-    if(!authReady){setMessage('ログイン接続は未設定です。SupabaseのURLとanon keyを auth-config.js に入れると動きます。','error');submitBtn.disabled=true;googleBtn.disabled=true;}
+    if(!authReady){setMessage('ログイン接続は未設定です。SupabaseのURLと公開可能キーを読み込めていません。数分待って再読み込みしてください。','error');submitBtn.disabled=true;googleBtn.disabled=true;}
     if(client){client.auth.getSession().then(({data})=>{if(data.session) location.href='./profile.html';});}
     form.onsubmit=async(e)=>{e.preventDefault();if(!client)return;submitBtn.disabled=true;setMessage('処理中です…','ok');const mail=email.value.trim();const pass=password.value;let result;if(mode==='login'){result=await client.auth.signInWithPassword({email:mail,password:pass});}else{result=await client.auth.signUp({email:mail,password:pass,options:{emailRedirectTo:cfg.redirectTo||location.origin+'/profile.html'}});}submitBtn.disabled=false;if(result.error){setMessage(result.error.message,'error');return;}if(mode==='signup'){setMessage('確認メールを送りました。メール内のリンクを開いてログインしてください。','ok');return;}location.href='./profile.html';};
     googleBtn.onclick=async()=>{if(!client)return;await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:cfg.redirectTo||location.origin+'/profile.html'}});};
