@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>管理者画面 | FlowVid Studio</title>
+  <meta name="theme-color" content="#050506" />
+  <style>
+    :root{--bg:#050506;--line:rgba(255,255,255,.13);--muted:rgba(255,255,255,.58);--gold:#d7b86a;--cyan:#6ee7f9;--violet:#7c3aed;--red:#fb7185;--ok:#86efac}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{overflow-x:hidden}.bg{position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 18% 0%,rgba(251,113,133,.14),transparent 34%),radial-gradient(circle at 86% 10%,rgba(124,58,237,.20),transparent 36%),linear-gradient(180deg,#050506,#08070d 62%,#030304)}.wrap{position:relative;max-width:980px;margin:0 auto;padding:16px 12px 40px}.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:28px}.brand{display:flex;gap:10px;align-items:center;color:#fff;text-decoration:none;min-width:0}.logo{width:44px;height:44px;min-width:44px;border-radius:17px;background:linear-gradient(135deg,var(--cyan),var(--violet));display:grid;place-items:center;font-weight:950;box-shadow:0 0 50px rgba(124,58,237,.32)}.brand small{display:block;color:rgba(255,255,255,.38);letter-spacing:.24em;font-size:9px}.brand b{display:block;font-size:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.top a,.top button{color:#fff;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.05);border-radius:999px;padding:10px 13px;font-size:13px}.top button{font:inherit}.hero{margin-bottom:16px}.hero p{margin:0 0 9px;color:var(--red);font-size:13px;letter-spacing:.18em}.hero h1{font-size:38px;line-height:1.08;letter-spacing:-.06em;margin:0 0 12px;background:linear-gradient(135deg,#fff,#f5b8c2 52%,#9be7ff);-webkit-background-clip:text;color:transparent}.lead{color:var(--muted);line-height:1.75;font-size:14px}.grid{display:grid;gap:12px}.card{border:1px solid var(--line);border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.03));padding:16px;box-shadow:0 24px 80px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.08)}.card h2{margin:0 0 10px;font-size:20px}.stat{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.box{border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.04);padding:14px}.box b{display:block;font-size:30px}.box span{color:var(--muted);font-size:13px}.row{display:flex;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding:12px 0;color:rgba(255,255,255,.76);font-size:14px}.row:first-child{border-top:0}.pill{display:inline-flex;border:1px solid rgba(134,239,172,.28);background:rgba(134,239,172,.10);color:#dcfce7;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:900}.warn{display:none;border:1px solid rgba(251,113,133,.35);background:rgba(251,113,133,.10);color:#fecdd3;border-radius:18px;padding:14px;line-height:1.6;margin-bottom:14px}.warn.show{display:block}.note{color:rgba(255,255,255,.36);font-size:12px;line-height:1.7;text-align:center;margin-top:14px}@media(min-width:760px){.grid{grid-template-columns:1fr 1fr}.wide{grid-column:1/-1}.hero h1{font-size:46px}}@media(max-width:430px){.hero h1{font-size:34px}.stat{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="bg"></div>
+<main class="wrap">
+  <header class="top"><a class="brand" href="./index.html"><div class="logo">▶</div><div><small>AI VIDEO STUDIO</small><b>FlowVid Studio</b></div></a><button id="logoutBtn">ログアウト</button></header>
+  <section class="hero"><p>ADMIN DASHBOARD</p><h1>管理者ダッシュボード</h1><div class="lead">ユーザー、クレジット、生成タスクを確認するための仮画面です。DBスキーマ実行後に実データを接続します。</div></section>
+  <div class="warn" id="warn"></div>
+  <section class="grid" id="dash" style="display:none">
+    <article class="card wide"><h2>ログイン状態</h2><div class="row"><span>管理者メール</span><strong id="adminEmail">確認中</strong></div><div class="row"><span>権限</span><span class="pill">admin</span></div></article>
+    <article class="card"><h2>ユーザー管理</h2><div class="stat"><div class="box"><b id="userCount">-</b><span>登録ユーザー</span></div><div class="box"><b id="adminCount">-</b><span>管理者</span></div></div></article>
+    <article class="card"><h2>クレジット</h2><div class="stat"><div class="box"><b id="creditTotal">0</b><span>総クレジット</span></div><div class="box"><b id="paidTotal">0</b><span>購入分</span></div></div></article>
+    <article class="card wide"><h2>生成タスク</h2><div class="row"><span>処理待ち</span><strong>0</strong></div><div class="row"><span>処理中</span><strong>0</strong></div><div class="row"><span>完了</span><strong>0</strong></div><div class="row"><span>失敗</span><strong>0</strong></div></article>
+    <article class="card wide"><h2>次に接続するもの</h2><div class="row"><span>Supabase DB</span><strong>schema.sql 実行後</strong></div><div class="row"><span>Seedance API</span><strong>未接続</strong></div><div class="row"><span>Stripe決済</span><strong>未接続</strong></div></article>
+  </section>
+  <p class="note">本番ではAPIキーや秘密鍵はこの静的ページに置きません。管理用の処理はサーバー側で実行します。</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./auth-config.js?v=3844d5ea2"></script>
+<script>
+const cfg=window.FLOWVID_AUTH||{};
+const adminEmails=(cfg.adminEmails||[]).map(v=>String(v).toLowerCase());
+const authReady=Boolean(cfg.supabaseUrl&&cfg.supabaseAnonKey);
+const client=authReady?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
+const warn=document.getElementById('warn');
+const dash=document.getElementById('dash');
+function showWarn(text){warn.textContent=text;warn.classList.add('show');dash.style.display='none';}
+function showDash(email){document.getElementById('adminEmail').textContent=email;dash.style.display='grid';warn.classList.remove('show');}
+(async()=>{
+  if(!authReady){showWarn('Supabase接続情報が未設定です。');return;}
+  const {data,error}=await client.auth.getSession();
+  const email=data.session?.user?.email||'';
+  if(error||!email){location.href='./admin-login.html';return;}
+  if(!adminEmails.includes(email.toLowerCase())){showWarn('このアカウントは管理者ではありません。');return;}
+  showDash(email);
+})();
+document.getElementById('logoutBtn').onclick=async()=>{if(client) await client.auth.signOut();location.href='./index.html';};
+</script>
+</body>
+</html>
