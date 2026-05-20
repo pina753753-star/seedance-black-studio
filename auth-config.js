@@ -39,6 +39,88 @@ window.FLOWVID_AUTH = {
   }
 })();
 
+(function persistAdminViewAcrossReloads() {
+  const allowed = new Set(['dashboard', 'veo', 'result', 'settings']);
+
+  function currentHashView() {
+    const raw = String(window.location.hash || '').replace(/^#/, '').trim();
+    return allowed.has(raw) ? raw : '';
+  }
+
+  function savedView() {
+    const raw = localStorage.getItem('flowvidAdminView') || '';
+    return allowed.has(raw) ? raw : '';
+  }
+
+  function remember(view) {
+    if (!allowed.has(view)) return;
+    localStorage.setItem('flowvidAdminView', view);
+    if (window.location.hash !== `#${view}`) {
+      history.replaceState(null, '', `#${view}`);
+    }
+  }
+
+  function openRememberedView() {
+    if (!/\/admin\.html$/.test(window.location.pathname)) return;
+    if (typeof window.showView !== 'function') return false;
+    const view = currentHashView() || savedView();
+    if (view) {
+      window.showView(view);
+      remember(view);
+    }
+    return true;
+  }
+
+  function hookShowView() {
+    if (!/\/admin\.html$/.test(window.location.pathname)) return;
+    if (typeof window.showView !== 'function') return false;
+    if (window.showView.__flowvidPersistHooked) return true;
+
+    const originalShowView = window.showView;
+    window.showView = function patchedShowView(name) {
+      const result = originalShowView.apply(this, arguments);
+      if (allowed.has(name)) remember(name);
+      return result;
+    };
+    window.showView.__flowvidPersistHooked = true;
+    return true;
+  }
+
+  function attachButtonMemory() {
+    document.querySelectorAll('.drawer .nav button[data-view]').forEach((button) => {
+      if (button.dataset.flowvidRememberView === '1') return;
+      button.dataset.flowvidRememberView = '1';
+      button.addEventListener('click', () => remember(button.dataset.view || ''));
+    });
+  }
+
+  function start() {
+    if (!/\/admin\.html$/.test(window.location.pathname)) return;
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts += 1;
+      const hooked = hookShowView();
+      attachButtonMemory();
+      const opened = openRememberedView();
+      if ((hooked && opened) || attempts > 40) clearInterval(timer);
+    }, 150);
+  }
+
+  window.addEventListener('hashchange', () => {
+    const view = currentHashView();
+    if (view && typeof window.showView === 'function') {
+      window.showView(view);
+      remember(view);
+    }
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+
 (function autoSaveCompletedVeoResults() {
   function findVideoUri(obj) {
     if (!obj || typeof obj !== 'object') return '';
