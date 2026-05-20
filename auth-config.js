@@ -306,3 +306,106 @@ window.FLOWVID_AUTH = {
     setTimeout(start, 500);
   }
 })();
+
+(function addCurrentUsageEstimate() {
+  const monthlyLimit = 2000;
+
+  function yen(value) {
+    const num = Math.round(Number(value || 0));
+    return `¥${num.toLocaleString('ja-JP')}`;
+  }
+
+  function currentMonthRows(rows) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    return (rows || []).filter((row) => {
+      const date = row.created_at ? new Date(row.created_at) : null;
+      if (!date || Number.isNaN(date.getTime())) return false;
+      return date.getFullYear() === year && date.getMonth() === month;
+    });
+  }
+
+  function ensureCard() {
+    const settings = document.getElementById('settings');
+    if (!settings || document.getElementById('currentUsageEstimateCard')) return;
+
+    const card = document.createElement('article');
+    card.className = 'card';
+    card.id = 'currentUsageEstimateCard';
+    card.innerHTML = `
+      <h2>今月の利用状況</h2>
+      <div class="row"><span>FlowVid記録の利用額</span><strong id="flowvidUsageAmount">読み込み中</strong></div>
+      <div class="row"><span>生成回数</span><strong id="flowvidUsageCount">-</strong></div>
+      <div class="row"><span>月上限まで残り</span><strong id="flowvidUsageRemaining">-</strong></div>
+      <div class="row"><span>上限使用率</span><strong id="flowvidUsagePercent">-</strong></div>
+      <div class="mini" id="flowvidUsageNote">generated_videos の credit_cost を集計した目安です。Google AI Studioの実請求額は下のボタンから確認してください。</div>
+      <button class="btn secondary" id="refreshUsageEstimateBtn" type="button">利用状況を再読み込み</button>
+    `;
+
+    const firstCard = settings.querySelector('.card');
+    if (firstCard?.nextSibling) {
+      firstCard.parentNode.insertBefore(card, firstCard.nextSibling);
+    } else {
+      settings.appendChild(card);
+    }
+
+    const button = document.getElementById('refreshUsageEstimateBtn');
+    if (button) button.addEventListener('click', loadUsage);
+  }
+
+  async function loadUsage() {
+    ensureCard();
+    const amountEl = document.getElementById('flowvidUsageAmount');
+    const countEl = document.getElementById('flowvidUsageCount');
+    const remainingEl = document.getElementById('flowvidUsageRemaining');
+    const percentEl = document.getElementById('flowvidUsagePercent');
+    const noteEl = document.getElementById('flowvidUsageNote');
+    if (!amountEl) return;
+
+    amountEl.textContent = '読み込み中';
+    try {
+      const response = await fetch('/api/generated-videos?limit=50');
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || '利用状況を取得できませんでした');
+
+      const monthRows = currentMonthRows(data.rows || []);
+      const completedRows = monthRows.filter((row) => ['completed', 'processing'].includes(String(row.status || '')));
+      const total = completedRows.reduce((sum, row) => sum + Number(row.credit_cost || 0), 0);
+      const remaining = Math.max(monthlyLimit - total, 0);
+      const percent = monthlyLimit > 0 ? Math.min((total / monthlyLimit) * 100, 999) : 0;
+
+      amountEl.textContent = yen(total);
+      countEl.textContent = `${completedRows.length}回`;
+      remainingEl.textContent = yen(remaining);
+      percentEl.textContent = `${percent.toFixed(1)}%`;
+      noteEl.textContent = `更新：${new Date().toLocaleString('ja-JP')}。この表示はFlowVid内の記録ベースです。Google AI Studio側の実測額とは数円ずれる可能性があります。`;
+    } catch (error) {
+      amountEl.textContent = '取得エラー';
+      countEl.textContent = '-';
+      remainingEl.textContent = '-';
+      percentEl.textContent = '-';
+      if (noteEl) noteEl.textContent = error.message || String(error);
+    }
+  }
+
+  function start() {
+    if (!/\/admin\.html$/.test(window.location.pathname)) return;
+    ensureCard();
+    loadUsage();
+    const nav = document.querySelector('.drawer .nav');
+    if (nav && !nav.dataset.flowvidUsageHooked) {
+      nav.dataset.flowvidUsageHooked = '1';
+      nav.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-view="settings"]');
+        if (button) setTimeout(loadUsage, 400);
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(start, 600));
+  } else {
+    setTimeout(start, 600);
+  }
+})();
