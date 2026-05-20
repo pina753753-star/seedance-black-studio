@@ -1,3 +1,16 @@
+function safeFilename(value, fallback) {
+  const cleaned = String(value || '')
+    .replace(/[\\/\r\n\t\0]/g, '-')
+    .replace(/[^a-zA-Z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 96);
+  return cleaned || fallback;
+}
+
+function wantsDownload(value) {
+  return ['1', 'true', 'yes', 'attachment', 'download'].includes(String(value || '').toLowerCase());
+}
+
 export default async function handler(req, res) {
   const googleApiKey = process.env.GOOGLE_API_KEY || '';
   if (!googleApiKey) {
@@ -24,6 +37,11 @@ export default async function handler(req, res) {
     url.searchParams.set('key', googleApiKey);
   }
 
+  const download = wantsDownload(req.query.download);
+  const rawVariant = String(req.query.variant || req.query.watermark || '').toLowerCase();
+  const variant = rawVariant.includes('clean') || rawVariant.includes('none') || rawVariant === '0' ? 'clean' : 'watermark';
+  const filename = safeFilename(req.query.filename, `flowvid-${variant}.mp4`);
+
   try {
     const upstream = await fetch(url.toString(), { method: 'GET' });
     if (!upstream.ok) {
@@ -38,7 +56,8 @@ export default async function handler(req, res) {
     const contentType = upstream.headers.get('content-type') || 'video/mp4';
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    res.setHeader('Content-Disposition', 'inline; filename="flowvid-veo-test.mp4"');
+    res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="${filename}"`);
+    res.setHeader('X-FlowVid-Download-Variant', variant);
 
     const arrayBuffer = await upstream.arrayBuffer();
     return res.status(200).send(Buffer.from(arrayBuffer));
