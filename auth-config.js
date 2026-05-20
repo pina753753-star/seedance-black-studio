@@ -136,3 +136,91 @@ window.FLOWVID_AUTH = {
     setTimeout(start, 300);
   }
 })();
+
+(function addRunDraftTaskButtons() {
+  function extractTaskId(item) {
+    const deleteButton = item.querySelector('button[onclick^="deleteTask"]');
+    const code = deleteButton?.getAttribute('onclick') || '';
+    const match = code.match(/deleteTask\('([^']+)'\)/);
+    return match ? match[1] : '';
+  }
+
+  function setTaskStatus(message, bad = false) {
+    const el = document.getElementById('taskStatus');
+    if (!el) return;
+    el.textContent = message;
+    el.className = 'status show' + (bad ? ' bad' : '');
+  }
+
+  async function runTask(taskId, button) {
+    const ok = confirm('このdraftをVeoで実行します。Google側で課金が発生する可能性があります。実行しますか？');
+    if (!ok) return;
+
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Veo実行中…';
+    setTaskStatus('Veo生成を開始しています…');
+
+    try {
+      const response = await fetch('/api/run-generation-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Veo実行に失敗しました');
+
+      if (result.operationName) {
+        localStorage.setItem('flowvidVeoOperation', result.operationName);
+      }
+
+      setTaskStatus(`${JSON.stringify(result, null, 2)}\n\n✅ Veo実行を開始しました。operationName が出ています。`);
+
+      const refreshButton = document.getElementById('refreshTasksBtn');
+      if (refreshButton) setTimeout(() => refreshButton.click(), 900);
+    } catch (error) {
+      setTaskStatus('Veo実行エラー：' + (error.message || String(error)), true);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+
+  function enhanceTaskList() {
+    if (!/\/admin\.html$/.test(window.location.pathname)) return;
+    document.querySelectorAll('#taskList .taskItem').forEach((item) => {
+      if (item.dataset.flowvidRunButtonAdded === '1') return;
+      const statusText = item.querySelector('.taskTop span')?.textContent?.trim() || '';
+      if (!['draft', 'queued', 'pending', 'failed', 'error'].includes(statusText)) return;
+
+      const taskId = extractTaskId(item);
+      if (!taskId) return;
+
+      const actions = item.querySelector('.taskActions');
+      if (!actions) return;
+
+      const runButton = document.createElement('button');
+      runButton.type = 'button';
+      runButton.className = 'taskBtn';
+      runButton.textContent = 'Veo実行';
+      runButton.addEventListener('click', () => runTask(taskId, runButton));
+      actions.insertBefore(runButton, actions.firstChild);
+      item.dataset.flowvidRunButtonAdded = '1';
+    });
+  }
+
+  function start() {
+    if (!/\/admin\.html$/.test(window.location.pathname)) return;
+    const list = document.getElementById('taskList');
+    if (!list) return;
+    enhanceTaskList();
+    const observer = new MutationObserver(enhanceTaskList);
+    observer.observe(list, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(start, 500));
+  } else {
+    setTimeout(start, 500);
+  }
+})();
