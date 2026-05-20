@@ -61,7 +61,14 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const limit = Math.min(Math.max(Number(req.query.limit || 10), 1), 50);
-      const rows = await supabaseRequest(`generated_videos?select=*&order=created_at.desc&limit=${limit}`);
+      const email = String(req.query.email || req.query.user_email || '').trim().toLowerCase();
+      const status = String(req.query.status || '').trim();
+      const filters = ['select=*'];
+      if (email) filters.push(`user_email=eq.${encodeURIComponent(email)}`);
+      if (status) filters.push(`status=eq.${encodeURIComponent(status)}`);
+      filters.push('order=created_at.desc');
+      filters.push(`limit=${limit}`);
+      const rows = await supabaseRequest(`generated_videos?${filters.join('&')}`);
       return res.status(200).json({ ok: true, rows, checkedAt: new Date().toISOString() });
     }
 
@@ -80,7 +87,7 @@ export default async function handler(req, res) {
     const videoUri = String(body.videoUri || body.video_uri || findVideoUri(body.response) || existing?.video_uri || '').trim();
 
     const payload = {
-      user_email: existing?.user_email || body.userEmail || body.user_email || null,
+      user_email: String(existing?.user_email || body.userEmail || body.user_email || '').trim().toLowerCase() || null,
       provider: existing?.provider || body.provider || 'veo',
       model: existing?.model || body.model || null,
       operation_name: operationName,
