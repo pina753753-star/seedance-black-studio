@@ -409,3 +409,66 @@ window.FLOWVID_AUTH = {
     setTimeout(start, 600);
   }
 })();
+
+(function labelGenerateActionButtons() {
+  function injectStyle() {
+    if (document.getElementById('flowvidGenerateActionLabelStyle')) return;
+    const style = document.createElement('style');
+    style.id = 'flowvidGenerateActionLabelStyle';
+    style.textContent = `
+      .flowvidActionLabel{
+        width:auto!important;
+        min-width:58px!important;
+        height:42px!important;
+        padding:4px 9px!important;
+        display:grid!important;
+        grid-template-rows:auto auto!important;
+        place-items:center!important;
+        gap:2px!important;
+        line-height:1.05!important;
+        font-size:11px!important;
+        font-weight:900!important;
+      }
+      .flowvidActionLabel .flowvidIcon{font-size:15px;line-height:1;display:block;}
+      .flowvidActionLabel .flowvidLabel{font-size:10px;line-height:1;display:block;opacity:.9;letter-spacing:.02em;}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function setLabel(el, icon, label) {
+    if (!el || el.dataset.flowvidLabel === label) return;
+    el.classList.add('flowvidActionLabel');
+    el.dataset.flowvidLabel = label;
+    el.innerHTML = `<span class="flowvidIcon">${icon}</span><span class="flowvidLabel">${label}</span>`;
+  }
+
+  function labelActions() {
+    if (!/\/generate\.html$/.test(window.location.pathname)) return;
+    injectStyle();
+    document.querySelectorAll('.taskActions .actionGroup').forEach((group) => {
+      const items = Array.from(group.children);
+      setLabel(items[0], '✦', '編集');
+      setLabel(items[1], '↗', '開く');
+      setLabel(items[2], '↓', '保存');
+    });
+  }
+
+  function start() {
+    if (!/\/generate\.html$/.test(window.location.pathname)) return;
+    labelActions();
+    const list = document.getElementById('taskList');
+    if (list && !list.dataset.flowvidActionLabelObserver) {
+      list.dataset.flowvidActionLabelObserver = '1';
+      const observer = new MutationObserver(labelActions);
+      observer.observe(list, { childList: true, subtree: true });
+    }
+    setTimeout(labelActions, 800);
+    setTimeout(labelActions, 1800);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
