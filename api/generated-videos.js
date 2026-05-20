@@ -38,6 +38,25 @@ async function supabaseRequest(path, options = {}) {
   return data;
 }
 
+async function markMatchingTaskCompleted(row) {
+  if (!row?.video_uri || !row?.prompt || !row?.user_email) {
+    return { taskSynced: false, reason: 'video_uri, prompt, or user_email missing' };
+  }
+
+  const profiles = await supabaseRequest(`profiles?select=id&email=eq.${encodeURIComponent(row.user_email)}&limit=1`);
+  const userId = profiles?.[0]?.id;
+  if (!userId) return { taskSynced: false, reason: 'profile not found' };
+
+  const path = `generation_tasks?user_id=eq.${encodeURIComponent(userId)}&prompt=eq.${encodeURIComponent(row.prompt)}&status=eq.processing`;
+  const updated = await supabaseRequest(path, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ status: 'completed' })
+  });
+
+  return { taskSynced: true, updatedCount: Array.isArray(updated) ? updated.length : 0 };
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
@@ -56,24 +75,26 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: 'operationName is required' });
     }
 
-    const existing = await supabaseRequest(`generated_videos?select=id&operation_name=eq.${encodeURIComponent(operationName)}&limit=1`);
-    const videoUri = String(body.videoUri || body.video_uri || findVideoUri(body.response) || '').trim();
+    const existingRows = await supabaseRequest(`generated_videos?select=*&operation_name=eq.${encodeURIComponent(operationName)}&limit=1`);
+    const existing = existingRows?.[0] || null;
+    const videoUri = String(body.videoUri || body.video_uri || findVideoUri(body.response) || existing?.video_uri || '').trim();
+
     const payload = {
-      user_email: body.userEmail || body.user_email || null,
-      provider: body.provider || 'veo',
-      model: body.model || null,
+      user_email: existing?.user_email || body.userEmail || body.user_email || null,
+      provider: existing?.provider || body.provider || 'veo',
+      model: existing?.model || body.model || null,
       operation_name: operationName,
-      prompt: body.prompt || null,
-      aspect_ratio: body.aspectRatio || body.aspect_ratio || null,
-      duration_seconds: Number(body.durationSeconds || body.duration_seconds || 5),
+      prompt: existing?.prompt || body.prompt || null,
+      aspect_ratio: existing?.aspect_ratio || body.aspectRatio || body.aspect_ratio || null,
+      duration_seconds: Number(existing?.duration_seconds || body.durationSeconds || body.duration_seconds || 5),
       video_uri: videoUri || null,
-      credit_cost: Number(body.creditCost || body.credit_cost || 128),
-      status: videoUri ? 'completed' : (body.status || 'processing')
+      credit_cost: Number(existing?.credit_cost || body.creditCost || body.credit_cost || 128),
+      status: videoUri ? 'completed' : (body.status || existing?.status || 'processing')
     };
 
     let rows;
-    if (existing?.[0]?.id) {
-      rows = await supabaseRequest(`generated_videos?id=eq.${existing[0].id}`, {
+    if (existing?.id) {
+      rows = await supabaseRequest(`generated_videos?id=eq.${existing.id}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify(payload)
@@ -86,7 +107,17 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({ ok: true, row: rows?.[0] || null, checkedAt: new Date().toISOString() });
+    const row = rows?.[0] || null;
+    let taskSync = { taskSynced: false, reason: 'not completed' };
+    if (row?.status === 'completed') {
+      try {
+        taskSync = await markMatchingTaskCompleted(row);
+      } catch (error) {
+        taskSync = { taskSynced: false, error: error?.message || 'task sync failed' };
+      }
+    }
+
+    return res.status(200).json({ ok: true, row, taskSync, checkedAt: new Date().toISOString() });
   } catch (error) {
     return res.status(error.status || 500).json({
       ok: false,
