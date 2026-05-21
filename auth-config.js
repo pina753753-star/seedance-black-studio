@@ -34,6 +34,21 @@ window.FLOWVID_AUTH = {
       card.classList.toggle('flowvid-unfinished-task',!hasVideo);
     });
   }
+  function cardTime(card){
+    const nodes=Array.from(card.querySelectorAll('div'));
+    const last=nodes.map(n=>(n.textContent||'').trim()).reverse().find(t=>/^\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}:\d{2}$/.test(t));
+    if(!last) return 0;
+    const d=new Date(last.replace(/\//g,'-'));
+    return Number.isNaN(d.getTime())?0:d.getTime();
+  }
+  function sortCardsNewestFirst(){
+    const list=document.getElementById('taskList');
+    if(!list) return;
+    const cards=Array.from(list.querySelectorAll(':scope > .taskCard'));
+    if(cards.length<2) return;
+    const sorted=cards.slice().sort((a,b)=>cardTime(b)-cardTime(a));
+    sorted.forEach(card=>list.appendChild(card));
+  }
   function setActionLabel(el,icon,label){
     if(!el||el.dataset.flowvidLabel===label) return;
     el.classList.add('flowvidActionLabel');
@@ -60,6 +75,7 @@ window.FLOWVID_AUTH = {
     if(!isGeneratePage()) return;
     document.body.classList.add('flowvid-ui');
     injectStyle();
+    sortCardsNewestFirst();
     markCards();
     labelActions();
     updateCreateButton();
