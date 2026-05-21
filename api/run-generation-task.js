@@ -6,6 +6,8 @@ function config() {
   };
 }
 
+const GOOGLE_VEO_CREDIT_COST = 80;
+
 async function supabase(path, options = {}) {
   const { supabaseUrl, serviceRoleKey } = config();
   if (!supabaseUrl || !serviceRoleKey) throw new Error('Missing Supabase environment variables');
@@ -39,6 +41,78 @@ function aspectFromTask(task) {
   const aspect = String(task.aspect_ratio || '9:16').trim();
   if (['16:9', '9:16'].includes(aspect)) return aspect;
   return '9:16';
+}
+
+function totalCredits(balance) {
+  return Number(balance?.free_credits || 0) + Number(balance?.subscription_credits || 0) + Number(balance?.purchased_credits || 0);
+}
+
+function debitCredits(balance, cost) {
+  let remaining = Number(cost || 0);
+  const next = {
+    free_credits: Number(balance?.free_credits || 0),
+    subscription_credits: Number(balance?.subscription_credits || 0),
+    purchased_credits: Number(balance?.purchased_credits || 0)
+  };
+
+  const useFree = Math.min(next.free_credits, remaining);
+  next.free_credits -= useFree;
+  remaining -= useFree;
+
+  const useSub = Math.min(next.subscription_credits, remaining);
+  next.subscription_credits -= useSub;
+  remaining -= useSub;
+
+  const usePurchased = Math.min(next.purchased_credits, remaining);
+  next.purchased_credits -= usePurchased;
+  remaining -= usePurchased;
+
+  if (remaining > 0) return null;
+  return next;
+}
+
+function refundCredits(balance, cost) {
+  return {
+    free_credits: Number(balance?.free_credits || 0) + Number(cost || 0),
+    subscription_credits: Number(balance?.subscription_credits || 0),
+    purchased_credits: Number(balance?.purchased_credits || 0)
+  };
+}
+
+async function chargeUserCredits(userId, cost) {
+  if (!userId) throw new Error('Task has no user_id');
+  const rows = await supabase(`credit_balances?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`);
+  const balance = rows?.[0];
+  if (!balance) throw new Error('Credit balance not found');
+  if (totalCredits(balance) < cost) {
+    const error = new Error(`Insufficient credits: ${cost} required`);
+    error.status = 402;
+    throw error;
+  }
+  const next = debitCredits(balance, cost);
+  if (!next) {
+    const error = new Error(`Insufficient credits: ${cost} required`);
+    error.status = 402;
+    throw error;
+  }
+  await supabase(`credit_balances?user_id=eq.${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(next)
+  });
+  return { before: balance, after: next };
+}
+
+async function refundUserCredits(userId, charged) {
+  if (!userId || !charged?.after) return;
+  const refunded = refundCredits(charged.after, GOOGLE_VEO_CREDIT_COST);
+  try {
+    await supabase(`credit_balances?user_id=eq.${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify(refunded)
+    });
+  } catch (_) {}
 }
 
 async function callVeo({ model, prompt, aspectRatio }) {
@@ -76,9 +150,13 @@ export default async function handler(req, res) {
       endpoint: '/api/run-generation-task',
       method: 'POST',
       exampleBody: { taskId: 'generation_tasks id' },
+      creditCost: GOOGLE_VEO_CREDIT_COST,
       note: 'Runs a saved draft task with Veo. This can incur Google API cost.'
     });
   }
+
+  let charged = null;
+  let userId = null;
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
@@ -95,7 +173,9 @@ export default async function handler(req, res) {
 
     const model = modelFromTask(task);
     const aspectRatio = aspectFromTask(task);
-    const userId = task.user_id || null;
+    userId = task.user_id || null;
+
+    charged = await chargeUserCredits(userId, GOOGLE_VEO_CREDIT_COST);
 
     let userEmail = null;
     if (userId) {
@@ -108,13 +188,14 @@ export default async function handler(req, res) {
     await supabase(`generation_tasks?id=eq.${encodeURIComponent(taskId)}`, {
       method: 'PATCH',
       headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({ status: 'processing' })
+      body: JSON.stringify({ status: 'processing', credit_cost: GOOGLE_VEO_CREDIT_COST })
     });
 
     let veo;
     try {
       veo = await callVeo({ model, prompt: task.prompt, aspectRatio });
     } catch (error) {
+      await refundUserCredits(userId, charged);
       await supabase(`generation_tasks?id=eq.${encodeURIComponent(taskId)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
@@ -125,6 +206,7 @@ export default async function handler(req, res) {
 
     const operationName = veo.operationName;
     if (!operationName) {
+      await refundUserCredits(userId, charged);
       await supabase(`generation_tasks?id=eq.${encodeURIComponent(taskId)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
@@ -145,7 +227,7 @@ export default async function handler(req, res) {
         aspect_ratio: aspectRatio,
         duration_seconds: Number(task.duration_seconds || 5),
         video_uri: null,
-        credit_cost: Number(task.credit_cost || 128),
+        credit_cost: GOOGLE_VEO_CREDIT_COST,
         status: 'processing'
       })
     });
@@ -158,6 +240,7 @@ export default async function handler(req, res) {
       model,
       aspectRatio,
       operationName,
+      creditCost: GOOGLE_VEO_CREDIT_COST,
       note: 'Veo generation started. Use Generate Result Check or history after completion.',
       response: veo.data,
       checkedAt: new Date().toISOString()
