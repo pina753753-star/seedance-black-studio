@@ -7,6 +7,7 @@ window.FLOWVID_AUTH = {
 };
 
 (function flowvidGeneratePageEnhancements(){
+  const GENERATION_CREDIT_COST=80;
   const ACTIVE_TASK_WINDOW_MS=1000*60*60*2;
   function isGeneratePage(){return /\/generate\.html$/.test(location.pathname)}
   function modeLabel(){return document.querySelector('.modeTabs button.active')?.textContent?.trim() || 'リファレンス'}
@@ -77,7 +78,7 @@ window.FLOWVID_AUTH = {
   function updateCreateButton(){
     const createBtn=document.getElementById('createBtn');
     if(createBtn&&!createBtn.disabled){
-      createBtn.innerHTML='<span>作成する</span><span class="flowvidCreateCost"><span class="flowvidCostIcon">✦</span>128</span>';
+      createBtn.innerHTML=`<span>作成する</span><span class="flowvidCreateCost"><span class="flowvidCostIcon">✦</span>${GENERATION_CREDIT_COST}</span>`;
     }
     const label=document.getElementById('modeLabel');
     if(label) label.textContent=modeLabel();
@@ -144,12 +145,24 @@ window.FLOWVID_AUTH = {
     }
     localStorage.setItem('flowvidUserOperations',JSON.stringify(keep.slice(0,10)));
   }
+  async function ensureCredits(user){
+    try{
+      await fetch('/api/ensure-user-credits',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:user.id,email:user.email||''})});
+    }catch(_){}
+  }
+  async function totalCredits(client,userId){
+    const {data}=await client.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',userId).maybeSingle();
+    return Number(data?.free_credits||0)+Number(data?.subscription_credits||0)+Number(data?.purchased_credits||0);
+  }
   async function createAndRun(){
     const client=currentClient();
     if(!client){status('Supabase接続情報が未設定です。',true);return}
     const {data:sessionData,error:sessionError}=await client.auth.getSession();
     const user=sessionData?.session?.user||null;
     if(sessionError||!user){location.href='./login.html';return}
+    await ensureCredits(user);
+    const balance=await totalCredits(client,user.id);
+    if(balance<GENERATION_CREDIT_COST){status(`クレジット不足です。${GENERATION_CREDIT_COST}クレジット必要です。`,true);return}
     const prompt=(document.getElementById('prompt')?.value||'').trim();
     if(!prompt){status('プロンプトを入力してください。',true);return}
     const createBtn=document.getElementById('createBtn');
@@ -164,7 +177,7 @@ window.FLOWVID_AUTH = {
         resolution:'veo',
         duration_seconds:Number(document.getElementById('duration')?.value||5),
         aspect_ratio:document.getElementById('aspectRatio')?.value||'9:16',
-        credit_cost:128,
+        credit_cost:GENERATION_CREDIT_COST,
         status:'draft',
         api_provider:'veo'
       };
