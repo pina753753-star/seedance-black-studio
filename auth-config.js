@@ -472,3 +472,206 @@ window.FLOWVID_AUTH = {
     start();
   }
 })();
+
+(function runUserCreateButtonWithVeo() {
+  function isGeneratePage() {
+    return /\/generate\.html$/.test(window.location.pathname);
+  }
+
+  function status(message, bad = false) {
+    const el = document.getElementById('status');
+    if (!el) return;
+    el.textContent = message;
+    el.className = 'status show' + (bad ? ' bad' : '');
+  }
+
+  function notice(message, bad = false) {
+    const el = document.getElementById('notice');
+    if (!el) return;
+    el.textContent = message;
+    el.className = bad ? 'pill bad' : 'pill';
+  }
+
+  function activeMode() {
+    return document.querySelector('.modeTabs button.active')?.dataset.mode || 'reference_to_video';
+  }
+
+  function currentClient() {
+    const cfg = window.FLOWVID_AUTH || {};
+    if (!window.supabase || !cfg.supabaseUrl || !cfg.supabaseAnonKey) return null;
+    if (!window.__flowvidUserClient) {
+      window.__flowvidUserClient = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+    }
+    return window.__flowvidUserClient;
+  }
+
+  async function refreshTasksSoon() {
+    const button = document.getElementById('loadTasksBtn');
+    if (button) {
+      setTimeout(() => button.click(), 500);
+      setTimeout(() => button.click(), 2500);
+      setTimeout(() => button.click(), 7000);
+    }
+  }
+
+  function rememberOperation(operationName, email) {
+    if (!operationName) return;
+    const raw = localStorage.getItem('flowvidUserOperations') || '[]';
+    let rows = [];
+    try { rows = JSON.parse(raw); } catch (_) { rows = []; }
+    rows = rows.filter((row) => row && row.operationName !== operationName);
+    rows.unshift({ operationName, email, startedAt: Date.now() });
+    localStorage.setItem('flowvidUserOperations', JSON.stringify(rows.slice(0, 10)));
+  }
+
+  async function checkOperation(row) {
+    const params = new URLSearchParams({ operationName: row.operationName || '' });
+    if (row.email) params.set('userEmail', row.email);
+    const response = await fetch('/api/check-veo-operation?' + params.toString());
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || '生成状況を確認できませんでした');
+    return data;
+  }
+
+  async function pollRememberedOperations() {
+    if (!isGeneratePage()) return;
+    const raw = localStorage.getItem('flowvidUserOperations') || '[]';
+    let rows = [];
+    try { rows = JSON.parse(raw); } catch (_) { rows = []; }
+    if (!rows.length) return;
+
+    const kept = [];
+    for (const row of rows) {
+      if (!row?.operationName) continue;
+      if (Date.now() - Number(row.startedAt || 0) > 1000 * 60 * 60 * 6) continue;
+      try {
+        const result = await checkOperation(row);
+        if (result.completed) {
+          notice('動画が完成しました');
+          refreshTasksSoon();
+        } else {
+          kept.push(row);
+        }
+      } catch (_) {
+        kept.push(row);
+      }
+    }
+    localStorage.setItem('flowvidUserOperations', JSON.stringify(kept.slice(0, 10)));
+  }
+
+  async function createAndRun() {
+    const client = currentClient();
+    if (!client) {
+      status('Supabase接続情報が未設定です。', true);
+      return;
+    }
+
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    const user = sessionData?.session?.user || null;
+    if (sessionError || !user) {
+      location.href = './login.html';
+      return;
+    }
+
+    const prompt = (document.getElementById('prompt')?.value || '').trim();
+    if (!prompt) {
+      status('プロンプトを入力してください。', true);
+      return;
+    }
+
+    const createBtn = document.getElementById('createBtn');
+    const originalText = createBtn?.textContent || '作成する';
+    if (createBtn) {
+      createBtn.disabled = true;
+      createBtn.textContent = '生成開始中…';
+    }
+    notice('Veo生成を開始しています…');
+    status('タスクを作成しています…');
+
+    try {
+      const payload = {
+        user_id: user.id,
+        mode: activeMode(),
+        prompt,
+        resolution: 'veo',
+        duration_seconds: Number(document.getElementById('duration')?.value || 5),
+        aspect_ratio: document.getElementById('aspectRatio')?.value || '9:16',
+        credit_cost: 128,
+        status: 'draft',
+        api_provider: 'veo'
+      };
+
+      const { data: task, error: insertError } = await client
+        .from('generation_tasks')
+        .insert(payload)
+        .select('id')
+        .single();
+
+      if (insertError || !task?.id) {
+        throw new Error(insertError?.message || 'タスク作成に失敗しました');
+      }
+
+      status('タスクを作成しました。Veo生成を開始しています…');
+      refreshTasksSoon();
+
+      const response = await fetch('/api/run-generation-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: task.id })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Veo生成開始に失敗しました');
+
+      if (result.operationName) {
+        rememberOperation(result.operationName, user.email || '');
+      }
+
+      document.getElementById('prompt').value = '';
+      notice('生成中です');
+      status('Veo生成を開始しました。完成したらタスク欄に動画が表示されます。');
+      refreshTasksSoon();
+      setTimeout(pollRememberedOperations, 12000);
+      setTimeout(pollRememberedOperations, 30000);
+      setTimeout(pollRememberedOperations, 60000);
+    } catch (error) {
+      notice('生成開始に失敗しました', true);
+      status('生成開始エラー：' + (error.message || String(error)), true);
+    } finally {
+      if (createBtn) {
+        createBtn.disabled = false;
+        createBtn.textContent = originalText;
+      }
+    }
+  }
+
+  function hookCreateButton() {
+    if (!isGeneratePage()) return;
+    const button = document.getElementById('createBtn');
+    if (!button) return;
+    if (button.dataset.flowvidUserRunHooked === '1') return;
+    button.dataset.flowvidUserRunHooked = '1';
+    button.onclick = createAndRun;
+  }
+
+  function start() {
+    if (!isGeneratePage()) return;
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts += 1;
+      const button = document.getElementById('createBtn');
+      if (button) {
+        button.dataset.flowvidUserRunHooked = '';
+        hookCreateButton();
+      }
+      if (attempts > 20) clearInterval(timer);
+    }, 400);
+    setTimeout(pollRememberedOperations, 2500);
+    setInterval(pollRememberedOperations, 30000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
