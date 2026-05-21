@@ -7,6 +7,7 @@ window.FLOWVID_AUTH = {
 };
 
 (function flowvidGeneratePageEnhancements(){
+  const ACTIVE_TASK_WINDOW_MS=1000*60*60*2;
   function isGeneratePage(){return /\/generate\.html$/.test(location.pathname)}
   function modeLabel(){return document.querySelector('.modeTabs button.active')?.textContent?.trim() || 'リファレンス'}
   function injectStyle(){
@@ -22,32 +23,42 @@ window.FLOWVID_AUTH = {
       body.flowvid-ui .flowvid-unfinished-task .taskPreview{display:none!important;}
       body.flowvid-ui .flowvid-unfinished-task .taskActions{display:none!important;}
       body.flowvid-ui .flowvid-unfinished-task{padding-bottom:13px!important;}
+      body.flowvid-ui .flowvid-stale-unfinished-task{display:none!important;}
       body.flowvid-ui .flowvidActionLabel{width:auto!important;min-width:58px!important;height:42px!important;padding:4px 9px!important;display:grid!important;grid-template-rows:auto auto!important;place-items:center!important;gap:2px!important;line-height:1.05!important;font-size:11px!important;font-weight:900!important;}
       body.flowvid-ui .flowvidActionLabel .flowvidIcon{font-size:15px;line-height:1;display:block;}
       body.flowvid-ui .flowvidActionLabel .flowvidLabel{font-size:10px;line-height:1;display:block;opacity:.9;letter-spacing:.02em;}
     `;
     document.head.appendChild(style);
   }
-  function markCards(){
-    document.querySelectorAll('.taskCard').forEach(card=>{
-      const hasVideo=Boolean(card.querySelector('.taskVideoWrap'));
-      card.classList.toggle('flowvid-unfinished-task',!hasVideo);
-    });
+  function cardTimeText(card){
+    const nodes=Array.from(card.querySelectorAll('div'));
+    return nodes.map(n=>(n.textContent||'').trim()).reverse().find(t=>/^\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}:\d{2}$/.test(t)) || '';
   }
   function cardTime(card){
-    const nodes=Array.from(card.querySelectorAll('div'));
-    const last=nodes.map(n=>(n.textContent||'').trim()).reverse().find(t=>/^\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}:\d{2}$/.test(t));
-    if(!last) return 0;
-    const d=new Date(last.replace(/\//g,'-'));
+    const text=cardTimeText(card);
+    if(!text) return 0;
+    const d=new Date(text.replace(/\//g,'-'));
     return Number.isNaN(d.getTime())?0:d.getTime();
+  }
+  function hasVideo(card){return Boolean(card.querySelector('.taskVideoWrap'))}
+  function isFreshUnfinished(card){
+    const t=cardTime(card);
+    if(!t) return false;
+    return Date.now()-t < ACTIVE_TASK_WINDOW_MS;
   }
   function sortCardsNewestFirst(){
     const list=document.getElementById('taskList');
     if(!list) return;
     const cards=Array.from(list.querySelectorAll(':scope > .taskCard'));
     if(cards.length<2) return;
-    const sorted=cards.slice().sort((a,b)=>cardTime(b)-cardTime(a));
-    sorted.forEach(card=>list.appendChild(card));
+    cards.slice().sort((a,b)=>cardTime(b)-cardTime(a)).forEach(card=>list.appendChild(card));
+  }
+  function markCards(){
+    document.querySelectorAll('.taskCard').forEach(card=>{
+      const video=hasVideo(card);
+      card.classList.toggle('flowvid-unfinished-task',!video);
+      card.classList.toggle('flowvid-stale-unfinished-task',!video&&!isFreshUnfinished(card));
+    });
   }
   function setActionLabel(el,icon,label){
     if(!el||el.dataset.flowvidLabel===label) return;
