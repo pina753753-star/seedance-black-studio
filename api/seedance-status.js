@@ -85,9 +85,18 @@ async function persistVideo({ jobId, videoUrl, apiKey }) {
   const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
   const publicUrl = data?.publicUrl || videoUrl;
 
-  await db.from(HISTORY_TABLE).upsert({ job_id: jobId, status: 'completed', video_url: publicUrl, updated_at: new Date().toISOString() }, { onConflict: 'job_id' }).catch(() => null);
+  let historySave = { ok: true };
+  try {
+    const { error } = await db.from(HISTORY_TABLE).upsert(
+      { job_id: jobId, status: 'completed', video_url: publicUrl, updated_at: new Date().toISOString() },
+      { onConflict: 'job_id' }
+    );
+    if (error) historySave = { ok: false, error: error.message };
+  } catch (error) {
+    historySave = { ok: false, error: error?.message || String(error) };
+  }
 
-  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length };
+  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length, historySave };
 }
 
 module.exports = async function handler(req, res) {
