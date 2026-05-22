@@ -58,6 +58,28 @@ function isOpenRouterUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) && String(url || '').includes('openrouter.ai');
 }
 
+async function verifyPublicObject(publicUrl) {
+  try {
+    const response = await fetch(publicUrl, { method: 'GET' });
+    const contentType = response.headers.get('content-type') || '';
+    const bytes = Number(response.headers.get('content-length') || 0);
+    const body = await response.arrayBuffer();
+    const actualBytes = body.byteLength;
+    if (!response.ok) {
+      return { ok: false, status: response.status, contentType, bytes: actualBytes, error: 'public-url-not-readable' };
+    }
+    if (actualBytes < 1024) {
+      return { ok: false, status: response.status, contentType, bytes: actualBytes, error: 'stored-file-too-small' };
+    }
+    if (!/video|octet-stream/i.test(contentType)) {
+      return { ok: false, status: response.status, contentType, bytes: actualBytes || bytes, error: 'stored-file-is-not-video' };
+    }
+    return { ok: true, status: response.status, contentType, bytes: actualBytes || bytes };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
 async function persistVideo({ jobId, videoUrl, apiKey }) {
   if (!videoUrl || isSupabasePublicUrl(videoUrl)) {
     return { ok: true, videoUrl, skipped: true, reason: 'already-persistent-or-empty' };
@@ -75,6 +97,10 @@ async function persistVideo({ jobId, videoUrl, apiKey }) {
 
   const contentType = upstream.headers.get('content-type') || 'video/mp4';
   const buffer = Buffer.from(await upstream.arrayBuffer());
+  if (buffer.length < 1024 || !/video|octet-stream/i.test(contentType)) {
+    return { ok: false, videoUrl, error: 'Downloaded file is not a valid video', contentType, bytes: buffer.length, preview: buffer.toString('utf8', 0, Math.min(buffer.length, 300)) };
+  }
+
   const ext = extFromContentType(contentType);
   const safeJobId = String(jobId || Date.now()).replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
   const path = `generated-videos/${safeJobId}.${ext}`;
@@ -84,6 +110,8 @@ async function persistVideo({ jobId, videoUrl, apiKey }) {
 
   const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
   const publicUrl = data?.publicUrl || videoUrl;
+  const publicCheck = await verifyPublicObject(publicUrl);
+  if (!publicCheck.ok) return { ok: false, videoUrl: publicUrl, originalUrl: videoUrl, error: 'Uploaded object is not publicly readable as video', bucket: VIDEO_BUCKET, path, publicCheck };
 
   let historySave = { ok: true };
   try {
@@ -96,7 +124,7 @@ async function persistVideo({ jobId, videoUrl, apiKey }) {
     historySave = { ok: false, error: error?.message || String(error) };
   }
 
-  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length, historySave };
+  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length, publicCheck, historySave };
 }
 
 module.exports = async function handler(req, res) {
