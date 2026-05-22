@@ -40,8 +40,37 @@
           : 'キャラ・商品・雰囲気など、残したい特徴と動きを説明してください。';
     }
   }
+  function patchFetch(){
+    if(window.__flowvidSafeVideoPatch) return;
+    window.__flowvidSafeVideoPatch=true;
+    const originalFetch=window.fetch.bind(window);
+    window.fetch=async function(input, init){
+      const response=await originalFetch(input, init);
+      try{
+        const url=typeof input==='string'?input:(input&&input.url)||'';
+        if(String(url).includes('/api/seedance-status')){
+          const clone=response.clone();
+          const data=await clone.json().catch(()=>null);
+          if(data && data.storage && data.storage.ok===false){
+            if(data.storage.videoUrl) data.storage.rejectedVideoUrl=data.storage.videoUrl;
+            delete data.storage.videoUrl;
+          }
+          if(data && data.done!==true){
+            data.videoUrl=null;
+          }
+          return new Response(JSON.stringify(data),{
+            status:response.status,
+            statusText:response.statusText,
+            headers:{'Content-Type':'application/json'}
+          });
+        }
+      }catch(_){ }
+      return response;
+    };
+  }
   function boot(){
     if(!/\/generate\.html$/.test(location.pathname)) return;
+    patchFetch();
     const initial=readMode();
     saveMode(initial);
     apply(initial);
