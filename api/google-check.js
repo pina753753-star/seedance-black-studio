@@ -1,4 +1,4 @@
-export default function handler(req, res) {
+module.exports = function handler(req, res) {
   const googleApiKey = process.env.GOOGLE_API_KEY || '';
   const videoProvider = process.env.VIDEO_PROVIDER || '';
 
@@ -15,4 +15,4 @@ export default function handler(req, res) {
     },
     checkedAt: new Date().toISOString()
   });
-}
+};
