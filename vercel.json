@@ -1,14 +1,5 @@
 {
-  "framework": null,
-  "buildCommand": "npm run build",
-  "outputDirectory": ".",
   "rewrites": [
-    { "source": "/", "destination": "/index.html" },
-    { "source": "/api/generated-videos", "destination": "/api/generated-videos.js" }
-  ],
-  "functions": {
-    "api/*.js": {
-      "runtime": "nodejs20.x"
-    }
-  }
+    { "source": "/", "destination": "/index.html" }
+  ]
 }
