@@ -39,5 +39,6 @@ grid.addEventListener('click',e=>{const card=e.target.closest('[data-sample-src]
 document.querySelectorAll('.tabs button').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');render(btn.dataset.category)});
 render('recommended');loadRealSample();
 </script>
+<script src="./index-video-debug.js?v=1"></script>
 </body>
 </html>
