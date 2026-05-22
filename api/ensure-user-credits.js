@@ -54,15 +54,9 @@ async function countInitialFreeUsers() {
   return Number.isFinite(total) ? total : 0;
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(200).json({
-      ok: true,
-      endpoint: '/api/ensure-user-credits',
-      method: 'POST',
-      initialFreeCredits: INITIAL_FREE_CREDITS,
-      initialFreeUserLimit: INITIAL_FREE_USER_LIMIT
-    });
+    return res.status(200).json({ ok: true, endpoint: '/api/ensure-user-credits', method: 'POST', initialFreeCredits: INITIAL_FREE_CREDITS, initialFreeUserLimit: INITIAL_FREE_USER_LIMIT });
   }
 
   try {
@@ -72,9 +66,7 @@ export default async function handler(req, res) {
     if (!userId) return res.status(400).json({ ok: false, error: 'userId is required' });
 
     const existing = await supabase(`credit_balances?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`);
-    if (existing?.[0]) {
-      return res.status(200).json({ ok: true, created: false, limitedCampaign: true, balance: existing[0] });
-    }
+    if (existing?.[0]) return res.status(200).json({ ok: true, created: false, limitedCampaign: true, balance: existing[0] });
 
     try {
       await supabase('profiles', {
@@ -91,12 +83,7 @@ export default async function handler(req, res) {
     const rows = await supabase('credit_balances', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
-        user_id: userId,
-        free_credits: freeCredits,
-        subscription_credits: 0,
-        purchased_credits: 0
-      })
+      body: JSON.stringify({ user_id: userId, free_credits: freeCredits, subscription_credits: 0, purchased_credits: 0 })
     });
 
     return res.status(200).json({
@@ -112,4 +99,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(error.status || 500).json({ ok: false, error: error?.message || 'Unknown error' });
   }
-}
+};
