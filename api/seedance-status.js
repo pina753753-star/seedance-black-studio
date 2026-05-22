@@ -1,10 +1,21 @@
+const { createClient } = require('@supabase/supabase-js');
+
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
+const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
+const HISTORY_TABLE = 'flowvid_video_history';
+
+function dbClient() {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return null;
+  return createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
+}
 
 function findVideoUrl(value) {
   if (!value) return null;
   if (typeof value === 'string') {
     if (/^https?:\/\//i.test(value) && /\.(mp4|mov|webm)(\?|$)/i.test(value)) return value;
-    if (/^https?:\/\//i.test(value) && /(video|output|download|storage|cdn)/i.test(value)) return value;
+    if (/^https?:\/\//i.test(value) && /(video|output|download|storage|cdn|signed|play)/i.test(value)) return value;
     return null;
   }
   if (Array.isArray(value)) {
@@ -41,6 +52,60 @@ function normalizeStatus(data) {
   ).toLowerCase();
 }
 
+function extFromContentType(contentType) {
+  const type = String(contentType || '').toLowerCase();
+  if (type.includes('webm')) return 'webm';
+  if (type.includes('quicktime') || type.includes('mov')) return 'mov';
+  return 'mp4';
+}
+
+function isSupabasePublicUrl(url) {
+  return /^https?:\/\//i.test(String(url || '')) && String(url || '').includes('/storage/v1/object/public/');
+}
+
+async function persistVideo({ jobId, videoUrl }) {
+  if (!videoUrl || isSupabasePublicUrl(videoUrl)) {
+    return { ok: true, videoUrl, skipped: true, reason: 'already-persistent-or-empty' };
+  }
+
+  const db = dbClient();
+  if (!db) return { ok: false, videoUrl, error: 'Missing Supabase key' };
+
+  const upstream = await fetch(videoUrl, { method: 'GET' });
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => '');
+    return { ok: false, videoUrl, error: `Video download failed: ${upstream.status}`, details: text.slice(0, 500) };
+  }
+
+  const contentType = upstream.headers.get('content-type') || 'video/mp4';
+  const buffer = Buffer.from(await upstream.arrayBuffer());
+  const ext = extFromContentType(contentType);
+  const safeJobId = String(jobId || Date.now()).replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
+  const path = `generated-videos/${safeJobId}.${ext}`;
+
+  const upload = await db.storage.from(VIDEO_BUCKET).upload(path, buffer, {
+    contentType,
+    cacheControl: '31536000',
+    upsert: true
+  });
+
+  if (upload.error) {
+    return { ok: false, videoUrl, error: upload.error.message, bucket: VIDEO_BUCKET, path };
+  }
+
+  const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
+  const publicUrl = data?.publicUrl || videoUrl;
+
+  await db.from(HISTORY_TABLE).upsert({
+    job_id: jobId,
+    status: 'completed',
+    video_url: publicUrl,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'job_id' }).catch(() => null);
+
+  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path };
+}
+
 module.exports = async function handler(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY || '';
   if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
@@ -66,8 +131,15 @@ module.exports = async function handler(req, res) {
     try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
 
     const jobStatus = normalizeStatus(data);
-    const videoUrl = findVideoUrl(data);
-    const done = Boolean(videoUrl) || ['completed', 'succeeded', 'success', 'done'].includes(jobStatus);
+    const rawVideoUrl = findVideoUrl(data);
+    const done = Boolean(rawVideoUrl) || ['completed', 'succeeded', 'success', 'done'].includes(jobStatus);
+    let videoUrl = rawVideoUrl;
+    let storage = null;
+
+    if (rawVideoUrl) {
+      storage = await persistVideo({ jobId, videoUrl: rawVideoUrl });
+      if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
+    }
 
     return res.status(response.ok ? 200 : response.status).json({
       ok: response.ok,
@@ -77,6 +149,8 @@ module.exports = async function handler(req, res) {
       jobStatus,
       done,
       videoUrl,
+      rawVideoUrl,
+      storage,
       response: data,
       checkedAt: new Date().toISOString()
     });
