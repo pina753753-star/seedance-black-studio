@@ -132,12 +132,27 @@ module.exports = async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
 
   const jobId = String(req.query.id || req.query.jobId || '').trim();
-  if (!jobId) return res.status(400).json({ ok: false, error: 'id query parameter is required', example: '/api/seedance-status?id=video_job_id' });
+  const pollingUrl = String(req.query.pollingUrl || req.query.polling_url || '').trim();
+
+  if (!jobId && !pollingUrl) {
+    return res.status(400).json({
+      ok: false,
+      error: 'id or pollingUrl query parameter is required',
+      example: '/api/seedance-status?id=video_job_id&pollingUrl=https://...'
+    });
+  }
+
+  const statusUrl = pollingUrl || `${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(jobId)}`;
 
   try {
-    const response = await fetch(`${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(jobId)}`, {
+    const response = await fetch(statusUrl, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://flowvid-studio.vercel.app', 'X-Title': 'FlowVid Studio' }
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://flowvid-studio.vercel.app',
+        'X-Title': 'FlowVid Studio'
+      }
     });
 
     const text = await response.text();
@@ -155,8 +170,22 @@ module.exports = async function handler(req, res) {
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
 
-    return res.status(response.ok ? 200 : response.status).json({ ok: response.ok, status: response.status, provider: 'openrouter', jobId, jobStatus, done, videoUrl, rawVideoUrl, storage, response: data, checkedAt: new Date().toISOString() });
+    return res.status(response.ok ? 200 : response.status).json({
+      ok: response.ok,
+      status: response.status,
+      provider: 'openrouter',
+      jobId,
+      pollingUrl,
+      statusUrl,
+      jobStatus,
+      done,
+      videoUrl,
+      rawVideoUrl,
+      storage,
+      response: data,
+      checkedAt: new Date().toISOString()
+    });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', checkedAt: new Date().toISOString() });
+    return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', statusUrl, checkedAt: new Date().toISOString() });
   }
 };
