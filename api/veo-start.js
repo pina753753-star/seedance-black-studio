@@ -1,16 +1,6 @@
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(200).json({
-      ok: true,
-      endpoint: '/api/veo-start',
-      method: 'POST',
-      note: 'Send a POST request to start a Veo generation. Opening this page in a browser will not consume credits.',
-      exampleBody: {
-        prompt: 'A cinematic shot of a small robot walking through a neon city at night.',
-        model: 'models/veo-3.0-fast-generate-001',
-        aspectRatio: '9:16'
-      }
-    });
+    return res.status(200).json({ ok: true, endpoint: '/api/veo-start', method: 'POST' });
   }
 
   const googleApiKey = process.env.GOOGLE_API_KEY || '';
@@ -24,36 +14,21 @@ export default async function handler(req, res) {
     const model = String(body.model || 'models/veo-3.0-fast-generate-001').trim();
     const aspectRatio = String(body.aspectRatio || '9:16').trim();
 
-    if (!prompt) {
-      return res.status(400).json({ ok: false, error: 'prompt is required' });
-    }
+    if (!prompt) return res.status(400).json({ ok: false, error: 'prompt is required' });
 
     const parameters = { aspectRatio };
-    if (body.personGeneration) {
-      parameters.personGeneration = String(body.personGeneration).trim();
-    }
+    if (body.personGeneration) parameters.personGeneration = String(body.personGeneration).trim();
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:predictLongRunning?key=${encodeURIComponent(googleApiKey)}`;
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        instances: [
-          {
-            prompt
-          }
-        ],
-        parameters
-      })
+      body: JSON.stringify({ instances: [{ prompt }], parameters })
     });
 
     const text = await response.text();
     let data = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch (_) {
-      data = text;
-    }
+    try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
 
     return res.status(response.ok ? 200 : 500).json({
       ok: response.ok,
@@ -65,10 +40,6 @@ export default async function handler(req, res) {
       checkedAt: new Date().toISOString()
     });
   } catch (error) {
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || 'Unknown error',
-      checkedAt: new Date().toISOString()
-    });
+    return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', checkedAt: new Date().toISOString() });
   }
-}
+};
