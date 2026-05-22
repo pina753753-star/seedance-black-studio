@@ -1,5 +1,11 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/index.html" }
-  ]
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/api/generated-videos", "destination": "/api/generated-videos.js" }
+  ],
+  "functions": {
+    "api/*.js": {
+      "runtime": "nodejs20.x"
+    }
+  }
 }
