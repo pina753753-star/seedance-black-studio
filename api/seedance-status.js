@@ -26,10 +26,7 @@ function findVideoUrl(value) {
     return null;
   }
   if (typeof value === 'object') {
-    const priorityKeys = [
-      'videoUrl', 'video_url', 'output_url', 'download_url', 'url', 'uri',
-      'file_url', 'asset_url', 'signed_url', 'play_url'
-    ];
+    const priorityKeys = ['videoUrl', 'video_url', 'output_url', 'download_url', 'url', 'uri', 'file_url', 'asset_url', 'signed_url', 'play_url'];
     for (const key of priorityKeys) {
       const found = findVideoUrl(value[key]);
       if (found) return found;
@@ -43,13 +40,7 @@ function findVideoUrl(value) {
 }
 
 function normalizeStatus(data) {
-  return String(
-    data?.status ||
-    data?.data?.status ||
-    data?.response?.status ||
-    data?.result?.status ||
-    ''
-  ).toLowerCase();
+  return String(data?.status || data?.data?.status || data?.response?.status || data?.result?.status || '').toLowerCase();
 }
 
 function extFromContentType(contentType) {
@@ -63,7 +54,11 @@ function isSupabasePublicUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) && String(url || '').includes('/storage/v1/object/public/');
 }
 
-async function persistVideo({ jobId, videoUrl }) {
+function isOpenRouterUrl(url) {
+  return /^https?:\/\//i.test(String(url || '')) && String(url || '').includes('openrouter.ai');
+}
+
+async function persistVideo({ jobId, videoUrl, apiKey }) {
   if (!videoUrl || isSupabasePublicUrl(videoUrl)) {
     return { ok: true, videoUrl, skipped: true, reason: 'already-persistent-or-empty' };
   }
@@ -71,7 +66,8 @@ async function persistVideo({ jobId, videoUrl }) {
   const db = dbClient();
   if (!db) return { ok: false, videoUrl, error: 'Missing Supabase key' };
 
-  const upstream = await fetch(videoUrl, { method: 'GET' });
+  const headers = isOpenRouterUrl(videoUrl) ? { Authorization: `Bearer ${apiKey}` } : {};
+  const upstream = await fetch(videoUrl, { method: 'GET', headers });
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => '');
     return { ok: false, videoUrl, error: `Video download failed: ${upstream.status}`, details: text.slice(0, 500) };
@@ -83,27 +79,15 @@ async function persistVideo({ jobId, videoUrl }) {
   const safeJobId = String(jobId || Date.now()).replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
   const path = `generated-videos/${safeJobId}.${ext}`;
 
-  const upload = await db.storage.from(VIDEO_BUCKET).upload(path, buffer, {
-    contentType,
-    cacheControl: '31536000',
-    upsert: true
-  });
-
-  if (upload.error) {
-    return { ok: false, videoUrl, error: upload.error.message, bucket: VIDEO_BUCKET, path };
-  }
+  const upload = await db.storage.from(VIDEO_BUCKET).upload(path, buffer, { contentType, cacheControl: '31536000', upsert: true });
+  if (upload.error) return { ok: false, videoUrl, error: upload.error.message, bucket: VIDEO_BUCKET, path };
 
   const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
   const publicUrl = data?.publicUrl || videoUrl;
 
-  await db.from(HISTORY_TABLE).upsert({
-    job_id: jobId,
-    status: 'completed',
-    video_url: publicUrl,
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'job_id' }).catch(() => null);
+  await db.from(HISTORY_TABLE).upsert({ job_id: jobId, status: 'completed', video_url: publicUrl, updated_at: new Date().toISOString() }, { onConflict: 'job_id' }).catch(() => null);
 
-  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path };
+  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length };
 }
 
 module.exports = async function handler(req, res) {
@@ -111,19 +95,12 @@ module.exports = async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
 
   const jobId = String(req.query.id || req.query.jobId || '').trim();
-  if (!jobId) {
-    return res.status(400).json({ ok: false, error: 'id query parameter is required', example: '/api/seedance-status?id=video_job_id' });
-  }
+  if (!jobId) return res.status(400).json({ ok: false, error: 'id query parameter is required', example: '/api/seedance-status?id=video_job_id' });
 
   try {
     const response = await fetch(`${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(jobId)}`, {
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://flowvid-studio.vercel.app',
-        'X-Title': 'FlowVid Studio'
-      }
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://flowvid-studio.vercel.app', 'X-Title': 'FlowVid Studio' }
     });
 
     const text = await response.text();
@@ -137,23 +114,11 @@ module.exports = async function handler(req, res) {
     let storage = null;
 
     if (rawVideoUrl) {
-      storage = await persistVideo({ jobId, videoUrl: rawVideoUrl });
+      storage = await persistVideo({ jobId, videoUrl: rawVideoUrl, apiKey });
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
 
-    return res.status(response.ok ? 200 : response.status).json({
-      ok: response.ok,
-      status: response.status,
-      provider: 'openrouter',
-      jobId,
-      jobStatus,
-      done,
-      videoUrl,
-      rawVideoUrl,
-      storage,
-      response: data,
-      checkedAt: new Date().toISOString()
-    });
+    return res.status(response.ok ? 200 : response.status).json({ ok: response.ok, status: response.status, provider: 'openrouter', jobId, jobStatus, done, videoUrl, rawVideoUrl, storage, response: data, checkedAt: new Date().toISOString() });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', checkedAt: new Date().toISOString() });
   }
