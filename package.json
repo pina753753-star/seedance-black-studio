@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "mkdir -p public && cp -f *.html public/ 2>/dev/null || true && cp -R assets public/assets 2>/dev/null || true && echo \"Static files copied to public\""
+    "build": "mkdir -p public && cp -f *.html *.js public/ 2>/dev/null || true && cp -R assets public/assets 2>/dev/null || true && node -e \"const fs=require('fs');const p='public/generate.html';if(fs.existsSync(p)){let s=fs.readFileSync(p,'utf8');if(!s.includes('mode-patch.js')){s=s.replace('</body>','<script src=\\\"./mode-patch.js?v=2\\\"></script></body>');fs.writeFileSync(p,s)}}\" && echo \"Static files copied to public\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4"
