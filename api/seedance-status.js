@@ -11,31 +11,49 @@ function dbClient() {
   return createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
 }
 
-function findVideoUrl(value) {
+function isStatusEndpointUrl(url) {
+  const value = String(url || '');
+  return /^https?:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(value);
+}
+
+function findVideoUrl(value, keyName = '') {
   if (!value) return null;
+
   if (typeof value === 'string') {
-    if (/^https?:\/\//i.test(value) && /\.(mp4|mov|webm)(\?|$)/i.test(value)) return value;
-    if (/^https?:\/\//i.test(value) && /(video|output|download|storage|cdn|signed|play)/i.test(value)) return value;
+    const url = value.trim();
+    if (!/^https?:\/\//i.test(url)) return null;
+
+    if (/\.(mp4|mov|webm)(\?|$)/i.test(url)) return url;
+
+    const keyLooksLikeVideo = /(videoUrl|video_url|output_url|download_url|file_url|asset_url|signed_url|play_url|url)$/i.test(keyName || '');
+    const urlLooksDownloadable = /(download|output|storage|cdn|signed|play|file|asset)/i.test(url);
+
+    if (isStatusEndpointUrl(url) && !/\.(mp4|mov|webm)(\?|$)/i.test(url)) return null;
+    if (keyLooksLikeVideo && urlLooksDownloadable) return url;
+
     return null;
   }
+
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findVideoUrl(item);
+      const found = findVideoUrl(item, keyName);
       if (found) return found;
     }
     return null;
   }
+
   if (typeof value === 'object') {
-    const priorityKeys = ['videoUrl', 'video_url', 'output_url', 'download_url', 'url', 'uri', 'file_url', 'asset_url', 'signed_url', 'play_url'];
+    const priorityKeys = ['videoUrl', 'video_url', 'output_url', 'download_url', 'file_url', 'asset_url', 'signed_url', 'play_url'];
     for (const key of priorityKeys) {
-      const found = findVideoUrl(value[key]);
+      const found = findVideoUrl(value[key], key);
       if (found) return found;
     }
     for (const key of Object.keys(value)) {
-      const found = findVideoUrl(value[key]);
+      const found = findVideoUrl(value[key], key);
       if (found) return found;
     }
   }
+
   return null;
 }
 
@@ -86,6 +104,7 @@ async function verifyPublicObject(publicUrl) {
     const bytes = Number(response.headers.get('content-length') || 0);
     const body = await response.arrayBuffer();
     const actualBytes = body.byteLength;
+
     if (!response.ok) {
       return { ok: false, status: response.status, contentType, bytes: actualBytes, error: 'public-url-not-readable' };
     }
@@ -95,6 +114,7 @@ async function verifyPublicObject(publicUrl) {
     if (!/video|octet-stream/i.test(contentType)) {
       return { ok: false, status: response.status, contentType, bytes: actualBytes || bytes, error: 'stored-file-is-not-video' };
     }
+
     return { ok: true, status: response.status, contentType, bytes: actualBytes || bytes };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
@@ -102,8 +122,19 @@ async function verifyPublicObject(publicUrl) {
 }
 
 async function persistVideo({ jobId, videoUrl, apiKey }) {
-  if (!videoUrl || isSupabasePublicUrl(videoUrl)) {
-    return { ok: true, videoUrl, skipped: true, reason: 'already-persistent-or-empty' };
+  if (!videoUrl) {
+    return { ok: false, videoUrl, error: 'No video URL found yet' };
+  }
+
+  if (isStatusEndpointUrl(videoUrl)) {
+    return { ok: false, videoUrl, error: 'OpenRouter status URL is not a downloadable video yet' };
+  }
+
+  if (isSupabasePublicUrl(videoUrl)) {
+    const publicCheck = await verifyPublicObject(videoUrl);
+    return publicCheck.ok
+      ? { ok: true, videoUrl, skipped: true, reason: 'already-persistent', publicCheck }
+      : { ok: false, videoUrl, error: 'Existing public URL is not readable as video', publicCheck };
   }
 
   const db = dbClient();
@@ -111,12 +142,13 @@ async function persistVideo({ jobId, videoUrl, apiKey }) {
 
   const headers = isOpenRouterUrl(videoUrl) ? { Authorization: `Bearer ${apiKey}` } : {};
   const upstream = await fetch(videoUrl, { method: 'GET', headers });
+  const contentType = upstream.headers.get('content-type') || '';
+
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => '');
-    return { ok: false, videoUrl, error: `Video download failed: ${upstream.status}`, details: text.slice(0, 500) };
+    return { ok: false, videoUrl, error: `Video download failed: ${upstream.status}`, contentType, details: text.slice(0, 500) };
   }
 
-  const contentType = upstream.headers.get('content-type') || 'video/mp4';
   const buffer = Buffer.from(await upstream.arrayBuffer());
   if (buffer.length < 1024 || !/video|octet-stream/i.test(contentType)) {
     return { ok: false, videoUrl, error: 'Downloaded file is not a valid video', contentType, bytes: buffer.length, preview: buffer.toString('utf8', 0, Math.min(buffer.length, 300)) };
@@ -183,7 +215,7 @@ module.exports = async function handler(req, res) {
     const jobStatus = normalizeStatus(data);
     const rawVideoUrl = findVideoUrl(data);
     const resolvedJobId = effectiveJobId({ jobId, pollingUrl, rawVideoUrl });
-    let videoUrl = rawVideoUrl;
+    let videoUrl = null;
     let storage = null;
 
     if (rawVideoUrl) {
