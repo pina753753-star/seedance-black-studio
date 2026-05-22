@@ -11,31 +11,21 @@ function wantsDownload(value) {
   return ['1', 'true', 'yes', 'attachment', 'download'].includes(String(value || '').toLowerCase());
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const googleApiKey = process.env.GOOGLE_API_KEY || '';
-  if (!googleApiKey) {
-    return res.status(500).json({ ok: false, error: 'Missing GOOGLE_API_KEY' });
-  }
+  if (!googleApiKey) return res.status(500).json({ ok: false, error: 'Missing GOOGLE_API_KEY' });
 
   const rawUri = String(req.query.uri || '').trim();
-  if (!rawUri) {
-    return res.status(400).json({ ok: false, error: 'uri query parameter is required' });
-  }
+  if (!rawUri) return res.status(400).json({ ok: false, error: 'uri query parameter is required' });
 
   let url;
-  try {
-    url = new URL(rawUri);
-  } catch (_) {
-    return res.status(400).json({ ok: false, error: 'Invalid uri' });
-  }
+  try { url = new URL(rawUri); } catch (_) { return res.status(400).json({ ok: false, error: 'Invalid uri' }); }
 
   if (url.hostname !== 'generativelanguage.googleapis.com') {
     return res.status(400).json({ ok: false, error: 'Unsupported video host' });
   }
 
-  if (!url.searchParams.has('key')) {
-    url.searchParams.set('key', googleApiKey);
-  }
+  if (!url.searchParams.has('key')) url.searchParams.set('key', googleApiKey);
 
   const download = wantsDownload(req.query.download);
   const rawVariant = String(req.query.variant || req.query.watermark || '').toLowerCase();
@@ -46,11 +36,7 @@ export default async function handler(req, res) {
     const upstream = await fetch(url.toString(), { method: 'GET' });
     if (!upstream.ok) {
       const text = await upstream.text();
-      return res.status(upstream.status).json({
-        ok: false,
-        status: upstream.status,
-        error: text
-      });
+      return res.status(upstream.status).json({ ok: false, status: upstream.status, error: text });
     }
 
     const contentType = upstream.headers.get('content-type') || 'video/mp4';
@@ -62,9 +48,6 @@ export default async function handler(req, res) {
     const arrayBuffer = await upstream.arrayBuffer();
     return res.status(200).send(Buffer.from(arrayBuffer));
   } catch (error) {
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || 'Unknown error'
-    });
+    return res.status(500).json({ ok: false, error: error?.message || 'Unknown error' });
   }
-}
+};
