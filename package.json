@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "echo \"Static site: no build step required\""
+    "build": "mkdir -p public && cp -f *.html public/ 2>/dev/null || true && cp -R assets public/assets 2>/dev/null || true && echo \"Static files copied to public\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4"
