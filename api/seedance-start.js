@@ -25,12 +25,19 @@ function normalizeResolution(value) {
 }
 
 function imageObject(url, frameType) {
-  const item = {
-    type: 'image_url',
-    image_url: { url: String(url || '').trim() }
-  };
+  const cleanUrl = String(url || '').trim();
+  if (!cleanUrl) return null;
+  const item = { type: 'image_url', image_url: { url: cleanUrl } };
   if (frameType) item.frame_type = frameType;
   return item;
+}
+
+function imageObjects(urls) {
+  return (Array.isArray(urls) ? urls : []).map((url) => imageObject(url)).filter(Boolean);
+}
+
+function extractJobId(data) {
+  return data?.id || data?.jobId || data?.data?.id || data?.response?.id || data?.request_id || null;
 }
 
 module.exports = async function handler(req, res) {
@@ -42,20 +49,12 @@ module.exports = async function handler(req, res) {
       provider: 'openrouter',
       model: DEFAULT_MODEL,
       note: 'POST only. Opening this page in a browser will not consume credits.',
-      requiredEnv: 'OPENROUTER_API_KEY',
-      exampleBody: {
-        prompt: 'A cinematic vertical smartphone video of a perfume bottle under neon light.',
-        duration: 5,
-        aspect_ratio: '9:16',
-        resolution: '720p'
-      }
+      requiredEnv: 'OPENROUTER_API_KEY'
     });
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY || '';
-  if (!apiKey) {
-    return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
-  }
+  if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
 
   try {
     const body = jsonBody(req);
@@ -75,17 +74,15 @@ module.exports = async function handler(req, res) {
     const inputReferences = Array.isArray(body.input_references) ? body.input_references : [];
     const firstFrameUrl = String(body.first_frame_url || '').trim();
     const referenceUrl = String(body.reference_url || '').trim();
+    const referenceUrls = imageObjects(body.reference_urls || body.referenceUrls || []);
 
-    if (frameImages.length) {
-      payload.frame_images = frameImages;
-    } else if (firstFrameUrl) {
-      payload.frame_images = [imageObject(firstFrameUrl, 'first_frame')];
-    }
+    if (frameImages.length) payload.frame_images = frameImages;
+    else if (firstFrameUrl) payload.frame_images = [imageObject(firstFrameUrl, 'first_frame')].filter(Boolean);
 
-    if (!payload.frame_images && inputReferences.length) {
-      payload.input_references = inputReferences;
-    } else if (!payload.frame_images && referenceUrl) {
-      payload.input_references = [imageObject(referenceUrl)];
+    if (!payload.frame_images?.length) {
+      if (inputReferences.length) payload.input_references = inputReferences;
+      else if (referenceUrls.length) payload.input_references = referenceUrls;
+      else if (referenceUrl) payload.input_references = [imageObject(referenceUrl)].filter(Boolean);
     }
 
     const response = await fetch(OPENROUTER_VIDEO_ENDPOINT, {
@@ -108,15 +105,18 @@ module.exports = async function handler(req, res) {
       status: response.status,
       provider: 'openrouter',
       model: payload.model,
-      jobId: data?.id || null,
-      pollingUrl: data?.polling_url || null,
-      jobStatus: data?.status || null,
+      jobId: extractJobId(data),
+      pollingUrl: data?.polling_url || data?.pollingUrl || null,
+      jobStatus: data?.status || data?.data?.status || null,
       request: {
         duration: payload.duration,
         resolution: payload.resolution,
         aspect_ratio: payload.aspect_ratio,
         has_frame_images: Boolean(payload.frame_images?.length),
-        has_input_references: Boolean(payload.input_references?.length)
+        frame_image_count: payload.frame_images?.length || 0,
+        has_input_references: Boolean(payload.input_references?.length),
+        input_reference_count: payload.input_references?.length || 0,
+        text_only: !payload.frame_images?.length && !payload.input_references?.length
       },
       response: data,
       checkedAt: new Date().toISOString()
