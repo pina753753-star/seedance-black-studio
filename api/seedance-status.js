@@ -58,6 +58,27 @@ function isOpenRouterUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) && String(url || '').includes('openrouter.ai');
 }
 
+function effectiveJobId({ jobId, pollingUrl, rawVideoUrl }) {
+  if (jobId) return jobId;
+
+  for (const url of [pollingUrl, rawVideoUrl]) {
+    try {
+      if (!url || !/^https?:\/\//i.test(url)) continue;
+      const parsed = new URL(url);
+      const queryId = parsed.searchParams.get('id') || parsed.searchParams.get('jobId') || parsed.searchParams.get('job_id');
+      if (queryId) return String(queryId).trim();
+
+      const pathParts = parsed.pathname.split('/').filter(Boolean);
+      const pathId = pathParts[pathParts.length - 1];
+      if (pathId && !/^(download|output|video|file|public)$/i.test(pathId)) return pathId;
+    } catch (_) {
+      // Ignore malformed URLs and fall back below.
+    }
+  }
+
+  return `video-${Date.now()}`;
+}
+
 async function verifyPublicObject(publicUrl) {
   try {
     const response = await fetch(publicUrl, { method: 'GET' });
@@ -161,20 +182,23 @@ module.exports = async function handler(req, res) {
 
     const jobStatus = normalizeStatus(data);
     const rawVideoUrl = findVideoUrl(data);
-    const done = Boolean(rawVideoUrl) || ['completed', 'succeeded', 'success', 'done'].includes(jobStatus);
+    const resolvedJobId = effectiveJobId({ jobId, pollingUrl, rawVideoUrl });
     let videoUrl = rawVideoUrl;
     let storage = null;
 
     if (rawVideoUrl) {
-      storage = await persistVideo({ jobId, videoUrl: rawVideoUrl, apiKey });
+      storage = await persistVideo({ jobId: resolvedJobId, videoUrl: rawVideoUrl, apiKey });
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
+
+    const done = Boolean(videoUrl);
 
     return res.status(response.ok ? 200 : response.status).json({
       ok: response.ok,
       status: response.status,
       provider: 'openrouter',
-      jobId,
+      jobId: resolvedJobId,
+      originalJobId: jobId,
       pollingUrl,
       statusUrl,
       jobStatus,
