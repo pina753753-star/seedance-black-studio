@@ -110,7 +110,7 @@ async function upsertGeneratedVideo({ operationName, operation, userEmail }) {
   return row;
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     const operationName = String(req.query.operationName || req.query.operation_name || '').trim();
     const userEmail = String(req.query.userEmail || req.query.user_email || '').trim().toLowerCase();
@@ -136,4 +136,4 @@ export default async function handler(req, res) {
       checkedAt: new Date().toISOString()
     });
   }
-}
+};
