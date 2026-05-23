@@ -57,6 +57,7 @@
           }
           if(data && data.done!==true){
             data.videoUrl=null;
+            data.rawVideoUrl=null;
           }
           return new Response(JSON.stringify(data),{
             status:response.status,
@@ -69,7 +70,7 @@
     };
   }
   function boot(){
-    if(!/\/generate\.html$/.test(location.pathname)) return;
+    if(!/\/generate(?:-prod)?\.html$/.test(location.pathname)) return;
     patchFetch();
     const initial=readMode();
     saveMode(initial);

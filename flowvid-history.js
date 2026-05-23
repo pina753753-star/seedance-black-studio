@@ -25,7 +25,7 @@
     if(!value)return '';
     if(typeof value==='string'){
       if(/^https?:\/\//i.test(value)&&/\.(mp4|mov|webm)(\?|$)/i.test(value))return value;
-      if(/^https?:\/\//i.test(value)&&/(video|output|download|storage|cdn|signed)/i.test(value))return value;
+      if(/^https?:\/\//i.test(value)&&/(output|download|storage|cdn|signed)/i.test(value)&&!/openrouter\.ai\/api\//i.test(value))return value;
       return '';
     }
     if(Array.isArray(value)){
@@ -83,7 +83,7 @@
     if(url.includes('/api/seedance-status')){
       response.clone().json().then(data=>{
         const jobId=data?.jobId||new URL(url,location.href).searchParams.get('id')||localStorage.getItem(LAST_JOB_KEY)||'';
-        const videoUrl=findVideoUrl(data);
+        const videoUrl=data?.done===true&&data?.videoUrl?data.videoUrl:'';
         if(!jobId)return;
         if(videoUrl){
           const prompt=localStorage.getItem('flowvidLastSeedancePrompt')||document.getElementById('prompt')?.value||'';
