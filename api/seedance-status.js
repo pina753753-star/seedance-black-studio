@@ -16,6 +16,10 @@ function isStatusEndpointUrl(url) {
   return /^https?:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(value);
 }
 
+function isOpenRouterContentUrl(url) {
+  return /^https?:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/content(?:\?|$)/i.test(String(url || ''));
+}
+
 function findVideoUrl(value, keyName = '') {
   if (!value) return null;
 
@@ -24,9 +28,10 @@ function findVideoUrl(value, keyName = '') {
     if (!/^https?:\/\//i.test(url)) return null;
 
     if (/\.(mp4|mov|webm)(\?|$)/i.test(url)) return url;
+    if (isOpenRouterContentUrl(url)) return url;
 
-    const keyLooksLikeVideo = /(videoUrl|video_url|output_url|download_url|file_url|asset_url|signed_url|play_url|url)$/i.test(keyName || '');
-    const urlLooksDownloadable = /(download|output|storage|cdn|signed|play|file|asset)/i.test(url);
+    const keyLooksLikeVideo = /(videoUrl|video_url|output_url|download_url|file_url|asset_url|signed_url|signed_urls|unsigned_url|unsigned_urls|play_url|url)$/i.test(keyName || '');
+    const urlLooksDownloadable = /(download|output|storage|cdn|signed|play|file|asset|content\?index=)/i.test(url);
 
     if (isStatusEndpointUrl(url) && !/\.(mp4|mov|webm)(\?|$)/i.test(url)) return null;
     if (keyLooksLikeVideo && urlLooksDownloadable) return url;
@@ -43,7 +48,7 @@ function findVideoUrl(value, keyName = '') {
   }
 
   if (typeof value === 'object') {
-    const priorityKeys = ['videoUrl', 'video_url', 'output_url', 'download_url', 'file_url', 'asset_url', 'signed_url', 'play_url'];
+    const priorityKeys = ['videoUrl', 'video_url', 'output_url', 'download_url', 'file_url', 'asset_url', 'signed_url', 'signed_urls', 'unsigned_url', 'unsigned_urls', 'play_url'];
     for (const key of priorityKeys) {
       const found = findVideoUrl(value[key], key);
       if (found) return found;
