@@ -236,8 +236,7 @@ module.exports = async function handler(req, res) {
       jobStatus,
       done,
       videoUrl,
-      rawVideoUrl,
-      storage,
+      storage: storage ? { ...storage, rawVideoUrl } : null,
       response: data,
       checkedAt: new Date().toISOString()
     });
