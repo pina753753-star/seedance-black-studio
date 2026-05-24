@@ -107,7 +107,7 @@
       #history .fv-prompt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\
       #history .fv-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;color:#8d94a3;font-size:12px;font-weight:800}\
       #history .fv-chip{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:4px 7px;background:rgba(255,255,255,.04)}\
-      #history .fv-video-frame{width:100%;height:min(72vh,560px);background:#050506;border-radius:16px;overflow:hidden;display:grid;place-items:center}\
+      #history .fv-video-frame{width:100%;height:320px;background:#050506;border-radius:16px;overflow:hidden;display:grid;place-items:center}\
       #history .fv-video-frame video{width:100%!important;height:100%!important;max-height:none!important;object-fit:contain!important;background:#000;border-radius:0}\
       #history .icons{margin-top:0;min-height:42px;align-items:center}\
       #history .fv-card-actions{display:flex;gap:8px;align-items:center;justify-content:space-between}\
@@ -116,7 +116,7 @@
       #history .fv-action.fav{min-width:44px;width:44px;padding:0;font-size:20px}\
       #history .fv-action.fav.on{background:rgba(251,191,36,.18);color:#fde68a}\
       #history .fv-delete-one{background:transparent;color:#fecdd3;border:1px solid rgba(251,113,133,.35);min-width:64px}\
-      @media(max-width:520px){#history .fv-video-frame{height:min(70vh,520px)}}\
+      @media(max-width:520px){#history .old{padding:10px}#history .fv-video-frame{height:300px}}\
     ';
     document.head.appendChild(style);
   }
