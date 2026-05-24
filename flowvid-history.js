@@ -59,6 +59,22 @@
   function esc(s){
     return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   }
+  function installFixedHistoryStyle(){
+    if(document.getElementById('fv-fixed-history-style'))return;
+    const style=document.createElement('style');
+    style.id='fv-fixed-history-style';
+    style.textContent='\
+      #history{display:grid;gap:14px}\
+      #history .old{min-height:0;padding:12px;border-radius:22px;display:grid;grid-template-rows:auto auto auto;gap:10px}\
+      #history .oldTop{min-height:48px;margin:0;color:#c8c8d2;font-weight:800;line-height:1.35}\
+      #history .fv-video-frame{width:100%;aspect-ratio:16/10;max-height:360px;background:#050506;border-radius:16px;overflow:hidden;display:grid;place-items:center}\
+      #history .fv-video-frame video{width:100%!important;height:100%!important;max-height:none!important;object-fit:contain;background:#000;border-radius:0}\
+      #history .icons{margin-top:0;min-height:38px;align-items:center}\
+      #history .fv-delete-one{align-self:flex-start}\
+      @media(max-width:520px){#history .fv-video-frame{aspect-ratio:16/11;max-height:330px}}\
+    ';
+    document.head.appendChild(style);
+  }
   function normalizeRemoteItem(row){
     const url=row?.video_url||row?.video_uri||row?.src||row?.url||'';
     if(!/^https?:\/\//i.test(url))return null;
@@ -73,6 +89,7 @@
   function renderApiHistoryList(items){
     const history=document.getElementById('history');
     if(!history)return;
+    installFixedHistoryStyle();
     if(!items.length){
       history.innerHTML='<div class="empty">まだ動画がありません</div>';
       return;
@@ -86,7 +103,7 @@
         +'<span>'+title+'</span>'
         +'<button type="button" class="fv-delete-one" data-job-id="'+job+'" data-url="'+url+'" style="border:1px solid rgba(255,255,255,.12);background:#2b303a;color:#fff;border-radius:10px;padding:7px 10px;font-weight:800;white-space:nowrap">削除</button>'
         +'</div>'
-        +'<video controls playsinline preload="metadata" src="'+url+'"></video>'
+        +'<div class="fv-video-frame"><video controls playsinline preload="metadata" src="'+url+'"></video></div>'
         +'<div class="icons"><a class="icon" href="'+url+'" target="_blank" rel="noreferrer">↗</a><a class="icon" href="'+url+'" download>↓</a></div>'
         +'</article>';
     }).join('');
@@ -94,6 +111,7 @@
   async function loadApiHistory(){
     const history=document.getElementById('history');
     if(!history)return;
+    installFixedHistoryStyle();
     history.innerHTML='<div class="empty">履歴を読み込み中...</div>';
     try{
       const res=await originalFetch('/api/generated-videos?limit=50&t='+Date.now(),{cache:'no-store'});
@@ -122,6 +140,7 @@
     }
   }
   function installApiHistoryUi(){
+    installFixedHistoryStyle();
     const clear=document.getElementById('clear');
     if(clear){
       clear.textContent='再読込';
