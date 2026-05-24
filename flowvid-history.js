@@ -56,6 +56,90 @@
     }catch(e){console.warn('[FlowVid history] remote save failed',e);}
   }
 
+  function esc(s){
+    return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+  function normalizeRemoteItem(row){
+    const url=row?.video_url||row?.video_uri||row?.src||row?.url||'';
+    if(!/^https?:\/\//i.test(url))return null;
+    if(/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(url))return null;
+    return {
+      url,
+      jobId: row?.job_id||row?.jobId||row?.id||'',
+      prompt: row?.prompt||row?.title||'生成動画',
+      createdAt: row?.created_at||row?.createdAt||''
+    };
+  }
+  function renderApiHistoryList(items){
+    const history=document.getElementById('history');
+    if(!history)return;
+    if(!items.length){
+      history.innerHTML='<div class="empty">まだ動画がありません</div>';
+      return;
+    }
+    history.innerHTML=items.map((it,idx)=>{
+      const title=esc((it.prompt||'生成動画').slice(0,54));
+      const url=esc(it.url);
+      const job=esc(it.jobId||'');
+      return '<article class="old" data-job-id="'+job+'" data-url="'+url+'">'
+        +'<div class="oldTop" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between">'
+        +'<span>'+title+'</span>'
+        +'<button type="button" class="fv-delete-one" data-job-id="'+job+'" data-url="'+url+'" style="border:1px solid rgba(255,255,255,.12);background:#2b303a;color:#fff;border-radius:10px;padding:7px 10px;font-weight:800;white-space:nowrap">削除</button>'
+        +'</div>'
+        +'<video controls playsinline preload="metadata" src="'+url+'"></video>'
+        +'<div class="icons"><a class="icon" href="'+url+'" target="_blank" rel="noreferrer">↗</a><a class="icon" href="'+url+'" download>↓</a></div>'
+        +'</article>';
+    }).join('');
+  }
+  async function loadApiHistory(){
+    const history=document.getElementById('history');
+    if(!history)return;
+    history.innerHTML='<div class="empty">履歴を読み込み中...</div>';
+    try{
+      const res=await originalFetch('/api/generated-videos?limit=50&t='+Date.now(),{cache:'no-store'});
+      const data=await res.json();
+      const rows=(data?.rows||[]).map(normalizeRemoteItem).filter(Boolean);
+      renderApiHistoryList(rows);
+    }catch(e){
+      history.innerHTML='<div class="empty">履歴を読み込めませんでした</div>';
+    }
+  }
+  async function deleteOneHistory(jobId,url){
+    if(!jobId){
+      alert('削除対象のjobIdがありません');
+      return;
+    }
+    const ok=confirm('この動画を履歴から削除しますか？\n\n動画ファイル本体は削除せず、履歴だけ削除します。');
+    if(!ok)return;
+    try{
+      const res=await originalFetch('/api/delete-video-history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
+      const data=await res.json();
+      if(!res.ok||!data.ok)throw new Error(data?.error||'削除に失敗しました');
+      localStorage.removeItem(HISTORY_KEY);
+      await loadApiHistory();
+    }catch(e){
+      alert('削除できませんでした: '+(e?.message||e));
+    }
+  }
+  function installApiHistoryUi(){
+    const clear=document.getElementById('clear');
+    if(clear){
+      clear.textContent='再読込';
+      clear.onclick=function(){
+        localStorage.removeItem(HISTORY_KEY);
+        loadApiHistory();
+      };
+    }
+    document.addEventListener('click',function(e){
+      const btn=e.target&&e.target.closest&&e.target.closest('.fv-delete-one');
+      if(!btn)return;
+      e.preventDefault();
+      deleteOneHistory(btn.dataset.jobId||'',btn.dataset.url||'');
+    });
+    setTimeout(loadApiHistory,0);
+    setTimeout(loadApiHistory,700);
+  }
+
   const originalFetch=window.fetch.bind(window);
   window.fetch=async function(input,init){
     const url=typeof input==='string'?input:(input&&input.url)||'';
@@ -90,6 +174,7 @@
           const mode=localStorage.getItem('flowvidLastSeedanceMode')||currentMode();
           localSave({url:videoUrl,prompt,mode,jobId,createdAt:new Date().toISOString()});
           saveRemote({jobId,status:'completed',mode,prompt,videoUrl});
+          setTimeout(loadApiHistory,1000);
         }else{
           saveRemote({jobId,status:data?.jobStatus||data?.status||'processing',mode:currentMode(),prompt:localStorage.getItem('flowvidLastSeedancePrompt')||''});
         }
@@ -98,4 +183,10 @@
 
     return response;
   };
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',installApiHistoryUi);
+  }else{
+    installApiHistoryUi();
+  }
 })();
