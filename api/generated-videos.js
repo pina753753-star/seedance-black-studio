@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
+const BROKEN_JOB_IDS = new Set(['uyfqpQhNClOWXqKYPfQ5']);
 
 function dbClient() {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
@@ -17,7 +18,12 @@ function validVideoUrl(url) {
   return '';
 }
 
+function isKnownBrokenRow(row) {
+  return BROKEN_JOB_IDS.has(String(row?.job_id || row?.operation_name || row?.id || ''));
+}
+
 function normalizeGeneratedRow(row) {
+  if (isKnownBrokenRow(row)) return null;
   const url = validVideoUrl(row.video_uri || row.video_url || row.url || '');
   if (!url) return null;
   return {
@@ -36,6 +42,7 @@ function normalizeGeneratedRow(row) {
 }
 
 function normalizeHistoryRow(row) {
+  if (isKnownBrokenRow(row)) return null;
   const url = validVideoUrl(row.video_url || row.video_uri || row.url || '');
   if (!url) return null;
   return {
@@ -105,7 +112,8 @@ module.exports = async function handler(req, res) {
       rows,
       sources: {
         flowvid_video_history: { count: history.rows.length, error: history.error },
-        generated_videos: { count: generated.rows.length, error: generated.error }
+        generated_videos: { count: generated.rows.length, error: generated.error },
+        hidden_broken_job_ids: Array.from(BROKEN_JOB_IDS)
       }
     });
   } catch (error) {
