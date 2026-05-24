@@ -2,6 +2,7 @@
   const DEVICE_KEY='flowvidDeviceId';
   const LAST_JOB_KEY='flowvidLastSeedanceJobId';
   const HISTORY_KEY='flowvidHistory';
+  const FAVORITES_KEY='flowvidFavoriteJobs';
 
   function deviceId(){
     let id=localStorage.getItem(DEVICE_KEY);
@@ -59,18 +60,61 @@
   function esc(s){
     return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   }
+  function favorites(){
+    const list=safeJson(localStorage.getItem(FAVORITES_KEY));
+    return Array.isArray(list)?list:[];
+  }
+  function isFavorite(jobId){
+    return favorites().includes(String(jobId||''));
+  }
+  function toggleFavorite(jobId){
+    if(!jobId)return;
+    const id=String(jobId);
+    const next=isFavorite(id)?favorites().filter(v=>v!==id):[id,...favorites()];
+    localStorage.setItem(FAVORITES_KEY,JSON.stringify(next.slice(0,100)));
+    loadApiHistory();
+  }
+  function shortDate(value){
+    const d=value?new Date(value):null;
+    if(!d||Number.isNaN(d.getTime()))return '';
+    const now=Date.now();
+    const diff=Math.max(0,now-d.getTime());
+    const mins=Math.floor(diff/60000);
+    if(mins<1)return '今';
+    if(mins<60)return mins+'分前';
+    const hours=Math.floor(mins/60);
+    if(hours<24)return hours+'時間前';
+    const days=Math.floor(hours/24);
+    if(days<7)return days+'日前';
+    return `${d.getMonth()+1}/${d.getDate()}`;
+  }
+  function modeLabel(value){
+    const v=String(value||'');
+    if(v==='image_to_video')return '画像から動画';
+    if(v==='text_to_video')return 'テキストから動画';
+    if(v==='reference_to_video')return 'リファレンス';
+    return 'Seedance';
+  }
   function installFixedHistoryStyle(){
     if(document.getElementById('fv-fixed-history-style'))return;
     const style=document.createElement('style');
     style.id='fv-fixed-history-style';
     style.textContent='\
       #history{display:grid;gap:14px}\
-      #history .old{min-height:0;padding:12px;border-radius:22px;display:grid;grid-template-rows:auto auto auto;gap:10px}\
+      #history .old{min-height:0;padding:12px;border-radius:22px;display:grid;grid-template-rows:auto auto auto;gap:10px;background:#1b1e25;border:1px solid rgba(255,255,255,.08)}\
       #history .oldTop{min-height:48px;margin:0;color:#c8c8d2;font-weight:800;line-height:1.35}\
+      #history .fv-title-row{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}\
+      #history .fv-prompt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\
+      #history .fv-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;color:#8d94a3;font-size:12px;font-weight:800}\
+      #history .fv-chip{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:4px 7px;background:rgba(255,255,255,.04)}\
       #history .fv-video-frame{width:100%;aspect-ratio:16/10;max-height:360px;background:#050506;border-radius:16px;overflow:hidden;display:grid;place-items:center}\
       #history .fv-video-frame video{width:100%!important;height:100%!important;max-height:none!important;object-fit:contain;background:#000;border-radius:0}\
-      #history .icons{margin-top:0;min-height:38px;align-items:center}\
-      #history .fv-delete-one{align-self:flex-start}\
+      #history .icons{margin-top:0;min-height:42px;align-items:center}\
+      #history .fv-card-actions{display:flex;gap:8px;align-items:center;justify-content:space-between}\
+      #history .fv-left-actions,#history .fv-right-actions{display:flex;gap:8px;align-items:center}\
+      #history .fv-action{width:43px;height:38px;border:0;border-radius:12px;background:#2b303a;color:#fff;text-decoration:none;display:grid;place-items:center;font-size:17px;font-weight:900}\
+      #history .fv-action.fav.on{background:rgba(251,191,36,.18);color:#fde68a}\
+      #history .fv-delete-one{background:#2b303a;color:#fff;border:1px solid rgba(255,255,255,.12)}\
       @media(max-width:520px){#history .fv-video-frame{aspect-ratio:16/11;max-height:330px}}\
     ';
     document.head.appendChild(style);
@@ -83,6 +127,10 @@
       url,
       jobId: row?.job_id||row?.jobId||row?.id||'',
       prompt: row?.prompt||row?.title||'生成動画',
+      mode: row?.mode||row?.type||'',
+      duration: row?.duration_seconds||row?.duration||5,
+      aspect: row?.aspect_ratio||row?.aspectRatio||'9:16',
+      model: row?.model||'Seedance',
       createdAt: row?.created_at||row?.createdAt||''
     };
   }
@@ -94,17 +142,29 @@
       history.innerHTML='<div class="empty">まだ動画がありません</div>';
       return;
     }
-    history.innerHTML=items.map((it,idx)=>{
-      const title=esc((it.prompt||'生成動画').slice(0,54));
+    const favs=favorites();
+    const sorted=[...items].sort((a,b)=>{
+      const af=favs.includes(String(a.jobId||''))?1:0;
+      const bf=favs.includes(String(b.jobId||''))?1:0;
+      if(af!==bf)return bf-af;
+      return new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime();
+    });
+    history.innerHTML=sorted.map((it)=>{
+      const title=esc((it.prompt||'生成動画').slice(0,72));
       const url=esc(it.url);
       const job=esc(it.jobId||'');
+      const fav=isFavorite(it.jobId);
+      const meta=[modeLabel(it.mode),it.aspect,`${it.duration||5}秒`,shortDate(it.createdAt)].filter(Boolean).map(v=>'<span class="fv-chip">'+esc(v)+'</span>').join('');
       return '<article class="old" data-job-id="'+job+'" data-url="'+url+'">'
-        +'<div class="oldTop" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between">'
-        +'<span>'+title+'</span>'
-        +'<button type="button" class="fv-delete-one" data-job-id="'+job+'" data-url="'+url+'" style="border:1px solid rgba(255,255,255,.12);background:#2b303a;color:#fff;border-radius:10px;padding:7px 10px;font-weight:800;white-space:nowrap">削除</button>'
+        +'<div class="oldTop">'
+        +'<div class="fv-title-row"><div><div class="fv-prompt">'+title+'</div><div class="fv-meta">'+meta+'</div></div>'
+        +'<button type="button" class="fv-action fav '+(fav?'on':'')+'" data-job-id="'+job+'" aria-label="お気に入り">'+(fav?'★':'☆')+'</button></div>'
         +'</div>'
         +'<div class="fv-video-frame"><video controls playsinline preload="metadata" src="'+url+'"></video></div>'
-        +'<div class="icons"><a class="icon" href="'+url+'" target="_blank" rel="noreferrer">↗</a><a class="icon" href="'+url+'" download>↓</a></div>'
+        +'<div class="fv-card-actions">'
+        +'<div class="fv-left-actions"><a class="fv-action" href="'+url+'" target="_blank" rel="noreferrer">↗</a><a class="fv-action" href="'+url+'" download>↓</a><button type="button" class="fv-action fv-copy-one" data-url="'+url+'">⛓</button></div>'
+        +'<div class="fv-right-actions"><button type="button" class="fv-action fv-delete-one" data-job-id="'+job+'" data-url="'+url+'">🗑</button></div>'
+        +'</div>'
         +'</article>';
     }).join('');
   }
@@ -150,10 +210,23 @@
       };
     }
     document.addEventListener('click',function(e){
-      const btn=e.target&&e.target.closest&&e.target.closest('.fv-delete-one');
-      if(!btn)return;
-      e.preventDefault();
-      deleteOneHistory(btn.dataset.jobId||'',btn.dataset.url||'');
+      const del=e.target&&e.target.closest&&e.target.closest('.fv-delete-one');
+      if(del){
+        e.preventDefault();
+        deleteOneHistory(del.dataset.jobId||'',del.dataset.url||'');
+        return;
+      }
+      const fav=e.target&&e.target.closest&&e.target.closest('.fv-action.fav');
+      if(fav){
+        e.preventDefault();
+        toggleFavorite(fav.dataset.jobId||'');
+        return;
+      }
+      const copy=e.target&&e.target.closest&&e.target.closest('.fv-copy-one');
+      if(copy){
+        e.preventDefault();
+        navigator.clipboard?.writeText(copy.dataset.url||'');
+      }
     });
     setTimeout(loadApiHistory,0);
     setTimeout(loadApiHistory,700);
