@@ -47,12 +47,29 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ ok: true, rows: data || [] });
   }
 
-  if (req.method !== 'POST') {
+  if (!['POST', 'DELETE'].includes(req.method)) {
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    const action = cleanString(body.action, 80).toLowerCase();
+    const shouldDelete = req.method === 'DELETE' || action === 'delete';
+
+    if (shouldDelete) {
+      const jobId = cleanString(body.jobId || body.job_id, 300);
+      if (!jobId) return res.status(400).json({ ok: false, error: 'jobId is required' });
+
+      const { data, error } = await db
+        .from(TABLE)
+        .delete()
+        .eq('job_id', jobId)
+        .select('job_id');
+
+      if (error) return res.status(500).json({ ok: false, error: error.message, table: TABLE, jobId });
+      return res.status(200).json({ ok: true, jobId, deleted: data?.length || 0 });
+    }
+
     const row = toRow(body);
     if (!row.job_id) return res.status(400).json({ ok: false, error: 'jobId is required' });
 
