@@ -107,8 +107,8 @@
       #history .fv-prompt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\
       #history .fv-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;color:#8d94a3;font-size:12px;font-weight:800}\
       #history .fv-chip{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:4px 7px;background:rgba(255,255,255,.04)}\
-      #history .fv-video-frame{width:100%;aspect-ratio:16/9;background:#050506;border-radius:16px;overflow:hidden;display:grid;place-items:center}\
-      #history .fv-video-frame video{width:100%!important;height:100%!important;max-height:none!important;object-fit:contain!important;background:#000;border-radius:0}\
+      #history .fv-video-frame{width:100%;aspect-ratio:16/9;background:#050506;border-radius:16px;overflow:hidden;display:flex;align-items:center;justify-content:center}\
+      #history .fv-video-frame video{width:auto!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;background:#000;border-radius:0;display:block}\
       #history .icons{margin-top:0;min-height:42px;align-items:center}\
       #history .fv-card-actions{display:flex;gap:8px;align-items:center;justify-content:space-between}\
       #history .fv-left-actions,#history .fv-right-actions{display:flex;gap:8px;align-items:center}\
