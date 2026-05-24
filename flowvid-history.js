@@ -107,15 +107,16 @@
       #history .fv-prompt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\
       #history .fv-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;color:#8d94a3;font-size:12px;font-weight:800}\
       #history .fv-chip{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:4px 7px;background:rgba(255,255,255,.04)}\
-      #history .fv-video-frame{width:100%;aspect-ratio:16/10;max-height:360px;background:#050506;border-radius:16px;overflow:hidden;display:grid;place-items:center}\
-      #history .fv-video-frame video{width:100%!important;height:100%!important;max-height:none!important;object-fit:contain;background:#000;border-radius:0}\
+      #history .fv-video-frame{width:100%;height:min(72vh,560px);background:#050506;border-radius:16px;overflow:hidden;display:grid;place-items:center}\
+      #history .fv-video-frame video{width:100%!important;height:100%!important;max-height:none!important;object-fit:contain!important;background:#000;border-radius:0}\
       #history .icons{margin-top:0;min-height:42px;align-items:center}\
       #history .fv-card-actions{display:flex;gap:8px;align-items:center;justify-content:space-between}\
       #history .fv-left-actions,#history .fv-right-actions{display:flex;gap:8px;align-items:center}\
-      #history .fv-action{width:43px;height:38px;border:0;border-radius:12px;background:#2b303a;color:#fff;text-decoration:none;display:grid;place-items:center;font-size:17px;font-weight:900}\
+      #history .fv-action{min-width:58px;height:40px;border:0;border-radius:12px;background:#2b303a;color:#fff;text-decoration:none;display:grid;place-items:center;font-size:15px;font-weight:900;padding:0 12px}\
+      #history .fv-action.fav{min-width:44px;width:44px;padding:0;font-size:20px}\
       #history .fv-action.fav.on{background:rgba(251,191,36,.18);color:#fde68a}\
-      #history .fv-delete-one{background:#2b303a;color:#fff;border:1px solid rgba(255,255,255,.12)}\
-      @media(max-width:520px){#history .fv-video-frame{aspect-ratio:16/11;max-height:330px}}\
+      #history .fv-delete-one{background:transparent;color:#fecdd3;border:1px solid rgba(251,113,133,.35);min-width:64px}\
+      @media(max-width:520px){#history .fv-video-frame{height:min(70vh,520px)}}\
     ';
     document.head.appendChild(style);
   }
@@ -162,8 +163,8 @@
         +'</div>'
         +'<div class="fv-video-frame"><video controls playsinline preload="metadata" src="'+url+'"></video></div>'
         +'<div class="fv-card-actions">'
-        +'<div class="fv-left-actions"><a class="fv-action" href="'+url+'" target="_blank" rel="noreferrer">↗</a><a class="fv-action" href="'+url+'" download>↓</a><button type="button" class="fv-action fv-copy-one" data-url="'+url+'">⛓</button></div>'
-        +'<div class="fv-right-actions"><button type="button" class="fv-action fv-delete-one" data-job-id="'+job+'" data-url="'+url+'">🗑</button></div>'
+        +'<div class="fv-left-actions"><a class="fv-action" href="'+url+'" target="_blank" rel="noreferrer">開く</a><a class="fv-action" href="'+url+'" download>保存</a></div>'
+        +'<div class="fv-right-actions"><button type="button" class="fv-action fv-delete-one" data-job-id="'+job+'" data-url="'+url+'">削除</button></div>'
         +'</div>'
         +'</article>';
     }).join('');
@@ -190,7 +191,7 @@
     const ok=confirm('この動画を履歴から削除しますか？\n\n動画ファイル本体は削除せず、履歴だけ削除します。');
     if(!ok)return;
     try{
-      const res=await originalFetch('/api/delete-video-history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
+      const res=await originalFetch('/api/video-history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete',jobId})});
       const data=await res.json();
       if(!res.ok||!data.ok)throw new Error(data?.error||'削除に失敗しました');
       localStorage.removeItem(HISTORY_KEY);
@@ -220,12 +221,6 @@
       if(fav){
         e.preventDefault();
         toggleFavorite(fav.dataset.jobId||'');
-        return;
-      }
-      const copy=e.target&&e.target.closest&&e.target.closest('.fv-copy-one');
-      if(copy){
-        e.preventDefault();
-        navigator.clipboard?.writeText(copy.dataset.url||'');
       }
     });
     setTimeout(loadApiHistory,0);
