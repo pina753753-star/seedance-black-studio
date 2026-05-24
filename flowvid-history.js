@@ -109,13 +109,13 @@
       #history .fv-chip{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:4px 7px;background:rgba(255,255,255,.04)}\
       #history .fv-video-frame{width:100%;aspect-ratio:16/9;background:#050506;border-radius:16px;overflow:hidden;display:flex;align-items:center;justify-content:center}\
       #history .fv-video-frame video{width:auto!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;background:#000;border-radius:0;display:block}\
-      #history .icons{margin-top:0;min-height:42px;align-items:center}\
+      #history .fv-video-frame video::-webkit-media-controls-panel{opacity:.82}\
       #history .fv-card-actions{display:flex;gap:8px;align-items:center;justify-content:space-between}\
       #history .fv-left-actions,#history .fv-right-actions{display:flex;gap:8px;align-items:center}\
-      #history .fv-action{min-width:58px;height:40px;border:0;border-radius:12px;background:#2b303a;color:#fff;text-decoration:none;display:grid;place-items:center;font-size:15px;font-weight:900;padding:0 12px}\
-      #history .fv-action.fav{min-width:44px;width:44px;padding:0;font-size:20px}\
+      #history .fv-action{min-width:52px;height:36px;border:0;border-radius:11px;background:#2b303a;color:#fff;text-decoration:none;display:grid;place-items:center;font-size:14px;font-weight:900;padding:0 11px}\
+      #history .fv-action.fav{min-width:44px;width:44px;height:44px;padding:0;font-size:20px}\
       #history .fv-action.fav.on{background:rgba(251,191,36,.18);color:#fde68a}\
-      #history .fv-delete-one{background:transparent;color:#fecdd3;border:1px solid rgba(251,113,133,.35);min-width:64px}\
+      #history .fv-delete-one{background:transparent;color:#fecdd3;border:1px solid rgba(251,113,133,.35);min-width:58px}\
       @media(max-width:520px){#history .old{padding:10px}#history .fv-video-frame{aspect-ratio:16/9}}\
     ';
     document.head.appendChild(style);
@@ -134,6 +134,23 @@
       model: row?.model||'Seedance',
       createdAt: row?.created_at||row?.createdAt||''
     };
+  }
+  function playHistoryVideos(){
+    document.querySelectorAll('#history .fv-video-frame video').forEach((video)=>{
+      video.muted=true;
+      video.loop=true;
+      video.playsInline=true;
+      video.setAttribute('muted','');
+      video.setAttribute('loop','');
+      video.setAttribute('playsinline','');
+      video.setAttribute('webkit-playsinline','');
+      video.addEventListener('loadedmetadata',()=>{
+        try{ video.currentTime = Math.min(0.1, Math.max(0, (video.duration || 1) - 0.1)); }catch(_){ }
+      },{once:true});
+      const start=()=>video.play().catch(()=>{});
+      video.addEventListener('canplay',start,{once:true});
+      setTimeout(start,300);
+    });
   }
   function renderApiHistoryList(items){
     const history=document.getElementById('history');
@@ -161,13 +178,14 @@
         +'<div class="fv-title-row"><div><div class="fv-prompt">'+title+'</div><div class="fv-meta">'+meta+'</div></div>'
         +'<button type="button" class="fv-action fav '+(fav?'on':'')+'" data-job-id="'+job+'" aria-label="お気に入り">'+(fav?'★':'☆')+'</button></div>'
         +'</div>'
-        +'<div class="fv-video-frame"><video controls playsinline preload="metadata" src="'+url+'"></video></div>'
+        +'<div class="fv-video-frame"><video autoplay muted loop playsinline webkit-playsinline preload="auto" src="'+url+'"></video></div>'
         +'<div class="fv-card-actions">'
         +'<div class="fv-left-actions"><a class="fv-action" href="'+url+'" target="_blank" rel="noreferrer">開く</a><a class="fv-action" href="'+url+'" download>保存</a></div>'
         +'<div class="fv-right-actions"><button type="button" class="fv-action fv-delete-one" data-job-id="'+job+'" data-url="'+url+'">削除</button></div>'
         +'</div>'
         +'</article>';
     }).join('');
+    playHistoryVideos();
   }
   async function loadApiHistory(){
     const history=document.getElementById('history');
@@ -225,6 +243,7 @@
     });
     setTimeout(loadApiHistory,0);
     setTimeout(loadApiHistory,700);
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) playHistoryVideos(); });
   }
 
   const originalFetch=window.fetch.bind(window);
