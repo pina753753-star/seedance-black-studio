@@ -13,7 +13,13 @@
   function currentMode(){return localStorage.getItem('flowvidGenerateMode')||document.querySelector('[data-mode].on')?.dataset?.mode||'reference_to_video'}
   function modeLabel(v){v=String(v||'');return v==='image_to_video'?'画像から動画':v==='text_to_video'?'テキストから動画':v==='reference_to_video'?'リファレンス':'Seedance'}
   function readDraft(){return safeJson(localStorage.getItem(DRAFT_KEY),'{}')||{}}
-  function getRefs(){const d=readDraft();return Array.isArray(d.referenceUrls)?d.referenceUrls.filter(Boolean):[]}
+  function getRefs(){
+    const d=readDraft();
+    const fromDraft=Array.isArray(d.referenceUrls)?d.referenceUrls.filter(Boolean):[];
+    const fromDom=Array.from(document.querySelectorAll('#assets .thumb img')).map(img=>img.currentSrc||img.src||'').filter(url=>/^https?:\/\//i.test(url));
+    return Array.from(new Set([...fromDraft,...fromDom])).filter(Boolean);
+  }
+  function toInputReferences(refs){return refs.map(url=>({type:'image_url',image_url:{url}}));}
   function extractJobId(d){if(!d||typeof d!=='object')return'';for(const k of ['jobId','job_id','id','request_id']){const v=d[k];if(typeof v==='string'&&v.trim())return v.trim()}for(const k of Object.keys(d)){const r=extractJobId(d[k]);if(r)return r}return''}
   function extractPollingUrl(d){if(!d||typeof d!=='object')return'';for(const k of ['pollingUrl','polling_url','statusUrl','status_url']){const v=d[k];if(typeof v==='string'&&/^https?:\/\//.test(v))return v}for(const k of Object.keys(d)){const r=extractPollingUrl(d[k]);if(r)return r}return''}
   function findVideoUrl(value){
@@ -69,7 +75,11 @@
     if(job)job.textContent='送信中...';
     const body={model:$('model')?.value||'bytedance/seedance-2.0',prompt,duration:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',aspect_ratio:$('aspect')?.value||'9:16',generate_audio:$('audio')?.value==='true',estimated_credits:credits()};
     if(mode==='image_to_video')body.first_frame_url=refs[0];
-    if(mode==='reference_to_video'){body.reference_url=refs[0];body.reference_urls=refs;}
+    if(mode==='reference_to_video'){
+      body.reference_url=refs[0];
+      body.reference_urls=refs;
+      body.input_references=toInputReferences(refs);
+    }
     const timeout=startTimeout(25000);
     try{
       const res=await originalFetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:timeout.signal});
