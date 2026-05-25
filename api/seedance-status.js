@@ -66,6 +66,10 @@ function normalizeStatus(data) {
   return String(data?.status || data?.data?.status || data?.response?.status || data?.result?.status || '').toLowerCase();
 }
 
+function isCompletedStatus(status) {
+  return ['completed', 'complete', 'succeeded', 'success', 'done'].includes(String(status || '').toLowerCase());
+}
+
 function extFromContentType(contentType) {
   const type = String(contentType || '').toLowerCase();
   if (type.includes('webm')) return 'webm';
@@ -93,13 +97,19 @@ function effectiveJobId({ jobId, pollingUrl, rawVideoUrl }) {
 
       const pathParts = parsed.pathname.split('/').filter(Boolean);
       const pathId = pathParts[pathParts.length - 1];
-      if (pathId && !/^(download|output|video|file|public)$/i.test(pathId)) return pathId;
+      if (pathId && !/^(download|output|video|file|public|content)$/i.test(pathId)) return pathId;
     } catch (_) {
       // Ignore malformed URLs and fall back below.
     }
   }
 
   return `video-${Date.now()}`;
+}
+
+function openRouterContentUrl(id) {
+  const clean = String(id || '').trim();
+  if (!clean) return null;
+  return `${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(clean)}/content`;
 }
 
 async function verifyPublicObject(publicUrl) {
@@ -218,8 +228,10 @@ module.exports = async function handler(req, res) {
     try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
 
     const jobStatus = normalizeStatus(data);
-    const rawVideoUrl = findVideoUrl(data);
-    const resolvedJobId = effectiveJobId({ jobId, pollingUrl, rawVideoUrl });
+    const foundVideoUrl = findVideoUrl(data);
+    const resolvedJobId = effectiveJobId({ jobId, pollingUrl, rawVideoUrl: foundVideoUrl });
+    const fallbackContentUrl = !foundVideoUrl && isCompletedStatus(jobStatus) ? openRouterContentUrl(resolvedJobId) : null;
+    const rawVideoUrl = foundVideoUrl || fallbackContentUrl;
     let videoUrl = null;
     let storage = null;
 
@@ -241,7 +253,7 @@ module.exports = async function handler(req, res) {
       jobStatus,
       done,
       videoUrl,
-      storage: storage ? { ...storage, rawVideoUrl } : null,
+      storage: storage ? { ...storage, rawVideoUrl, usedFallbackContentUrl: Boolean(fallbackContentUrl) } : null,
       response: data,
       checkedAt: new Date().toISOString()
     });
