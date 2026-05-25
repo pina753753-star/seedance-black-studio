@@ -25,7 +25,7 @@
 <section class="section"><h2>過去動画</h2><button id="clear" type="button">消去</button></section>
 <div class="history" id="history"><div class="empty">まだ動画がありません</div></div>
 </main>
-<script src="./flowvid-history.js?v=6"></script>
+<script src="./flowvid-history.js?v=105"></script>
 <script>
 const $=id=>document.getElementById(id);
 const DRAFT_KEY='flowvidGenerateDraft';
@@ -70,8 +70,6 @@ $('prompt').addEventListener('input',persistDraft);
 $('file').onchange=e=>upload(e.target.files);
 $('sample').onclick=()=>{$('prompt').value=sample();persistDraft();updateCreditUi()};
 $('guide').onclick=()=>{};
-$('create').onclick=start;
-$('rerun').onclick=start;
 $('download').addEventListener('click',handleDownload);
 $('copy').onclick=()=>navigator.clipboard?.writeText($('open').href);
 $('clear').onclick=()=>{localStorage.removeItem('flowvidHistory');renderHistoryList([])};
