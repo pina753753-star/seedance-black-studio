@@ -3,15 +3,14 @@
     let overlay=document.getElementById('fv-inline-video-overlay');
     if(overlay)return overlay;
     const style=document.createElement('style');
-    style.textContent='body.fv-video-open{overflow:hidden}.fv-inline-video-overlay{position:fixed;inset:0;z-index:99999;background:#000;display:none}.fv-inline-video-overlay.show{display:block}.fv-inline-video-overlay video{width:100vw;height:100dvh;object-fit:contain;background:#000;display:block}.fv-inline-close{position:fixed;left:calc(12px + env(safe-area-inset-left));top:calc(12px + env(safe-area-inset-top));z-index:100000;width:46px;height:46px;border:0;border-radius:999px;background:rgba(0,0,0,.58);color:#fff;font-size:32px;font-weight:900;line-height:1;display:grid;place-items:center}.fv-inline-save{position:fixed;right:calc(12px + env(safe-area-inset-right));top:calc(12px + env(safe-area-inset-top));z-index:100000;border:0;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-size:15px;font-weight:900;padding:12px 16px}';
+    style.textContent='body.fv-video-open{overflow:hidden}.fv-inline-video-overlay{position:fixed;inset:0;z-index:99999;background:#000;display:none}.fv-inline-video-overlay.show{display:block}.fv-inline-video-overlay video{width:100vw;height:100dvh;object-fit:contain;background:#000;display:block}.fv-inline-close{position:fixed;left:calc(12px + env(safe-area-inset-left));top:calc(56px + env(safe-area-inset-top));z-index:100000;width:46px;height:46px;border:0;border-radius:999px;background:rgba(0,0,0,.58);color:#fff;font-size:32px;font-weight:900;line-height:1;display:grid;place-items:center}';
     document.head.appendChild(style);
     overlay=document.createElement('div');
     overlay.id='fv-inline-video-overlay';
     overlay.className='fv-inline-video-overlay';
-    overlay.innerHTML='<button class="fv-inline-close" type="button" aria-label="閉じる">×</button><button class="fv-inline-save" type="button">保存</button><video controls playsinline></video>';
+    overlay.innerHTML='<button class="fv-inline-close" type="button" aria-label="閉じる">×</button><video controls playsinline></video>';
     document.body.appendChild(overlay);
     overlay.querySelector('.fv-inline-close').addEventListener('click',closeOverlay);
-    overlay.querySelector('.fv-inline-save').addEventListener('click',()=>saveCurrentVideo(overlay));
     return overlay;
   }
   function openOverlay(url){
