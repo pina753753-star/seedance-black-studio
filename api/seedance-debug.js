@@ -43,13 +43,18 @@ module.exports = async function handler(req, res) {
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
 
-    const urls = findUrls(data).map((item) => ({
-      path: item.path,
-      url: item.url,
-      isStatusUrl: /^https?:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(item.url),
-      looksLikeVideoFile: /\.(mp4|mov|webm)(\?|$)/i.test(item.url),
-      looksDownloadable: /(download|output|storage|cdn|signed|play|file|asset)/i.test(item.url)
-    }));
+    const urls = findUrls(data).map((item) => {
+      const isStatusUrl = /^https?:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(item.url);
+      const isContentUrl = /\/content\?/i.test(item.url);
+      return {
+        path: item.path,
+        url: item.url,
+        isStatusUrl,
+        isContentUrl,
+        looksLikeVideoFile: /\.(mp4|mov|webm)(\?|$)/i.test(item.url) || isContentUrl,
+        looksDownloadable: /(download|output|storage|cdn|signed|play|file|asset)/i.test(item.url) || isContentUrl
+      };
+    });
 
     return res.status(200).json({
       ok: response.ok,
