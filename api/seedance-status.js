@@ -70,6 +70,81 @@ function isCompletedStatus(status) {
   return ['completed', 'complete', 'succeeded', 'success', 'done'].includes(String(status || '').toLowerCase());
 }
 
+function isFailedStatus(status) {
+  return ['failed', 'error', 'cancelled', 'canceled'].includes(String(status || '').toLowerCase());
+}
+
+// Looks up the generation_tasks record for this OpenRouter job, atomically marks
+// it as failed (preventing concurrent calls from double-refunding), then refunds
+// each credit pool back to where the credits were originally deducted from.
+async function processRefundIfNeeded(db, jobId, jobStatus) {
+  if (!db || !jobId || !isFailedStatus(jobStatus)) return;
+
+  // Find the task — only eligible if still in a non-terminal state
+  const { data: task } = await db
+    .from('generation_tasks')
+    .select('id,user_id,credit_cost,status')
+    .eq('api_task_id', jobId)
+    .in('status', ['queued', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!task) return; // Not found, already terminal, or no matching task
+
+  // Atomic claim: update status to 'failed' only if still in non-terminal state.
+  // If a concurrent polling call already claimed it, 0 rows are returned → skip.
+  const { data: claimed } = await db
+    .from('generation_tasks')
+    .update({ status: 'failed', updated_at: new Date().toISOString() })
+    .eq('id', task.id)
+    .in('status', ['queued', 'processing'])
+    .select('id');
+
+  if (!claimed || claimed.length === 0) return; // Already handled by another request
+
+  // Reconstruct deduction breakdown from credit_transactions
+  const { data: deductions } = await db
+    .from('credit_transactions')
+    .select('credit_type,amount')
+    .eq('related_task_id', task.id)
+    .eq('reason', 'video_generation');
+
+  if (!deductions || deductions.length === 0) return; // Nothing to refund
+
+  let fromSub = 0, fromFree = 0, fromPurchased = 0;
+  for (const tx of deductions) {
+    const amount = Math.abs(Number(tx.amount || 0));
+    if (tx.credit_type === 'subscription') fromSub += amount;
+    else if (tx.credit_type === 'free') fromFree += amount;
+    else if (tx.credit_type === 'purchased') fromPurchased += amount;
+  }
+
+  if (fromSub + fromFree + fromPurchased === 0) return;
+
+  // Read current balance and add back to each pool
+  const { data: bal } = await db
+    .from('credit_balances')
+    .select('free_credits,subscription_credits,purchased_credits')
+    .eq('user_id', task.user_id)
+    .maybeSingle();
+
+  if (!bal) return;
+
+  const updateFields = { updated_at: new Date().toISOString() };
+  if (fromSub > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + fromSub;
+  if (fromFree > 0) updateFields.free_credits = Number(bal.free_credits || 0) + fromFree;
+  if (fromPurchased > 0) updateFields.purchased_credits = Number(bal.purchased_credits || 0) + fromPurchased;
+  await db.from('credit_balances').update(updateFields).eq('user_id', task.user_id);
+
+  // Record per-pool refund transactions
+  const txRows = [];
+  if (fromSub > 0) txRows.push({ user_id: task.user_id, amount: fromSub, credit_type: 'subscription', reason: 'generation_refund', related_task_id: task.id });
+  if (fromFree > 0) txRows.push({ user_id: task.user_id, amount: fromFree, credit_type: 'free', reason: 'generation_refund', related_task_id: task.id });
+  if (fromPurchased > 0) txRows.push({ user_id: task.user_id, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: task.id });
+  if (txRows.length) await db.from('credit_transactions').insert(txRows);
+}
+
 function extFromContentType(contentType) {
   const type = String(contentType || '').toLowerCase();
   if (type.includes('webm')) return 'webm';
@@ -241,6 +316,15 @@ module.exports = async function handler(req, res) {
     }
 
     const done = Boolean(videoUrl);
+
+    // Refund credits on terminal failure:
+    // - response.ok + isFailedStatus: OpenRouter confirmed the job failed
+    // - response.status === 404: job not found; client treats ≥400 as failed
+    //   and stops polling, so this is the only chance to refund
+    const terminalFailure = (response.ok && isFailedStatus(jobStatus)) || response.status === 404;
+    if (terminalFailure && !done) {
+      await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed').catch(() => {});
+    }
 
     return res.status(response.ok ? 200 : response.status).json({
       ok: response.ok,
