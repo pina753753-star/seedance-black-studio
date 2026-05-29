@@ -9,7 +9,7 @@ window.FLOWVID_AUTH = {
 (function flowvidGeneratePageEnhancements(){
   const GENERATION_CREDIT_COST=80;
   const ACTIVE_TASK_WINDOW_MS=1000*60*60*2;
-  function isGeneratePage(){return /\/generate\.html$/.test(location.pathname)}
+  function isGeneratePage(){return /\/generate(-prod)?\.html$/.test(location.pathname)}
   function modeLabel(){return document.querySelector('.modeTabs button.active')?.textContent?.trim() || 'リファレンス'}
   function injectStyle(){
     if(document.getElementById('flowvidGenerateEnhancementStyle')) return;
