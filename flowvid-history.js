@@ -154,7 +154,7 @@
     style();loadHistory();
     const clear=$('clear');if(clear){clear.textContent='再読込';clear.onclick=()=>loadHistory()}
     document.addEventListener('click',e=>{const save=e.target?.closest?.('.fv-save');if(save){e.preventDefault();e.stopPropagation();saveVideo(save.dataset.url||'',save.dataset.jobId||'',save);return}const del=e.target?.closest?.('.fv-delete-one');if(del){e.preventDefault();deleteHistory(del.dataset.jobId||'');return}const fav=e.target?.closest?.('.fv-action.fav');if(fav){e.preventDefault();toggleFav(fav.dataset.jobId||'');return}const prompt=e.target?.closest?.('.fv-prompt');if(prompt){e.preventDefault();e.stopPropagation();togglePromptPop(prompt);return}const pop=e.target?.closest?.('.fv-prompt-pop');if(pop)return;closePromptPops();const frame=e.target?.closest?.('.fv-video-frame');if(frame?.dataset?.openUrl){window.open(frame.dataset.openUrl,'_blank','noopener')}});
-    setTimeout(()=>{const create=$('create');if(create)create.onclick=robustStart;updateCreate()},800);
+    setTimeout(()=>{const create=$('create');if(create)create.onclick=window.flowvidCreateHandler||robustStart;updateCreate()},800);
     ['duration','resolution','audio','model','aspect'].forEach(id=>$(id)?.addEventListener('change',()=>setTimeout(updateCreate,0)));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();

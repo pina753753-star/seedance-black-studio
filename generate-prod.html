@@ -81,6 +81,7 @@ $('assets').addEventListener('click',e=>{const btn=e.target.closest('.remove');i
 $('file').onchange=e=>upload(e.target.files);
 $('sample').onclick=()=>{$('prompt').value=sample();persistDraft();updateCreditUi()};
 $('guide').onclick=()=>{};
+$('create').onclick=start;window.flowvidCreateHandler=start;
 $('download').addEventListener('click',handleDownload);
 $('copy').onclick=()=>navigator.clipboard?.writeText($('open').href);
 $('clear').onclick=()=>{localStorage.removeItem('flowvidHistory');renderHistoryList([])};
