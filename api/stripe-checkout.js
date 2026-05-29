@@ -13,7 +13,7 @@ const SUBSCRIPTION_PLANS = {
 };
 
 const CREDIT_PACKS = {
-  credits_100: { name: '100 credits', amount: 500, credits: 100 },
+  credits_100: { name: '100 credits', amount: 100, credits: 100 },
   credits_300: { name: '300 credits', amount: 1300, credits: 300 },
   credits_500: { name: '500 credits', amount: 2000, credits: 500 },
   credits_1000: { name: '1,000 credits', amount: 3600, credits: 1000 },
