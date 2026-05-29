@@ -93,7 +93,7 @@ module.exports = async function handler(req, res) {
 
     if (kind === 'subscription') {
       const plan = SUBSCRIPTION_PLANS[id];
-      if (!plan || id === 'team') return res.status(400).json({ ok: false, error: 'このプランは現在オンライン決済対象外です' });
+      if (!plan) return res.status(400).json({ ok: false, error: 'プランが見つかりません' });
       const metadata = {
         user_id: user.id,
         user_email: user.email || '',
