@@ -1,4 +1,21 @@
 (function(){
+  function ensureGenerateHistory(){
+    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
+    if(document.getElementById('history'))return;
+    const main=document.querySelector('main.wrap');
+    if(!main)return;
+    const section=document.createElement('section');
+    section.className='section';
+    section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button>';
+    const historyDiv=document.createElement('div');
+    historyDiv.className='history';
+    historyDiv.id='history';
+    historyDiv.innerHTML='<div class="empty">履歴を読み込み中...</div>';
+    main.appendChild(section);
+    main.appendChild(historyDiv);
+    if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory();
+    section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory()};
+  }
   function ensureOverlay(){
     let overlay=document.getElementById('fv-inline-video-overlay');
     if(overlay)return overlay;
@@ -76,4 +93,5 @@
     e.stopImmediatePropagation();
     openOverlay(url);
   },true);
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureGenerateHistory);else ensureGenerateHistory();
 })();
