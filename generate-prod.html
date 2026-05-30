@@ -23,8 +23,6 @@
 </section>
 <section class="now" id="now"><div class="row"><b>処理中</b><span class="spin"></span></div><div class="bar"><span></span></div><div class="job" id="job">jobId待機中</div></section>
 <section class="done" id="done"><div class="head"><b>完成動画</b><span class="pill">completed</span></div><video id="video" controls playsinline></video><div class="icons"><a class="icon" id="open" target="_blank" rel="noreferrer">↗</a><a class="icon" id="download" download>↓</a><button class="icon" id="copy" type="button">⛓</button><button class="icon" id="rerun" type="button">↻</button></div></section>
-<section class="section"><h2>過去動画</h2><button id="clear" type="button">消去</button></section>
-<div class="history" id="history"><div class="empty">まだ動画がありません</div></div>
 </main>
 <div class="drawer" id="drawer"><div class="shade" id="shade"></div><div class="menu"><div class="menuHead"><b>メニュー</b><button class="menuClose" id="menuClose">×</button></div><a href="./index.html">ホーム <span>›</span></a><a href="./generate-prod.html">生成 <span>›</span></a><a href="./profile.html">マイページ <span>›</span></a><a href="./pricing.html">料金 <span>›</span></a><a class="logout" href="./logout.html">ログアウト <span>›</span></a></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -60,13 +58,10 @@ function done(d){return d?.done===true}
 function failed(d){const s=String(d?.jobStatus||d?.status||d?.response?.status||d?.response?.data?.status||'').toLowerCase();return ['failed','error','cancelled','canceled'].includes(s)||Number(d?.status) >= 400}
 function normalizeHistoryItem(it){const url=it?.url||it?.video_url||it?.video_uri||it?.src||'';if(!/^https?:\/\//.test(url))return null;if(/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(url))return null;return{url,prompt:it.prompt||it.title||'生成動画',mode:it.mode||mode,jobId:it.jobId||it.job_id||'',createdAt:it.createdAt||it.created_at||new Date().toISOString()}}
 function save(item){const current=JSON.parse(localStorage.getItem('flowvidHistory')||'[]').map(normalizeHistoryItem).filter(Boolean);const next=normalizeHistoryItem(item);if(next&&!current.some(v=>v.url===next.url))current.unshift(next);localStorage.setItem('flowvidHistory',JSON.stringify(current.slice(0,20)))}
-function historyCard(it){return'<article class="old"><div class="oldTop">'+esc((it.prompt||'生成動画').slice(0,42))+'</div><video controls playsinline src="'+esc(it.url)+'"></video><div class="icons"><a class="icon" href="'+esc(it.url)+'" target="_blank">↗</a><a class="icon" href="'+esc(it.url)+'" download>↓</a></div></article>'}
-function renderHistoryList(list){$('history').innerHTML=list.length?list.map(historyCard).join(''):'<div class="empty">まだ動画がありません</div>'}
-async function renderHistory(){const local=JSON.parse(localStorage.getItem('flowvidHistory')||'[]').map(normalizeHistoryItem).filter(Boolean);try{const res=await fetch('/api/generated-videos?limit=50&t='+Date.now(),{cache:'no-store'});const data=await res.json();const remote=(data?.rows||[]).map(normalizeHistoryItem).filter(Boolean);const byUrl=new Map();for(const item of [...remote,...local]){if(!byUrl.has(item.url))byUrl.set(item.url,item)}const merged=Array.from(byUrl.values()).slice(0,20);localStorage.setItem('flowvidHistory',JSON.stringify(merged));renderHistoryList(merged)}catch(_){renderHistoryList(local)}}
 function stop(){if(timer){clearInterval(timer);timer=null}}
 async function check(){if(!jobId&&!pollingUrl)return;const params=new URLSearchParams();if(pollingUrl)params.set('pollingUrl',pollingUrl);else params.set('id',jobId);const res=await fetch('/api/seedance-status?'+params.toString());const data=await res.json();const u=findVideo(data);if(u){stop();$('create').disabled=false;showVideo(u,lastPrompt);return}if(failed(data)){stop();$('create').disabled=false;$('now').classList.remove('show');return}if(done(data)||Date.now()-started>10*60*1000){stop();$('create').disabled=false;$('now').classList.remove('show');return}}
 function poll(){stop();started=Date.now();check();timer=setInterval(check,12000)}
-function showVideo(u,p){$('video').src=u;$('open').href=u;$('download').href=u;$('done').classList.add('show');$('now').classList.remove('show');save({url:u,prompt:p,mode,jobId,createdAt:new Date().toISOString()});renderHistory();setTimeout(()=>$('done').scrollIntoView({behavior:'smooth'}),200)}
+function showVideo(u,p){$('video').src=u;$('open').href=u;$('download').href=u;$('done').classList.add('show');$('now').classList.remove('show');save({url:u,prompt:p,mode,jobId,createdAt:new Date().toISOString()});setTimeout(()=>$('done').scrollIntoView({behavior:'smooth'}),200)}
 async function getToken(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return '';if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data}=await window.__flowvidUserClient.auth.getSession();return data?.session?.access_token||''}catch(_){return ''}}
 async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return null;if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return null;const{data}=await window.__flowvidUserClient.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',user.id).maybeSingle();return Number(data?.free_credits||0)+Number(data?.subscription_credits||0)+Number(data?.purchased_credits||0)}catch(_){return null}}
 function showCreditShortage(needed,balance){const el=$('creditStatus');if(!el)return;el.innerHTML='<div style="color:#fca5a5;font-weight:700;margin-bottom:10px;">クレジットが足りません。必要'+needed+'cr / 残高'+balance+'cr</div><a href="./pricing.html" style="display:inline-block;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:12px;padding:10px 18px;font-weight:800;text-decoration:none;">料金・クレジットへ →</a>';el.style.display='block';setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50)}
@@ -84,11 +79,10 @@ $('guide').onclick=()=>{};
 $('create').onclick=start;window.flowvidCreateHandler=start;
 $('download').addEventListener('click',handleDownload);
 $('copy').onclick=()=>navigator.clipboard?.writeText($('open').href);
-$('clear').onclick=()=>{localStorage.removeItem('flowvidHistory');renderHistoryList([])};
 restoreDraft();
 const q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
 setMode(['reference_to_video','image_to_video','text_to_video'].includes(q)?q:'reference_to_video');
-renderAssets();updateCreditUi();renderHistory();
+renderAssets();updateCreditUi();
 (function(){const d=document.getElementById('drawer');document.getElementById('menuBtn').onclick=()=>d.classList.add('open');document.getElementById('shade').onclick=()=>d.classList.remove('open');document.getElementById('menuClose').onclick=()=>d.classList.remove('open');}());
 </script>
 </body>
