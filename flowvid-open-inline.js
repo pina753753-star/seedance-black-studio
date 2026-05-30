@@ -13,8 +13,9 @@
     historyDiv.innerHTML='<div class="empty">履歴を読み込み中...</div>';
     main.appendChild(section);
     main.appendChild(historyDiv);
-    if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory();
-    section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory()};
+    const getMode=()=>document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
+    if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode());
+    section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode())};
   }
   function ensureOverlay(){
     let overlay=document.getElementById('fv-inline-video-overlay');
