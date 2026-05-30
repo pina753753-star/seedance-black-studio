@@ -1,4 +1,33 @@
 (function(){
+  function ensureGenerateHistory(){
+    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
+    if(document.getElementById('history'))return;
+    const main=document.querySelector('main.wrap');
+    if(!main)return;
+    const section=document.createElement('section');
+    section.className='section';
+    section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button>';
+    const history=document.createElement('div');
+    history.className='history';
+    history.id='history';
+    history.innerHTML='<div class="empty">履歴を読み込み中...</div>';
+    main.appendChild(section);
+    main.appendChild(history);
+    const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const valid=u=>/^https?:\/\//i.test(u||'')&&!/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(u||'');
+    async function load(){
+      try{
+        history.innerHTML='<div class="empty">履歴を読み込み中...</div>';
+        const res=await fetch('/api/generated-videos?limit=50&t='+Date.now(),{cache:'no-store'});
+        const data=await res.json();
+        const rows=(data?.rows||[]).map(r=>({url:r.video_url||r.video_uri||r.src||r.url||'',prompt:r.prompt||r.title||'生成動画',jobId:r.job_id||r.jobId||r.id||''})).filter(r=>valid(r.url));
+        if(!rows.length){history.innerHTML='<div class="empty">まだ動画がありません</div>';return}
+        history.innerHTML=rows.map(r=>'<article class="old"><div class="oldTop">'+esc(String(r.prompt).slice(0,42))+'</div><video controls playsinline preload="metadata" src="'+esc(r.url)+'#t=0.2"></video><div class="icons"><a class="icon" href="'+esc(r.url)+'" target="_blank" rel="noreferrer">↗</a><a class="icon" href="'+esc(r.url)+'" download>↓</a></div></article>').join('');
+      }catch(_){history.innerHTML='<div class="empty">履歴を読み込めませんでした</div>'}
+    }
+    section.querySelector('#clear').onclick=load;
+    load();
+  }
   function ensureOverlay(){
     let overlay=document.getElementById('fv-inline-video-overlay');
     if(overlay)return overlay;
@@ -76,4 +105,5 @@
     e.stopImmediatePropagation();
     openOverlay(url);
   },true);
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureGenerateHistory);else ensureGenerateHistory();
 })();
