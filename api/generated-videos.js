@@ -22,6 +22,15 @@ function isKnownBrokenRow(row) {
   return BROKEN_JOB_IDS.has(String(row?.job_id || row?.operation_name || row?.id || ''));
 }
 
+function resolveMode(row) {
+  const raw = String(row?.mode || row?.generation_mode || row?.settings?.mode || '').trim();
+  if (!raw) return '';
+  if (raw === 'image_to_video' || raw === '画像から動画' || raw === '画像から動画へ') return 'image_to_video';
+  if (raw === 'text_to_video' || raw === 'テキストから動画') return 'text_to_video';
+  if (raw === 'reference_to_video' || raw === 'リファレンス') return 'reference_to_video';
+  return raw;
+}
+
 function normalizeGeneratedRow(row) {
   if (isKnownBrokenRow(row)) return null;
   const url = validVideoUrl(row.video_uri || row.video_url || row.url || '');
@@ -32,6 +41,7 @@ function normalizeGeneratedRow(row) {
     status: row.status || 'completed',
     title: String(row.prompt || '').includes('香水') ? 'Perfume sample' : '生成サンプル',
     prompt: row.prompt || '',
+    mode: resolveMode(row),
     video_uri: url,
     video_url: url,
     src: url,
@@ -51,6 +61,7 @@ function normalizeHistoryRow(row) {
     status: row.status || 'completed',
     title: '生成動画',
     prompt: row.prompt || '',
+    mode: resolveMode(row),
     video_uri: url,
     video_url: url,
     src: url,
