@@ -94,5 +94,6 @@
     e.stopImmediatePropagation();
     openOverlay(url);
   },true);
+  window.fvOpenOverlay=openOverlay;
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureGenerateHistory);else ensureGenerateHistory();
 })();
