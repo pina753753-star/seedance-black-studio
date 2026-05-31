@@ -160,7 +160,7 @@
     },12000);
   }
   function ensurePromptModal(){let m=document.getElementById('fv-prompt-modal');if(m)return m;m=document.createElement('div');m.id='fv-prompt-modal';m.innerHTML='<div id="fv-prompt-modal-inner"><p id="fv-prompt-modal-label">プロンプト</p><div id="fv-prompt-modal-text"></div><div id="fv-prompt-modal-btns"><button type="button" id="fv-prompt-modal-copy">コピー</button><button type="button" id="fv-prompt-modal-close">閉じる</button></div></div>';document.body.appendChild(m);m.addEventListener('click',e=>{if(e.target===m)closePromptModal()});document.getElementById('fv-prompt-modal-close').addEventListener('click',closePromptModal);document.getElementById('fv-prompt-modal-copy').addEventListener('click',()=>{const text=document.getElementById('fv-prompt-modal-text').textContent||'';navigator.clipboard?.writeText(text).then(()=>{const btn=document.getElementById('fv-prompt-modal-copy');const t=btn.textContent;btn.textContent='コピー済';setTimeout(()=>{btn.textContent=t},1500)})});return m}
-  function openPromptModal(text){if(!text)return;ensurePromptModal();document.getElementById('fv-prompt-modal-text').textContent=text||'';document.getElementById('fv-prompt-modal').classList.add('show')}
+  function openPromptModal(text){if(!text)return;ensurePromptModal();const display=text.replace(/\n{2,}/g,'\n').trim();document.getElementById('fv-prompt-modal-text').textContent=display;document.getElementById('fv-prompt-modal').classList.add('show')}
   function closePromptModal(){document.getElementById('fv-prompt-modal')?.classList.remove('show')}
   function install(){
     style();loadHistory();
