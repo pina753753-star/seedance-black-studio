@@ -21,7 +21,7 @@
     let overlay=document.getElementById('fv-inline-video-overlay');
     if(overlay)return overlay;
     const style=document.createElement('style');
-    style.textContent='body.fv-video-open{overflow:hidden}.fv-inline-video-overlay{position:fixed;inset:0;z-index:99999;background:#000;display:none}.fv-inline-video-overlay.show{display:block}.fv-inline-video-overlay video{width:100vw;height:100dvh;object-fit:contain;background:#000;display:block}.fv-inline-close{position:fixed;left:calc(12px + env(safe-area-inset-left));top:calc(56px + env(safe-area-inset-top));z-index:100000;width:46px;height:46px;border:0;border-radius:999px;background:rgba(0,0,0,.58);color:#fff;font-size:32px;font-weight:900;line-height:1;display:grid;place-items:center}';
+    style.textContent='body.fv-video-open{overflow:hidden}.fv-inline-video-overlay{position:fixed;inset:0;z-index:99999;background:#000;display:none}.fv-inline-video-overlay.show{display:block}.fv-inline-video-overlay video{width:100vw;height:100dvh;object-fit:contain;background:#000;display:block}.fv-inline-close{position:fixed;left:calc(12px + env(safe-area-inset-left));top:calc(56px + env(safe-area-inset-top));z-index:100000;width:44px;height:44px;border:0;border-radius:999px;background:rgba(90,90,90,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:rgba(255,255,255,.92);font-size:22px;font-weight:500;line-height:1;display:grid;place-items:center;opacity:0;transition:opacity .22s;pointer-events:none}';
     document.head.appendChild(style);
     overlay=document.createElement('div');
     overlay.id='fv-inline-video-overlay';
@@ -29,7 +29,20 @@
     overlay.innerHTML='<button class="fv-inline-close" type="button" aria-label="閉じる">×</button><video controls playsinline></video>';
     document.body.appendChild(overlay);
     overlay.querySelector('.fv-inline-close').addEventListener('click',closeOverlay);
+    overlay.addEventListener('click',function(e){
+      if(e.target.closest('.fv-inline-close'))return;
+      showCloseBtn(overlay);
+    });
     return overlay;
+  }
+  let _hideTimer=null;
+  function showCloseBtn(overlay){
+    const btn=overlay.querySelector('.fv-inline-close');
+    if(!btn)return;
+    btn.style.opacity='1';
+    btn.style.pointerEvents='auto';
+    clearTimeout(_hideTimer);
+    _hideTimer=setTimeout(()=>{btn.style.opacity='0';btn.style.pointerEvents='none'},3000);
   }
   function openOverlay(url){
     if(!url)return;
@@ -40,10 +53,12 @@
     document.body.classList.add('fv-video-open');
     overlay.classList.add('show');
     video.play().catch(()=>{});
+    showCloseBtn(overlay);
   }
   function closeOverlay(){
     const overlay=document.getElementById('fv-inline-video-overlay');
     if(!overlay)return;
+    clearTimeout(_hideTimer);
     const video=overlay.querySelector('video');
     video.pause();
     video.removeAttribute('src');
