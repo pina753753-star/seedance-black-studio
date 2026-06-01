@@ -52,7 +52,19 @@ function imageObjects(urls) {
 }
 
 function extractJobId(data) {
-  return data?.id || data?.jobId || data?.data?.id || data?.response?.id || data?.request_id || null;
+  const direct = data?.id || data?.jobId || data?.data?.id || data?.response?.id || data?.request_id;
+  if (direct) return direct;
+  // Fall back to extracting the video ID from polling_url path
+  // (OpenRouter video jobs may return only polling_url without a top-level id)
+  const pollingUrl = data?.polling_url || data?.pollingUrl;
+  if (pollingUrl && typeof pollingUrl === 'string') {
+    try {
+      const parts = new URL(pollingUrl).pathname.split('/').filter(Boolean);
+      const pathId = parts[parts.length - 1];
+      if (pathId && !/^(content|download|output|video|file|public|status)$/i.test(pathId)) return pathId;
+    } catch (_) {}
+  }
+  return null;
 }
 
 function bearerToken(req) {
