@@ -113,8 +113,8 @@
     if(openLink&&(openLink.textContent||'').trim()==='開く')return openLink.href;
     const oldOpen=target.closest&&target.closest('a.icon');
     if(oldOpen&&oldOpen.href&&(oldOpen.textContent||'').includes('↗'))return oldOpen.href;
-    const frame=target.closest&&target.closest('.fv-video-frame');
-    if(frame?.dataset?.openUrl)return frame.dataset.openUrl;
+    const expand=target.closest&&target.closest('.fv-expand-btn');
+    if(expand?.dataset?.url)return expand.dataset.url;
     return '';
   }
   document.addEventListener('click',function(e){
