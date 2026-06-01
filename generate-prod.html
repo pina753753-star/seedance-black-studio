@@ -28,7 +28,7 @@
 <div class="drawer" id="drawer"><div class="shade" id="shade"></div><div class="menu"><div class="menuHead"><b>メニュー</b><button class="menuClose" id="menuClose">×</button></div><a href="./index.html">ホーム <span>›</span></a><a href="./generate-prod.html">生成 <span>›</span></a><a href="./profile.html">マイページ <span>›</span></a><a href="./pricing.html">料金 <span>›</span></a><a class="logout" href="./logout.html">ログアウト <span>›</span></a></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="./auth-config.js?v=3844d5ea2"></script>
-<script src="./flowvid-history.js?v=108"></script>
+<script src="./flowvid-history.js?v=109"></script>
 <script src="./flowvid-open-inline.js?v=1"></script>
 <script>
 const $=id=>document.getElementById(id);
@@ -89,12 +89,14 @@ const _pendingPollers={};
 function _ptShortDate(v){const d=v?new Date(v):null;if(!d||Number.isNaN(d.getTime()))return'';const m=Math.floor((Date.now()-d.getTime())/60000);if(m<1)return'今';if(m<60)return m+'分前';const h=Math.floor(m/60);if(h<24)return h+'時間前';return Math.floor(h/24)+'日前'}
 const _modeLabel={reference_to_video:'リファレンス',image_to_video:'画像から動画',text_to_video:'テキストから動画'};
 function _ptCard(task,isFailed){
+  const CHIP='border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:2px 7px;background:rgba(255,255,255,.04);font-size:11px;font-weight:700;color:#9ca3af';
+  const CHIP_MODE='border:1px solid rgba(139,92,246,.4);border-radius:999px;padding:2px 7px;background:rgba(139,92,246,.18);font-size:11px;font-weight:700;color:#c4b5fd';
   const chips=[
-    task.mode?'<span class="fv-chip fv-chip-mode">'+esc(_modeLabel[task.mode]||task.mode)+'</span>':'',
-    task.aspect_ratio?'<span class="fv-chip">'+esc(task.aspect_ratio)+'</span>':'',
-    task.duration_seconds?'<span class="fv-chip">'+task.duration_seconds+'秒</span>':'',
-    task.resolution?'<span class="fv-chip">'+esc(task.resolution)+'</span>':'',
-    _ptShortDate(task.created_at)?'<span class="fv-chip">'+_ptShortDate(task.created_at)+'</span>':''
+    task.mode?'<span style="'+CHIP_MODE+'">'+esc(_modeLabel[task.mode]||task.mode)+'</span>':'',
+    task.aspect_ratio?'<span style="'+CHIP+'">'+esc(task.aspect_ratio)+'</span>':'',
+    task.duration_seconds?'<span style="'+CHIP+'">'+task.duration_seconds+'秒</span>':'',
+    task.resolution?'<span style="'+CHIP+'">'+esc(task.resolution)+'</span>':'',
+    _ptShortDate(task.created_at)?'<span style="'+CHIP+'">'+_ptShortDate(task.created_at)+'</span>':''
   ].filter(Boolean).join('');
   const arCss=String(task.aspect_ratio||'9:16').replace(':','/');
   const frameBg=isFailed?'background:rgba(251,113,133,.06)':'background:#050506';
@@ -105,7 +107,7 @@ function _ptCard(task,isFailed){
   const promptSlice=esc((task.prompt||'').slice(0,200));
   const promptSection=task.prompt
     ?'<div style="min-width:0;margin-top:10px">'
-      +'<div class="fv-prompt" data-full-prompt="'+promptEsc+'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:#c8cad6;font-weight:700;line-height:1.4;font-size:14px;cursor:pointer;-webkit-user-select:none;user-select:none">'+promptSlice+'</div>'
+      +'<div data-pt-prompt data-full-prompt="'+promptEsc+'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:#c8cad6;font-weight:700;line-height:1.4;font-size:14px;cursor:pointer;-webkit-user-select:none;user-select:none">'+promptSlice+'</div>'
       +'<div style="display:flex;gap:7px;margin-top:8px">'
         +'<button type="button" class="fv-copy" data-prompt="'+promptEsc+'" style="height:36px;border:0;border-radius:10px;background:#1e2230;color:#b8bcc8;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:700;padding:0 12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>コピー</button>'
       +'</div>'
@@ -145,6 +147,7 @@ async function loadPendingTasks(){
   }catch(_){}
 }
 setTimeout(loadPendingTasks,1200);
+document.addEventListener('click',function(e){const pt=e.target&&e.target.closest&&e.target.closest('[data-pt-prompt]');if(pt){e.preventDefault();e.stopPropagation();const text=pt.dataset.fullPrompt||pt.textContent||'';if(text&&typeof window.flowvidLoadHistory==='function'&&window._fvOpenPromptModal){window._fvOpenPromptModal(text)}else if(text){alert(text)}return}});
 // ---- end pending tasks ----
 (function(){const d=document.getElementById('drawer');document.getElementById('menuBtn').onclick=()=>d.classList.add('open');document.getElementById('shade').onclick=()=>d.classList.remove('open');document.getElementById('menuClose').onclick=()=>d.classList.remove('open');}());
 </script>

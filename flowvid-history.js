@@ -169,5 +169,6 @@
     setTimeout(()=>{const create=$('create');if(create)create.onclick=window.flowvidCreateHandler||robustStart;updateCreate()},800);
     ['duration','resolution','audio','model','aspect'].forEach(id=>$(id)?.addEventListener('change',()=>setTimeout(updateCreate,0)));
   }
+  window._fvOpenPromptModal=openPromptModal;
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
 })();
