@@ -73,6 +73,10 @@ module.exports = async function handler(req, res) {
     const row = toRow(body);
     if (!row.job_id) return res.status(400).json({ ok: false, error: 'jobId is required' });
 
+    // Merge settings with any existing row to avoid clobbering server-written credit metadata
+    const { data: existingRow } = await db.from(TABLE).select('settings').eq('job_id', row.job_id).maybeSingle();
+    row.settings = { ...(existingRow?.settings || {}), ...row.settings };
+
     const { data, error } = await db
       .from(TABLE)
       .upsert(row, { onConflict: 'job_id' })

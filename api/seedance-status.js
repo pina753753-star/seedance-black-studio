@@ -5,6 +5,160 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
 const HISTORY_TABLE = 'flowvid_video_history';
+const CREDIT_RATE = 110;
+
+// ---- cost-based credit settlement ----
+
+function extractCostUsd(data) {
+  if (!data || typeof data !== 'object') return null;
+  for (const key of ['cost', 'cost_usd', 'total_cost']) {
+    const v = Number(data[key]);
+    if (Number.isFinite(v) && v > 0) return v;
+  }
+  if (data.usage && typeof data.usage === 'object') {
+    for (const key of ['cost', 'total_cost', 'cost_usd']) {
+      const v = Number(data.usage[key]);
+      if (Number.isFinite(v) && v > 0) return v;
+    }
+  }
+  for (const key of ['response', 'data']) {
+    if (data[key] && typeof data[key] === 'object') {
+      const found = extractCostUsd(data[key]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// Refund delta back to subscription_credits (highest-priority pool).
+async function creditDeltaRefund(db, userId, taskId, amount) {
+  if (amount <= 0) return;
+  try {
+    const { data: bal } = await db.from('credit_balances')
+      .select('subscription_credits').eq('user_id', userId).maybeSingle();
+    if (!bal) return;
+    await db.from('credit_balances').update({
+      subscription_credits: Number(bal.subscription_credits || 0) + amount,
+      updated_at: new Date().toISOString()
+    }).eq('user_id', userId);
+    await db.from('credit_transactions').insert({
+      user_id: userId, amount, credit_type: 'subscription',
+      reason: 'cost_based_refund', related_task_id: taskId
+    });
+  } catch (_) {}
+}
+
+// Charge additional delta. Returns shortfall (0 if fully charged).
+async function creditDeltaCharge(db, userId, taskId, amount) {
+  if (amount <= 0) return 0;
+  try {
+    const { data: bal } = await db.from('credit_balances')
+      .select('free_credits,subscription_credits,purchased_credits')
+      .eq('user_id', userId).maybeSingle();
+    if (!bal) return amount;
+
+    const sub = Number(bal.subscription_credits || 0);
+    const free = Number(bal.free_credits || 0);
+    const purch = Number(bal.purchased_credits || 0);
+    const available = sub + free + purch;
+    const charge = Math.min(amount, available);
+    const shortfall = amount - charge;
+
+    if (charge > 0) {
+      let rem = charge;
+      const fromSub = Math.min(rem, sub); rem -= fromSub;
+      const fromFree = Math.min(rem, free); rem -= fromFree;
+      const fromPurch = Math.min(rem, purch);
+      await db.from('credit_balances').update({
+        subscription_credits: sub - fromSub,
+        free_credits: free - fromFree,
+        purchased_credits: purch - fromPurch,
+        updated_at: new Date().toISOString()
+      }).eq('user_id', userId);
+      const txRows = [];
+      if (fromSub > 0) txRows.push({ user_id: userId, amount: -fromSub, credit_type: 'subscription', reason: 'cost_based_adjustment', related_task_id: taskId });
+      if (fromFree > 0) txRows.push({ user_id: userId, amount: -fromFree, credit_type: 'free', reason: 'cost_based_adjustment', related_task_id: taskId });
+      if (fromPurch > 0) txRows.push({ user_id: userId, amount: -fromPurch, credit_type: 'purchased', reason: 'cost_based_adjustment', related_task_id: taskId });
+      if (txRows.length) await db.from('credit_transactions').insert(txRows);
+    }
+    if (shortfall > 0) {
+      // Log shortfall; do NOT go negative
+      await db.from('credit_transactions').insert({
+        user_id: userId, amount: -shortfall, credit_type: 'purchased',
+        reason: 'cost_based_shortfall', related_task_id: taskId
+      }).catch(() => {});
+    }
+    return shortfall;
+  } catch (_) {
+    return amount;
+  }
+}
+
+// Atomically claims the completed task, settles the credit delta, and
+// writes credit metadata to flowvid_video_history.settings.
+async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
+  if (!db || !resolvedJobId) return null;
+  try {
+    const { data: task } = await db
+      .from('generation_tasks')
+      .select('id,user_id,credit_cost,status')
+      .eq('api_task_id', resolvedJobId)
+      .in('status', ['queued', 'processing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!task) return null;
+
+    // Atomic claim — prevents double-settlement on concurrent polls
+    const { data: claimed } = await db
+      .from('generation_tasks')
+      .update({ status: 'completed', updated_at: new Date().toISOString() })
+      .eq('id', task.id)
+      .in('status', ['queued', 'processing'])
+      .select('id');
+    if (!claimed || claimed.length === 0) return null;
+
+    const estimatedCredits = Number(task.credit_cost || 0);
+    const finalCredits = (costUsd != null && Number.isFinite(Number(costUsd)) && Number(costUsd) > 0)
+      ? Math.ceil(Number(costUsd) * CREDIT_RATE)
+      : estimatedCredits;
+    const delta = finalCredits - estimatedCredits;
+    let shortfall = 0;
+
+    if (delta < 0) {
+      await creditDeltaRefund(db, task.user_id, task.id, Math.abs(delta));
+    } else if (delta > 0) {
+      shortfall = await creditDeltaCharge(db, task.user_id, task.id, delta);
+    }
+
+    const creditMeta = {
+      estimated_credits: estimatedCredits,
+      final_credits: finalCredits,
+      cost_usd: costUsd ?? null,
+      credit_rate: CREDIT_RATE,
+      pricing_mode: 'cost_based',
+      shortfall: shortfall || 0,
+      settled_at: new Date().toISOString()
+    };
+
+    // Merge into flowvid_video_history.settings (read-then-write to avoid clobbering)
+    if (videoUrl) {
+      const { data: existing } = await db.from(HISTORY_TABLE)
+        .select('settings').eq('job_id', resolvedJobId).maybeSingle();
+      const merged = { ...(existing?.settings || {}), ...creditMeta };
+      await db.from(HISTORY_TABLE).upsert(
+        { job_id: resolvedJobId, settings: merged, updated_at: new Date().toISOString() },
+        { onConflict: 'job_id' }
+      );
+    }
+
+    return { estimatedCredits, finalCredits, costUsd, delta, shortfall };
+  } catch (_) {
+    return null;
+  }
+}
+
+// ---- end cost-based settlement ----
 
 function dbClient() {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
@@ -317,6 +471,13 @@ module.exports = async function handler(req, res) {
 
     const done = Boolean(videoUrl);
 
+    // Settle final credits on successful completion (once, via atomic task claim)
+    const costUsd = extractCostUsd(data);
+    let finalCreditsResult = null;
+    if (done) {
+      finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+    }
+
     // Refund credits on terminal failure:
     // - response.ok + isFailedStatus: OpenRouter confirmed the job failed
     // - response.status === 404: job not found; client treats ≥400 as failed
@@ -337,6 +498,9 @@ module.exports = async function handler(req, res) {
       jobStatus,
       done,
       videoUrl,
+      costUsd: costUsd ?? null,
+      finalCredits: finalCreditsResult?.finalCredits ?? null,
+      estimatedCredits: finalCreditsResult?.estimatedCredits ?? null,
       storage: storage ? { ...storage, rawVideoUrl, usedFallbackContentUrl: Boolean(fallbackContentUrl) } : null,
       response: data,
       checkedAt: new Date().toISOString()
