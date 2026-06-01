@@ -101,7 +101,17 @@ function _ptCard(task,isFailed){
   const frameInner=isFailed
     ?'<div style="display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center"><span style="font-size:24px">⚠</span><span style="color:#fca5a5;font-weight:700;font-size:13px">生成に失敗しました</span></div>'
     :'<div style="display:flex;flex-direction:column;align-items:center;gap:10px"><div class="spin"></div><span style="color:#8ed8ff;font-weight:700;font-size:13px">生成中...</span></div>';
-  return '<article class="old" data-ptask-id="'+esc(task.id)+'" style="padding:12px;border-radius:22px;background:#1b1e25;border:1px solid rgba(255,255,255,.08)"><div class="fv-prompt-wrap" style="min-width:0;margin-bottom:10px"><div style="color:#c8cad6;font-weight:700;line-height:1.4;font-size:14px">'+esc((task.prompt||'生成動画').slice(0,72))+'</div><div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'+chips+'</div></div><div data-ptask-frame style="width:100%;'+frameBg+';border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;aspect-ratio:'+arCss+';max-height:260px">'+frameInner+'</div></article>';
+  const promptEsc=esc(task.prompt||'');
+  const promptSlice=esc((task.prompt||'').slice(0,200));
+  const promptSection=task.prompt
+    ?'<div style="min-width:0;margin-top:10px">'
+      +'<div class="fv-prompt" data-full-prompt="'+promptEsc+'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:#c8cad6;font-weight:700;line-height:1.4;font-size:14px;cursor:pointer;-webkit-user-select:none;user-select:none">'+promptSlice+'</div>'
+      +'<div style="display:flex;gap:7px;margin-top:8px">'
+        +'<button type="button" class="fv-copy" data-prompt="'+promptEsc+'" style="height:36px;border:0;border-radius:10px;background:#1e2230;color:#b8bcc8;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:700;padding:0 12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>コピー</button>'
+      +'</div>'
+    +'</div>'
+    :'';
+  return '<article class="old" data-ptask-id="'+esc(task.id)+'" style="padding:12px;border-radius:22px;background:#1b1e25;border:1px solid rgba(255,255,255,.08)"><div data-ptask-frame style="width:100%;'+frameBg+';border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;aspect-ratio:'+arCss+';max-height:260px">'+frameInner+'</div><div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px">'+chips+'</div>'+promptSection+'</article>';
 }
 function _ptRemove(taskId){const c=document.querySelector('[data-ptask-id="'+taskId+'"]');if(c)c.remove();const l=$('pendingList');if(l&&!l.querySelector('[data-ptask-id]'))$('pendingSection').style.display='none'}
 function _ptFail(taskId){const c=document.querySelector('[data-ptask-id="'+taskId+'"]');if(!c)return;const f=c.querySelector('[data-ptask-frame]');if(f){f.style.background='rgba(251,113,133,.06)';f.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center"><span style="font-size:24px">⚠</span><span style="color:#fca5a5;font-weight:700;font-size:13px">生成に失敗しました</span></div>'}}
