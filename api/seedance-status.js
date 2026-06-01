@@ -101,7 +101,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
   try {
     const { data: task } = await db
       .from('generation_tasks')
-      .select('id,user_id,credit_cost,status')
+      .select('id,user_id,credit_cost,status,prompt,mode')
       .eq('api_task_id', resolvedJobId)
       .in('status', ['queued', 'processing'])
       .order('created_at', { ascending: false })
@@ -131,6 +131,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       shortfall = await creditDeltaCharge(db, task.user_id, task.id, delta);
     }
 
+    const taskPrompt = String(task.prompt || '').trim();
     const creditMeta = {
       estimated_credits: estimatedCredits,
       final_credits: finalCredits,
@@ -140,16 +141,19 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       shortfall: shortfall || 0,
       settled_at: new Date().toISOString()
     };
+    if (taskPrompt) creditMeta.prompt = taskPrompt;
 
     // Merge into flowvid_video_history.settings (read-then-write to avoid clobbering)
     if (videoUrl) {
       const { data: existing } = await db.from(HISTORY_TABLE)
-        .select('settings').eq('job_id', resolvedJobId).maybeSingle();
+        .select('settings,prompt').eq('job_id', resolvedJobId).maybeSingle();
       const merged = { ...(existing?.settings || {}), ...creditMeta };
-      await db.from(HISTORY_TABLE).upsert(
-        { job_id: resolvedJobId, settings: merged, updated_at: new Date().toISOString() },
-        { onConflict: 'job_id' }
-      );
+      const row = { job_id: resolvedJobId, settings: merged, updated_at: new Date().toISOString() };
+      // Always persist the prompt column so reference-mode history keeps the input prompt
+      if (taskPrompt) row.prompt = taskPrompt;
+      else if (existing?.prompt) row.prompt = existing.prompt;
+      if (task.mode) row.mode = task.mode;
+      await db.from(HISTORY_TABLE).upsert(row, { onConflict: 'job_id' });
     }
 
     return { estimatedCredits, finalCredits, costUsd, delta, shortfall };

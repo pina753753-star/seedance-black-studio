@@ -74,8 +74,16 @@ module.exports = async function handler(req, res) {
     if (!row.job_id) return res.status(400).json({ ok: false, error: 'jobId is required' });
 
     // Merge settings with any existing row to avoid clobbering server-written credit metadata
-    const { data: existingRow } = await db.from(TABLE).select('settings').eq('job_id', row.job_id).maybeSingle();
+    const { data: existingRow } = await db.from(TABLE).select('settings,prompt').eq('job_id', row.job_id).maybeSingle();
     row.settings = { ...(existingRow?.settings || {}), ...row.settings };
+    // Always keep the prompt available: mirror into settings.prompt, and never clobber a saved prompt with an empty one
+    if (row.prompt) {
+      row.settings.prompt = row.prompt;
+    } else if (existingRow?.prompt) {
+      row.prompt = existingRow.prompt;
+    } else if (row.settings.prompt) {
+      row.prompt = row.settings.prompt;
+    }
 
     const { data, error } = await db
       .from(TABLE)
