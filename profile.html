@@ -15,7 +15,7 @@
 <section class='hero'><p>MY PAGE</p><h1>アカウントとクレジットを管理</h1></section>
 <section class='dashboard'>
 <section class='panel'><div class='user'><div class='avatar' id='avatar'>G</div><div class='name'><h2 id='displayName'>ゲスト</h2><p id='displayEmail'>ログインしていません</p><span class='badge' id='statusBadge'>Guest mode</span></div></div><div class='creditMain'><div><strong id='creditAmount'>0</strong><span>利用可能クレジット</span></div><div class='planPill' id='planName'>フリープラン</div></div><div class='trial' id='trialText'><b>無料お試し：</b>原価確認後までOFFです。</div></section>
-<section class='stats'><div class='stat'><b id='freeCredit'>0</b><span>無料クレジット</span></div><div class='stat'><b id='subCredit'>0</b><span>サブスククレジット</span></div><div class='stat'><b id='paidCredit'>0</b><span>購入クレジット</span></div></section>
+<section class='stats' style='grid-template-columns:repeat(2,1fr)'><div class='stat'><b id='totalCredit'>0</b><span>利用可能クレジット</span></div><div class='stat'><b id='paidCredit'>0</b><span>購入クレジット</span></div></section>
 <section class='actions' id='actionArea'><a class='primary' href='./login.html'>ログイン</a><a href='./login.html'>アカウント作成</a></section>
 <section class='list'><a class='rowLink' href='./pricing.html'>サブスクリプションプラン <span>›</span></a><a class='rowLink' href='./pricing.html#credit'>クレジット購入 <span>›</span></a><a class='rowLink' href='./help.html'>ヘルプセンター <span>›</span></a></section>
 </section>
@@ -34,7 +34,7 @@
 <script>
 const d=document.getElementById('drawer');document.getElementById('menuBtn').onclick=()=>d.classList.add('open');document.getElementById('shade').onclick=()=>d.classList.remove('open');document.getElementById('close').onclick=()=>d.classList.remove('open');
 const cfg=window.FLOWVID_AUTH||{};const authReady=Boolean(cfg.supabaseUrl&&cfg.supabaseAnonKey);const client=authReady?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;const $=id=>document.getElementById(id);const jpPlan={free:'フリープラン',standard:'スタンダード',premium:'プレミアム',scale:'スケール',team:'チーム'};
-function setCredits(balance){const free=Number(balance?.free_credits||0),sub=Number(balance?.subscription_credits||0),paid=Number(balance?.purchased_credits||0),total=free+sub+paid;$('freeCredit').textContent=free;$('subCredit').textContent=sub;$('paidCredit').textContent=paid;$('creditAmount').textContent=total;}
+function setCredits(balance){const free=Number(balance?.free_credits||0),sub=Number(balance?.subscription_credits||0),paid=Number(balance?.purchased_credits||0),total=free+sub+paid;$('totalCredit').textContent=total;$('paidCredit').textContent=paid;$('creditAmount').textContent=total;}
 function showGuest(){$('avatar').textContent='G';$('displayName').textContent='ゲスト';$('displayEmail').textContent='ログインしていません';$('statusBadge').textContent='Guest mode';setCredits({});$('planName').textContent='フリープラン';$('trialText').innerHTML='<b>無料お試し：</b>原価確認後までOFFです。';$('actionArea').innerHTML='<a class=primary href=./login.html>ログイン</a><a href=./login.html>アカウント作成</a>';$('loginNav').style.display='inline-block';}
 async function loadDb(user){const email=user.email||'';$('avatar').textContent=(email[0]||'U').toUpperCase();$('displayName').textContent='ログイン中';$('displayEmail').textContent=email;$('statusBadge').textContent='Signed in';$('actionArea').innerHTML='<a class=primary href=./generate.html>生成画面へ</a><button id=logoutBtn>ログアウト</button>';$('loginNav').style.display='none';$('logoutBtn').onclick=async()=>{await client.auth.signOut();showGuest();};
   const [profileRes,balanceRes]=await Promise.all([
