@@ -187,9 +187,17 @@ async function createTask(db, { userId, mode, model, prompt, resolution, duratio
       credit_cost: creditCost,
       status: 'queued'
     }).select('id').single();
-    if (error || !data?.id) return null;
+    if (error) {
+      console.error('[seedance-start] createTask error:', error.message, error.code, error.details);
+      return null;
+    }
+    if (!data?.id) {
+      console.error('[seedance-start] createTask: no id returned');
+      return null;
+    }
     return data.id;
-  } catch (_) {
+  } catch (err) {
+    console.error('[seedance-start] createTask exception:', err?.message);
     return null;
   }
 }
@@ -257,13 +265,19 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Create task record to get a UUID for transaction references
+    // Create task record — MUST succeed before touching credits or calling OpenRouter
     const taskId = await createTask(db, { userId: user.id, mode, model, prompt, resolution, duration, aspectRatio, creditCost });
+    if (!taskId) {
+      console.error('[seedance-start] Aborting: task creation failed, will not deduct credits or call OpenRouter');
+      return res.status(500).json({ ok: false, error: 'タスクの作成に失敗しました。もう一度お試しください。' });
+    }
+    console.log('[seedance-start] task created:', taskId, 'user:', user.id, 'mode:', mode);
 
     // Deduct credits with optimistic concurrency control (prevents double-deduction)
     const deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
     if (!deduction.ok) {
-      if (taskId) await updateTask(db, taskId, { status: 'cancelled', error_message: deduction.error });
+      console.error('[seedance-start] credit deduction failed:', deduction.error, 'taskId:', taskId);
+      await updateTask(db, taskId, { status: 'cancelled', error_message: deduction.error });
       return res.status(deduction.insufficient ? 402 : 409).json({
         ok: false,
         error: deduction.error,
@@ -298,6 +312,7 @@ module.exports = async function handler(req, res) {
     }
 
     // Call OpenRouter
+    console.log('[seedance-start] calling OpenRouter, taskId:', taskId, 'model:', payload.model, 'mode:', mode, 'has_refs:', Boolean(payload.input_references?.length), 'has_frames:', Boolean(payload.frame_images?.length));
     let response, text, data;
     try {
       response = await fetch(OPENROUTER_VIDEO_ENDPOINT, {
@@ -313,8 +328,9 @@ module.exports = async function handler(req, res) {
       text = await response.text();
       try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
     } catch (fetchError) {
+      console.error('[seedance-start] OpenRouter network error:', fetchError?.message, 'taskId:', taskId);
       await refundCredits(db, user.id, deduction, taskId);
-      if (taskId) await updateTask(db, taskId, { status: 'failed', error_message: fetchError?.message || 'Network error' });
+      await updateTask(db, taskId, { status: 'failed', error_message: fetchError?.message || 'Network error' });
       return res.status(502).json({
         ok: false,
         error: fetchError?.message || 'OpenRouter request failed',
@@ -324,8 +340,9 @@ module.exports = async function handler(req, res) {
     }
 
     if (!response.ok) {
+      console.error('[seedance-start] OpenRouter returned', response.status, 'taskId:', taskId, 'body:', String(text||'').slice(0,300));
       await refundCredits(db, user.id, deduction, taskId);
-      if (taskId) await updateTask(db, taskId, { status: 'failed', error_message: `OpenRouter ${response.status}` });
+      await updateTask(db, taskId, { status: 'failed', error_message: `OpenRouter ${response.status}` });
       return res.status(response.status).json({
         ok: false,
         error: 'OpenRouter generation failed',
@@ -336,7 +353,8 @@ module.exports = async function handler(req, res) {
     }
 
     const jobId = extractJobId(data);
-    if (taskId) await updateTask(db, taskId, { status: 'processing', api_task_id: jobId || null });
+    console.log('[seedance-start] OpenRouter accepted, jobId:', jobId, 'pollingUrl:', data?.polling_url||data?.pollingUrl, 'taskId:', taskId);
+    await updateTask(db, taskId, { status: 'processing', api_task_id: jobId || null });
 
     return res.status(202).json({
       ok: true,
