@@ -1,24 +1,8 @@
-import { z } from "zod";
 import type { CreateTaskInput } from "./types";
 import { normalizeProviderStatus } from "./store";
 
 const provider = process.env.SEEDANCE_PROVIDER ?? "mock";
-
-const baseUrl = process.env.SEEDANCE_API_BASE_URL ?? "https://ark.cn-beijing.volces.com/api/v3";
-const createPath = process.env.SEEDANCE_CREATE_PATH ?? "/contents/generations/tasks";
-const queryPath = process.env.SEEDANCE_QUERY_PATH ?? "/contents/generations/tasks/{task_id}";
-const model = process.env.SEEDANCE_MODEL ?? "seedance-2.0";
-
-const seedanceResponseSchema = z.object({
-  id: z.string().optional(),
-  task_id: z.string().optional(),
-  status: z.string().optional(),
-  state: z.string().optional(),
-  video_url: z.string().optional(),
-  output_video_url: z.string().optional(),
-  url: z.string().optional(),
-  data: z.any().optional()
-}).passthrough();
+const apiKey = process.env.SEEDANCE_API_KEY ?? process.env.OPENROUTER_API_KEY;
 
 export function buildSeedancePayload(input: CreateTaskInput) {
   const imageUrls = input.assets.filter((a) => a.type === "image" && a.url).map((a) => a.url);
@@ -26,15 +10,11 @@ export function buildSeedancePayload(input: CreateTaskInput) {
   const audioUrls = input.assets.filter((a) => a.type === "audio" && a.url).map((a) => a.url);
 
   return {
-    model,
+    model: "bytedance/seedance-2.0",
     prompt: input.prompt,
-    mode: input.mode,
     resolution: input.resolution,
     duration: input.duration,
-    aspect_ratio: input.aspectRatio,
-    with_audio: true,
-    real_person: input.realPerson,
-    return_last_frame: input.returnLastFrame,
+    aspect_ratio: input.aspectRatio === "auto" ? "16:9" : input.aspectRatio,
     references: {
       images: imageUrls,
       videos: videoUrls,
@@ -52,12 +32,9 @@ export async function createSeedanceTask(input: CreateTaskInput) {
     };
   }
 
-  const apiKey = process.env.SEEDANCE_API_KEY;
-  if (!apiKey) {
-    throw new Error("SEEDANCE_API_KEY is not set.");
-  }
+  if (!apiKey) throw new Error("SEEDANCE_API_KEY is not set.");
 
-  const response = await fetch(`${baseUrl}${createPath}`, {
+  const response = await fetch("https://openrouter.ai/api/v1/videos", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
@@ -68,16 +45,13 @@ export async function createSeedanceTask(input: CreateTaskInput) {
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(`Seedance API error ${response.status}: ${JSON.stringify(body)}`);
+    throw new Error(`OpenRouter API error ${response.status}: ${JSON.stringify(body)}`);
   }
 
-  const parsed = seedanceResponseSchema.parse(body);
-  const data = parsed.data ?? parsed;
-
   return {
-    providerTaskId: String(data.id ?? data.task_id ?? parsed.id ?? parsed.task_id),
-    status: normalizeProviderStatus(data.status ?? data.state ?? parsed.status ?? parsed.state),
-    outputVideoUrl: data.video_url ?? data.output_video_url ?? data.url ?? parsed.video_url ?? parsed.output_video_url ?? parsed.url
+    providerTaskId: String(body.id ?? body.task_id ?? ""),
+    status: normalizeProviderStatus(body.status ?? body.state ?? "processing"),
+    outputVideoUrl: body.video_url ?? body.output_url ?? body.url ?? undefined
   };
 }
 
@@ -89,13 +63,9 @@ export async function getSeedanceTask(providerTaskId: string) {
     };
   }
 
-  const apiKey = process.env.SEEDANCE_API_KEY;
-  if (!apiKey) {
-    throw new Error("SEEDANCE_API_KEY is not set.");
-  }
+  if (!apiKey) throw new Error("SEEDANCE_API_KEY is not set.");
 
-  const path = queryPath.replace("{task_id}", encodeURIComponent(providerTaskId));
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetch(`https://openrouter.ai/api/v1/videos/${encodeURIComponent(providerTaskId)}`, {
     headers: {
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json"
@@ -104,14 +74,11 @@ export async function getSeedanceTask(providerTaskId: string) {
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(`Seedance API error ${response.status}: ${JSON.stringify(body)}`);
+    throw new Error(`OpenRouter API error ${response.status}: ${JSON.stringify(body)}`);
   }
 
-  const parsed = seedanceResponseSchema.parse(body);
-  const data = parsed.data ?? parsed;
-
   return {
-    status: normalizeProviderStatus(data.status ?? data.state ?? parsed.status ?? parsed.state),
-    outputVideoUrl: data.video_url ?? data.output_video_url ?? data.url ?? parsed.video_url ?? parsed.output_video_url ?? parsed.url
+    status: normalizeProviderStatus(body.status ?? body.state ?? "processing"),
+    outputVideoUrl: body.video_url ?? body.output_url ?? body.url ?? undefined
   };
 }
