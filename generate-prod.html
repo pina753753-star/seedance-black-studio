@@ -100,8 +100,11 @@ function _ptCard(task,isFailed){
     _ptShortDate(task.created_at)?'<span style="'+CHIP+'">'+_ptShortDate(task.created_at)+'</span>':''
   ].filter(Boolean).join('');
   const arCss=String(task.aspect_ratio||'9:16').replace(':','/');
-  const frameBg=isFailed?'background:rgba(251,113,133,.06)':'background:#050506';
-  const frameInner=isFailed
+  const isStale=task._stale===true;
+  const frameBg=(isFailed||isStale)?'background:rgba(251,113,133,.06)':'background:#050506';
+  const frameInner=isStale
+    ?'<div style="display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:0 14px"><span style="font-size:24px">⚠</span><span style="color:#fcd34d;font-weight:700;font-size:13px;line-height:1.5">生成が停止しました。<br>再読み込みしてください</span></div>'
+    :isFailed
     ?'<div style="display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center"><span style="font-size:24px">⚠</span><span style="color:#fca5a5;font-weight:700;font-size:13px">生成に失敗しました</span></div>'
     :'<div style="display:flex;flex-direction:column;align-items:center;gap:10px"><div class="spin"></div><span style="color:#8ed8ff;font-weight:700;font-size:13px">生成中...</span></div>';
   const promptEsc=esc(task.prompt||'');
@@ -139,12 +142,19 @@ async function loadPendingTasks(){
     const r=await fetch('/api/pending-tasks',{headers:{'Authorization':'Bearer '+token}});
     if(!r.ok)return;
     const d=await r.json();
-    const tasks=d.tasks||[];
+    const STALE_MS=30*60*1000;   // 30分以上 pending/processing のままは停止扱い
+    const MAX_AGE_MS=24*60*60*1000; // 24時間以上前の古いタスクは表示しない
+    const now=Date.now();
+    const tasks=(d.tasks||[]).map(t=>{
+      const ageMs=t.created_at?now-new Date(t.created_at).getTime():0;
+      return {...t,_ageMs:ageMs,_stale:ageMs>STALE_MS};
+    }).filter(t=>t._ageMs<=MAX_AGE_MS);
     const list=$('pendingList');if(!list)return;
     if(!tasks.length){$('pendingSection').style.display='none';return}
     $('pendingSection').style.display='block';
     list.innerHTML=tasks.map(t=>_ptCard(t,false)).join('');
-    tasks.forEach(t=>_ptStartPoll(t));
+    // 新しい(=stale でない)タスクだけポーリングを再開する
+    tasks.forEach(t=>{if(!t._stale)_ptStartPoll(t)});
   }catch(_){}
 }
 setTimeout(loadPendingTasks,1200);

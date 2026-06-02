@@ -40,11 +40,25 @@ module.exports = async function handler(req, res) {
   if (!db) return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
 
   try {
+    const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24時間以上前のタスクは古いとみなす
+    const cutoffIso = new Date(Date.now() - MAX_AGE_MS).toISOString();
+
+    // 24時間以上 pending / processing のままのタスクは expired にして以後返さない
+    try {
+      await db
+        .from('generation_tasks')
+        .update({ status: 'expired', updated_at: new Date().toISOString() })
+        .eq('user_id', user.id)
+        .in('status', ['queued', 'processing'])
+        .lt('created_at', cutoffIso);
+    } catch (_) { /* expiry cleanup is best-effort */ }
+
     const { data, error } = await db
       .from('generation_tasks')
       .select('id,mode,model,prompt,resolution,duration_seconds,aspect_ratio,status,api_task_id,created_at')
       .eq('user_id', user.id)
       .in('status', ['queued', 'processing'])
+      .gte('created_at', cutoffIso)
       .order('created_at', { ascending: false })
       .limit(10);
 
