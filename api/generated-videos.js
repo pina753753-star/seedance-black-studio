@@ -101,7 +101,30 @@ async function readFlowvidHistory(db, limit) {
     .limit(limit);
 
   if (error) return { rows: [], error: error.message };
-  return { rows: (data || []).map(normalizeHistoryRow).filter(Boolean), error: null };
+  const rows = (data || []);
+
+  // Find rows missing mode or prompt — backfill from generation_tasks via api_task_id
+  const needsBackfill = rows.filter(r => !r.mode || !r.prompt);
+  if (needsBackfill.length > 0) {
+    const jobIds = needsBackfill.map(r => r.job_id).filter(Boolean);
+    if (jobIds.length > 0) {
+      const { data: tasks } = await db
+        .from('generation_tasks')
+        .select('api_task_id,mode,prompt')
+        .in('api_task_id', jobIds);
+      if (tasks && tasks.length) {
+        const byJobId = new Map(tasks.map(t => [t.api_task_id, t]));
+        for (const row of rows) {
+          const task = byJobId.get(row.job_id);
+          if (!task) continue;
+          if (!row.mode && task.mode) row.mode = task.mode;
+          if (!row.prompt && task.prompt) row.prompt = task.prompt;
+        }
+      }
+    }
+  }
+
+  return { rows: rows.map(normalizeHistoryRow).filter(Boolean), error: null };
 }
 
 module.exports = async function handler(req, res) {
