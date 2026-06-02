@@ -340,22 +340,20 @@ module.exports = async function handler(req, res) {
     }
 
     if (!response.ok) {
-      console.error('[seedance-start] OpenRouter returned', response.status, 'taskId:', taskId, 'body:', String(text||'').slice(0,300));
+      const rawBody = String(text || '');
+      console.error('[seedance-start] OpenRouter error body:', response.status, rawBody.slice(0, 500));
       await refundCredits(db, user.id, deduction, taskId);
-      await updateTask(db, taskId, { status: 'failed', error_message: `OpenRouter ${response.status}` });
-      // Always return 502 — never forward OpenRouter's status code (e.g. 403, 429)
-      // to avoid misleading the client or Vercel request logs.
-      const orError = (typeof data === 'object' && data?.error) ? String(data.error) : String(text||'').slice(0,200);
-      const userMsg = response.status === 403
-        ? 'API キーが無効か、モデルへのアクセス権がありません（OpenRouter 403）'
+      await updateTask(db, taskId, { status: 'failed', error_message: `OpenRouter ${response.status}: ${rawBody.slice(0,200)}` });
+      const orMsg = response.status === 403
+        ? 'APIキーが無効か、モデルへのアクセス権がありません'
         : response.status === 429
-        ? 'リクエストが多すぎます。しばらくしてからお試しください（OpenRouter 429）'
-        : `生成に失敗しました（OpenRouter ${response.status}）`;
+        ? 'リクエストが多すぎます。しばらくしてからお試しください'
+        : `OpenRouterエラー`;
       return res.status(502).json({
         ok: false,
-        error: userMsg,
+        error: `${orMsg}（HTTP ${response.status}）`,
+        error_detail: rawBody.slice(0, 1000),
         openrouterStatus: response.status,
-        openrouterError: orError,
         creditRefunded: creditCost,
         checkedAt: new Date().toISOString()
       });
