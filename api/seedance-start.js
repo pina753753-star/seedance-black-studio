@@ -205,8 +205,11 @@ async function createTask(db, { userId, mode, model, prompt, resolution, duratio
 async function updateTask(db, taskId, fields) {
   if (!taskId) return;
   try {
-    await db.from('generation_tasks').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', taskId);
-  } catch (_) {}
+    const { error } = await db.from('generation_tasks').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', taskId);
+    if (error) console.error('[seedance-start] updateTask error:', error.message, 'taskId:', taskId, 'fields:', JSON.stringify(Object.keys(fields)));
+  } catch (err) {
+    console.error('[seedance-start] updateTask exception:', err?.message, 'taskId:', taskId);
+  }
 }
 
 module.exports = async function handler(req, res) {
@@ -360,8 +363,20 @@ module.exports = async function handler(req, res) {
     }
 
     const jobId = extractJobId(data);
-    console.log('[seedance-start] OpenRouter accepted, jobId:', jobId, 'pollingUrl:', data?.polling_url||data?.pollingUrl, 'taskId:', taskId);
+    const orPollingUrl = data?.polling_url || data?.pollingUrl || null;
+    console.log('[seedance-start] OR response keys:', Object.keys(data && typeof data === 'object' ? data : {}));
+    console.log('[seedance-start] OR response preview:', JSON.stringify(data).slice(0, 600));
+    console.log('[seedance-start] OpenRouter accepted, jobId:', jobId, 'pollingUrl:', orPollingUrl, 'taskId:', taskId);
     await updateTask(db, taskId, { status: 'processing', api_task_id: jobId || null });
+    // Try to persist polling_url for recovery after reload (fails silently if column absent)
+    if (orPollingUrl) {
+      try {
+        const { error: puErr } = await db.from('generation_tasks')
+          .update({ polling_url: orPollingUrl, updated_at: new Date().toISOString() })
+          .eq('id', taskId);
+        if (puErr) console.error('[seedance-start] polling_url store error:', puErr.message, '(column may not exist — safe to ignore)');
+      } catch (_) {}
+    }
 
     return res.status(202).json({
       ok: true,
