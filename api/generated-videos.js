@@ -24,11 +24,17 @@ function isKnownBrokenRow(row) {
 
 function resolveMode(row) {
   const raw = String(row?.mode || row?.generation_mode || row?.settings?.mode || '').trim();
-  if (!raw) return '';
   if (raw === 'image_to_video' || raw === '画像から動画' || raw === '画像から動画へ') return 'image_to_video';
   if (raw === 'text_to_video' || raw === 'テキストから動画') return 'text_to_video';
   if (raw === 'reference_to_video' || raw === 'リファレンス') return 'reference_to_video';
-  return raw;
+  if (raw) return raw;
+  // Infer from settings when mode column is empty
+  const s = row?.settings || {};
+  if (Array.isArray(s.reference_urls) && s.reference_urls.length) return 'reference_to_video';
+  if (s.reference_url || s.referenceUrl) return 'reference_to_video';
+  if (s.first_frame_url || s.input_image_url || s.image_url || s.imageUrl || s.inputImageUrl) return 'image_to_video';
+  if (row?.first_frame_url || row?.input_image_url) return 'image_to_video';
+  return '';
 }
 
 function normalizeGeneratedRow(row) {
