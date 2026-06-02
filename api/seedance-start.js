@@ -280,7 +280,7 @@ module.exports = async function handler(req, res) {
       duration,
       resolution,
       aspect_ratio: aspectRatio,
-      generate_audio: Boolean(body.generate_audio || false)
+      generate_audio: true
     };
 
     const frameImages = Array.isArray(body.frame_images) ? body.frame_images : [];
