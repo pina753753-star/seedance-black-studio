@@ -343,11 +343,20 @@ module.exports = async function handler(req, res) {
       console.error('[seedance-start] OpenRouter returned', response.status, 'taskId:', taskId, 'body:', String(text||'').slice(0,300));
       await refundCredits(db, user.id, deduction, taskId);
       await updateTask(db, taskId, { status: 'failed', error_message: `OpenRouter ${response.status}` });
-      return res.status(response.status).json({
+      // Always return 502 — never forward OpenRouter's status code (e.g. 403, 429)
+      // to avoid misleading the client or Vercel request logs.
+      const orError = (typeof data === 'object' && data?.error) ? String(data.error) : String(text||'').slice(0,200);
+      const userMsg = response.status === 403
+        ? 'API キーが無効か、モデルへのアクセス権がありません（OpenRouter 403）'
+        : response.status === 429
+        ? 'リクエストが多すぎます。しばらくしてからお試しください（OpenRouter 429）'
+        : `生成に失敗しました（OpenRouter ${response.status}）`;
+      return res.status(502).json({
         ok: false,
-        error: 'OpenRouter generation failed',
+        error: userMsg,
+        openrouterStatus: response.status,
+        openrouterError: orError,
         creditRefunded: creditCost,
-        response: data,
         checkedAt: new Date().toISOString()
       });
     }
