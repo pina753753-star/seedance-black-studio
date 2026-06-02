@@ -185,8 +185,7 @@ async function createTask(db, { userId, mode, model, prompt, resolution, duratio
       duration_seconds: Number(duration),
       aspect_ratio: aspectRatio,
       credit_cost: creditCost,
-      status: 'queued',
-      api_provider: 'openrouter'
+      status: 'queued'
     }).select('id').single();
     if (error || !data?.id) return null;
     return data.id;
