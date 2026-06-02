@@ -68,6 +68,7 @@ function normalizeHistoryRow(row) {
     title: '生成動画',
     prompt: row.prompt || '',
     mode: resolveMode(row),
+    reference_urls: Array.isArray(row.reference_urls) ? row.reference_urls : [],
     video_uri: url,
     video_url: url,
     src: url,
