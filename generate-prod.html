@@ -260,6 +260,12 @@ $('sbAnalyzeBtn').onclick=async()=>{
     if(!sbCuts.length)throw new Error('カットが検出されませんでした');
     $('sbStyle').textContent=data.result?.style||'';
     $('sbCuts').innerHTML=sbCuts.map(c=>`<div class="sbCutCard"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:13px">カット${esc(c.cut_number)}</b><span style="color:#888;font-size:11px">${esc(c.duration||5)}秒</span></div><div style="color:#bbb;font-size:12px;margin-bottom:4px">${esc(c.content||'')}</div><div style="color:#7dd3fc;font-size:11px;line-height:1.4">${esc(c.prompt||'')}</div>${c.camera?'<div style="color:#777;font-size:10px;margin-top:4px">📷 '+esc(c.camera)+'</div>':''}</div>`).join('');
+    // 絵コンテ画像をアップロードしてURLを保存
+        try{
+          const uploadRes=await fetch('/api/upload-reference-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataUrl:'data:image/jpeg;base64,'+base64,filename:'storyboard.jpg',contentType:'image/jpeg'})});
+          const uploadData=await uploadRes.json();
+          if(uploadData.ok)window._sbImageUrl=uploadData.publicUrl||uploadData.url||'';
+        }catch(_){}
     $('sbResults').style.display='block';
   }catch(e){
     alert('解析エラー: '+e.message+'\nstack: '+(e.stack||'').slice(0,200));
@@ -283,6 +289,7 @@ $('sbGenerateBtn').onclick=async()=>{
     const dur=Math.max(1,Math.min(15,Number(c.duration||5)));
     const credits=Math.max(50,dur*12);
     const body={model:'bytedance/seedance-2.0',prompt:c.prompt||'',duration:dur,resolution:'720p',aspect_ratio:'16:9',generate_audio:true,mode:'storyboard',estimated_credits:credits};
+        if(window._sbImageUrl){body.reference_url=window._sbImageUrl;body.reference_urls=[{type:'image_url',image_url:{url:window._sbImageUrl}}];}
     try{
       const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});
       const data=await res.json();
