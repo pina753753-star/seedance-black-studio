@@ -72,7 +72,9 @@ module.exports = async function handler(req, res) {
         }]
       })
     });
-    data = await response.json().catch(() => ({}));
+    const rawText = await response.text();
+    console.log('Anthropic raw response:', rawText.slice(0, 500));
+    try { data = JSON.parse(rawText); } catch(_) { data = { error: 'non-JSON response: ' + rawText.slice(0, 300) }; }
   } catch (err) {
     return res.status(502).json({ ok: false, error: `Anthropic API network error: ${err?.message || String(err)}` });
   }
