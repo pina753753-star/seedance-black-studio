@@ -31,9 +31,9 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'POST only' });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  const apiKey = process.env.OPENROUTER_API_KEY || '';
   if (!apiKey) {
-    return res.status(500).json({ ok: false, error: 'ANTHROPIC_API_KEY is not configured.' });
+    return res.status(500).json({ ok: false, error: 'OPENROUTER_API_KEY is not configured.' });
   }
 
   const body = jsonBody(req);
@@ -52,24 +52,22 @@ module.exports = async function handler(req, res) {
 
   let response, data;
   try {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
+    response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'Authorization': 'Bearer ' + apiKey,
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'anthropic/claude-sonnet-4-5',
         max_tokens: 2000,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: [
+            { type: 'image_url', image_url: { url: 'data:' + mediaType + ';base64,' + base64 } },
             { type: 'text', text: '上記の絵コンテ画像を解析してください。' }
-          ]
-        }]
+          ]}
+        ]
       })
     });
     const rawText = await response.text();
@@ -83,7 +81,7 @@ module.exports = async function handler(req, res) {
     return res.status(502).json({ ok: false, error: `Anthropic API error ${response.status}: ${JSON.stringify(data).slice(0,300)}` });
   }
 
-  const text = String(data?.content?.[0]?.text ?? '');
+  const text = String(data?.choices?.[0]?.message?.content ?? '');
 
   let parsed;
   try {
