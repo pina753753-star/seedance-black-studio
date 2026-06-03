@@ -36,7 +36,7 @@ function normalizeResolution(value) {
 
 function normalizeMode(value) {
   const m = String(value || '').trim();
-  return ['text_to_video', 'image_to_video', 'reference_to_video'].includes(m) ? m : 'reference_to_video';
+  return ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'].includes(m) ? m : 'reference_to_video';
 }
 
 function imageObject(url, frameType) {
