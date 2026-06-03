@@ -245,7 +245,7 @@ $('sbAnalyzeBtn').onclick=async()=>{
     $('sbCuts').innerHTML=sbCuts.map(c=>`<div class="sbCutCard"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:13px">カット${esc(c.cut_number)}</b><span style="color:#888;font-size:11px">${esc(c.duration||5)}秒</span></div><div style="color:#bbb;font-size:12px;margin-bottom:4px">${esc(c.content||'')}</div><div style="color:#7dd3fc;font-size:11px;line-height:1.4">${esc(c.prompt||'')}</div>${c.camera?'<div style="color:#777;font-size:10px;margin-top:4px">📷 '+esc(c.camera)+'</div>':''}</div>`).join('');
     $('sbResults').style.display='block';
   }catch(e){
-    alert('解析エラー: '+e.message);
+    alert('解析エラー: '+e.message+'\nstack: '+(e.stack||'').slice(0,200));
   }finally{
     $('sbAnalyzeBtn').disabled=false;
     $('sbAnalyzeBtn').textContent='解析する ✦';
