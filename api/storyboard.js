@@ -82,14 +82,22 @@ module.exports = async function handler(req, res) {
   }
 
   const text = String(data?.content?.[0]?.text ?? '');
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
 
   let parsed;
   try {
+    // まずコードブロック内のJSONを試す
+    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
     parsed = JSON.parse(jsonText);
   } catch (_) {
-    return res.status(502).json({ ok: false, error: 'Failed to parse JSON from Claude response.', raw: text.slice(0, 500) });
+    try {
+      // { } で囲まれた部分を抽出して試す
+      const objMatch = text.match(/\{[\s\S]*\}/);
+      if (!objMatch) throw new Error('no JSON object found');
+      parsed = JSON.parse(objMatch[0]);
+    } catch (_2) {
+      return res.status(502).json({ ok: false, error: 'Failed to parse JSON from Claude response.', raw: text.slice(0, 500) });
+    }
   }
 
   return res.status(200).json({ ok: true, result: parsed });
