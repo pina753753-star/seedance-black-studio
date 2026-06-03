@@ -25,6 +25,7 @@ export type CreateTaskInput = {
 
 export type GenerationTask = CreateTaskInput & {
   id: string;
+  userId?: string;
   providerTaskId?: string;
   status: TaskStatus;
   outputVideoUrl?: string;
