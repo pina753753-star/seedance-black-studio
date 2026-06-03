@@ -112,7 +112,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
     // Atomic claim — prevents double-settlement on concurrent polls
     const { data: claimed } = await db
       .from('generation_tasks')
-      .update({ status: 'completed', updated_at: new Date().toISOString() })
+      .update({ status: 'completed', output_url: videoUrl, updated_at: new Date().toISOString() })
       .eq('id', task.id)
       .in('status', ['queued', 'processing'])
       .select('id');
