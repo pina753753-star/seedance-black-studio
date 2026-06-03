@@ -44,6 +44,7 @@ export async function createSeedanceTask(input: CreateTaskInput) {
   });
 
   const body = await response.json().catch(() => ({}));
+  console.log("OpenRouter createSeedanceTask response:", JSON.stringify(body));
   if (!response.ok) {
     throw new Error(`OpenRouter API error ${response.status}: ${JSON.stringify(body)}`);
   }
@@ -73,6 +74,7 @@ export async function getSeedanceTask(providerTaskId: string) {
   });
 
   const body = await response.json().catch(() => ({}));
+  console.log("OpenRouter getSeedanceTask response:", JSON.stringify(body));
   if (!response.ok) {
     throw new Error(`OpenRouter API error ${response.status}: ${JSON.stringify(body)}`);
   }
