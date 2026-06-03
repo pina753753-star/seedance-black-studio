@@ -234,7 +234,8 @@ $('sbAnalyzeBtn').onclick=async()=>{
   try{
     const r=new FileReader();
     const dataUrl=await new Promise((ok,ng)=>{r.onload=()=>ok(r.result);r.onerror=ng;r.readAsDataURL(sbFile)});
-    const base64=String(dataUrl).replace(/^data:[^;]+;base64,/,'');
+    const comma = String(dataUrl).indexOf(',');
+    const base64 = comma >= 0 ? String(dataUrl).slice(comma + 1) : String(dataUrl);
     const res=await fetch('/api/storyboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base64,mediaType:sbFile.type||'image/jpeg'})});
     const data=await res.json();
     if(!res.ok||!data.ok)throw new Error(data.error||'解析に失敗しました');
