@@ -62,7 +62,7 @@ module.exports = async function handler(req, res) {
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: [
-            { type: 'image_url', image_url: { url: 'data:' + mediaType + ';base64,' + image } },
+            { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + image } },
             { type: 'text', text: '上記の絵コンテ画像を解析してください。' }
           ]}
         ]
