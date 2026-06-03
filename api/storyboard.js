@@ -80,7 +80,7 @@ module.exports = async function handler(req, res) {
   }
 
   if (!response.ok) {
-    return res.status(502).json({ ok: false, error: `Anthropic API error ${response.status}`, detail: data });
+    return res.status(502).json({ ok: false, error: `Anthropic API error ${response.status}: ${JSON.stringify(data).slice(0,300)}` });
   }
 
   const text = String(data?.content?.[0]?.text ?? '');
