@@ -60,13 +60,14 @@ module.exports = async function handler(req, res) {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-5',
+        model: 'claude-sonnet-4-5',
         max_tokens: 2000,
+        system: SYSTEM_PROMPT,
         messages: [{
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-            { type: 'text', text: SYSTEM_PROMPT }
+            { type: 'text', text: '上記の絵コンテ画像を解析してください。' }
           ]
         }]
       })
