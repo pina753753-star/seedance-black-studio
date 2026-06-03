@@ -282,7 +282,7 @@ $('sbGenerateBtn').onclick=async()=>{
     const c=sbCuts[i];
     const dur=Math.max(1,Math.min(15,Number(c.duration||5)));
     const credits=Math.max(50,dur*12);
-    const body={model:'bytedance/seedance-2.0',prompt:c.prompt||'',duration:dur,resolution:'720p',aspect_ratio:'16:9',generate_audio:true,mode:'text_to_video',estimated_credits:credits};
+    const body={model:'bytedance/seedance-2.0',prompt:c.prompt||'',duration:dur,resolution:'720p',aspect_ratio:'16:9',generate_audio:true,mode:'storyboard',estimated_credits:credits};
     try{
       const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});
       const data=await res.json();
