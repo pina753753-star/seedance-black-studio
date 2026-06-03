@@ -96,7 +96,7 @@ module.exports = async function handler(req, res) {
       if (!objMatch) throw new Error('no JSON object found');
       parsed = JSON.parse(objMatch[0]);
     } catch (_2) {
-      return res.status(502).json({ ok: false, error: 'Failed to parse JSON from Claude response.', raw: text.slice(0, 500) });
+      return res.status(200).json({ ok: false, error: text.slice(0, 1000) });
     }
   }
 
