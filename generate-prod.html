@@ -232,10 +232,23 @@ $('sbAnalyzeBtn').onclick=async()=>{
   $('sbAnalyzeBtn').disabled=true;
   $('sbAnalyzeBtn').textContent='解析中…';
   try{
-    const r=new FileReader();
-    const dataUrl=await new Promise((ok,ng)=>{r.onload=()=>ok(r.result);r.onerror=ng;r.readAsDataURL(sbFile)});
-    const comma = String(dataUrl).indexOf(',');
-    const base64 = comma >= 0 ? String(dataUrl).slice(comma + 1) : String(dataUrl);
+    const dataUrl=await new Promise((ok,ng)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=ng;r.readAsDataURL(sbFile)});
+    // 画像を最大1280pxにリサイズしてbase64を小さくする
+    const base64=await new Promise((ok,ng)=>{
+      const img=new Image();
+      img.onload=()=>{
+        const MAX=1280;
+        let w=img.width,h=img.height;
+        if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}}
+        const c=document.createElement('canvas');c.width=w;c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        const resized=c.toDataURL('image/jpeg',0.85);
+        const comma=resized.indexOf(',');
+        ok(comma>=0?resized.slice(comma+1):resized);
+      };
+      img.onerror=ng;
+      img.src=String(dataUrl);
+    });
     const res=await fetch('/api/storyboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base64,mediaType:sbFile.type||'image/jpeg'})});
     const rawText = await res.text();
     let data;
