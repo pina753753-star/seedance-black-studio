@@ -237,8 +237,9 @@ $('sbAnalyzeBtn').onclick=async()=>{
     const comma = String(dataUrl).indexOf(',');
     const base64 = comma >= 0 ? String(dataUrl).slice(comma + 1) : String(dataUrl);
     const res=await fetch('/api/storyboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base64,mediaType:sbFile.type||'image/jpeg'})});
-    const data=await res.json();
-    if(!res.ok||!data.ok)throw new Error(data.error||'解析に失敗しました');
+    let data;
+    try{ data=await res.json(); }catch(jsonErr){ throw new Error('APIレスポンスのJSON解析失敗: '+jsonErr.message); }
+    if(!res.ok||!data.ok)throw new Error(typeof data.error==='string'?data.error:JSON.stringify(data.error||data));
     sbCuts=data.result?.cuts||[];
     if(!sbCuts.length)throw new Error('カットが検出されませんでした');
     $('sbStyle').textContent=data.result?.style||'';
