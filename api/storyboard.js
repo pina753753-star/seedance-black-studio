@@ -48,8 +48,6 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ ok: false, error: `mediaType must be one of: ${allowed.join(', ')}` });
   }
 
-  const base64 = String(image).replace(/^data:[^;]+;base64,/, '');
-
   let response, data;
   try {
     response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -64,39 +62,36 @@ module.exports = async function handler(req, res) {
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: [
-            { type: 'image_url', image_url: { url: 'data:' + mediaType + ';base64,' + base64 } },
+            { type: 'image_url', image_url: { url: 'data:' + mediaType + ';base64,' + image } },
             { type: 'text', text: '上記の絵コンテ画像を解析してください。' }
           ]}
         ]
       })
     });
     const rawText = await response.text();
-    console.log('Anthropic raw response:', rawText.slice(0, 500));
-    try { data = JSON.parse(rawText); } catch(_) { data = { error: 'non-JSON response: ' + rawText.slice(0, 300) }; }
+    try { data = JSON.parse(rawText); } catch(_) { data = { error: rawText.slice(0, 300) }; }
   } catch (err) {
-    return res.status(502).json({ ok: false, error: `Anthropic API network error: ${err?.message || String(err)}` });
+    return res.status(502).json({ ok: false, error: `network error: ${err?.message || String(err)}` });
   }
 
   if (!response.ok) {
-    return res.status(502).json({ ok: false, error: `Anthropic API error ${response.status}: ${JSON.stringify(data).slice(0,300)}` });
+    return res.status(502).json({ ok: false, error: `OpenRouter error ${response.status}: ${JSON.stringify(data).slice(0,300)}` });
   }
 
   const text = String(data?.choices?.[0]?.message?.content ?? '');
 
   let parsed;
   try {
-    // まずコードブロック内のJSONを試す
     const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
     const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
     parsed = JSON.parse(jsonText);
   } catch (_) {
     try {
-      // { } で囲まれた部分を抽出して試す
       const objMatch = text.match(/\{[\s\S]*\}/);
-      if (!objMatch) throw new Error('no JSON object found');
+      if (!objMatch) throw new Error('no JSON found');
       parsed = JSON.parse(objMatch[0]);
     } catch (_2) {
-      return res.status(502).json({ ok: false, error: 'Failed to parse JSON from Claude response.', raw: text.slice(0, 500) });
+      return res.status(502).json({ ok: false, error: 'JSONパース失敗', raw: text.slice(0, 500) });
     }
   }
 
