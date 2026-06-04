@@ -235,7 +235,7 @@ function isFailedStatus(status) {
 // Looks up the generation_tasks record for this OpenRouter job, atomically marks
 // it as failed (preventing concurrent calls from double-refunding), then refunds
 // each credit pool back to where the credits were originally deducted from.
-async function processRefundIfNeeded(db, jobId, jobStatus) {
+async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
   if (!db || !jobId || !isFailedStatus(jobStatus)) return;
 
   // Find the task — only eligible if still in a non-terminal state
@@ -254,7 +254,7 @@ async function processRefundIfNeeded(db, jobId, jobStatus) {
   // If a concurrent polling call already claimed it, 0 rows are returned → skip.
   const { data: claimed } = await db
     .from('generation_tasks')
-    .update({ status: 'failed', updated_at: new Date().toISOString() })
+    .update({ status: 'failed', error_message: errorMessage || null, updated_at: new Date().toISOString() })
     .eq('id', task.id)
     .in('status', ['queued', 'processing'])
     .select('id');
@@ -488,7 +488,8 @@ module.exports = async function handler(req, res) {
     //   and stops polling, so this is the only chance to refund
     const terminalFailure = (response.ok && isFailedStatus(jobStatus)) || response.status === 404;
     if (terminalFailure && !done) {
-      await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed').catch(() => {});
+      const orErrorMsg = (data && typeof data === 'object') ? (data.error || data.message || JSON.stringify(data).slice(0, 200)) : String(data || '').slice(0, 200);
+      await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', orErrorMsg).catch(() => {});
     }
 
     return res.status(response.ok ? 200 : response.status).json({
