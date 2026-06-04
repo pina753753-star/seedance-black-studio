@@ -126,7 +126,7 @@ function setMode(m){
     $('pendingSection').style.display='none';
   }
   if(!isSb){
-    $('modeLabel').textContent=modeName(m);
+    const modeLabelEl=$('modeLabel');if(modeLabelEl)modeLabelEl.textContent=modeName(m);
     $('assets').style.display=m==='text_to_video'?'none':'grid';
     $('file').multiple=m==='reference_to_video';
     if(m==='text_to_video')urls=[];
