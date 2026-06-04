@@ -114,7 +114,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       .from('generation_tasks')
       .update({ status: 'completed', output_url: videoUrl, updated_at: new Date().toISOString() })
       .eq('id', task.id)
-      .in('status', ['queued', 'processing'])
+      .in('status', ['queued', 'processing', 'completed'])
       .select('id');
     if (!claimed || claimed.length === 0) return null;
 
