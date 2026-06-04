@@ -12,9 +12,9 @@ function dbClient() {
 function validVideoUrl(url) {
   const value = String(url || '').trim();
   if (!/^https?:\/\//i.test(value)) return '';
-  if (/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(value)) return '';
   if (/\.(mp4|mov|webm)(\?|$)/i.test(value)) return value;
   if (/\/storage\/v1\/object\/public\//i.test(value)) return value;
+  if (/openrouter\.ai\/api\/v1\/videos\//i.test(value)) return value;
   return '';
 }
 
