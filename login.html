@@ -23,7 +23,7 @@
   <main class="wrap">
     <header class="top"><a class="brand" href="./index.html"><img src="/logo.png" alt="FlowVid Studio" style="height:auto;width:120px;display:block"></a><a class="back" href="./index.html">トップへ</a></header>
     <section class="layout">
-      <div class="hero"><p>LOGIN</p><h1>生成するにはログインが必要です。</h1><div class="lead">クレジット管理、生成履歴、決済、API利用上限を守るため、動画生成はログイン後に使う設計にします。</div><div class="secure"><div>✓ ゲストは画面確認のみ</div><div>✓ 先着100名限定で100クレジット付与</div><div>✓ 本番APIはクレジット残高を確認してから実行</div></div></div>
+      <div class="hero"><p>LOGIN</p><h1>生成するにはログインが必要です。</h1></div>
       <div class="card">
         <div class="tabs"><button class="tab active" id="loginTab">ログイン</button><button class="tab" id="signupTab">新規登録</button></div>
         <form class="form" id="authForm">
@@ -35,11 +35,9 @@
           <button type="button" class="ghost" id="appleBtn" disabled>Appleで続ける（後で対応）</button>
           <button type="button" class="ghost" disabled>電話番号で続ける（無料生成解放時）</button>
           <div class="message" id="message"></div>
-          <div class="notice">先着100名限定で100クレジットを付与します。メールログインはSupabase Authで接続します。GoogleログインはSupabase側のGoogle provider有効化後に使えます。</div>
         </form>
       </div>
     </section>
-    <p class="note">勝手な課金を防ぐため、本番ではログイン・クレジット残高・生成確認を通してからAPIに送信します。</p>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-config.js?v=3844d5ea2"></script>
