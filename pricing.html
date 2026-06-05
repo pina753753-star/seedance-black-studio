@@ -13,7 +13,6 @@
 <body>
 <main class="wrap">
 <header class="top"><a class="brand" href="./index.html"><img src="/logo.png" alt="FlowVid Studio" style="height:auto;width:120px;display:block"></a><button class="menuBtn" id="menuBtn">☰</button></header>
-<section class="hero"><span class="pill">PRICING</span><h1>必要な分だけ、動画を作れる。</h1></section>
 <section class="tabs"><button id="subTab" class="tab active">サブスクリプション</button><button id="creditTab" class="tab">追加クレジット</button></section>
 <section id="subscriptionView"><section class="toggle"><button id="annualBtn" class="billing">年額請求</button><button id="monthlyBtn" class="billing active">月額請求</button></section><section class="plans" id="plans"></section></section>
 <section id="creditView" class="hidden"><div class="intro"><span class="member">✦ サブスク会員限定</span><h2>追加クレジット</h2><p>月間クレジットを使い切った時だけ追加購入できます。Freeユーザーはまずサブスク登録へ誘導します。</p></div><section class="packs" id="packs"></section></section>
@@ -32,11 +31,11 @@ const plans=[
 {cls:'team',name:'Team',monthly:'298,000',annual:'3,576,000',period:'/月',btn:'準備中',credits:'90,000',annualCredits:'1,080,000',desc:'チーム機能は後で対応',features:['複数アカウント','共有クレジット','共有アセット','チーム管理']}
 ];
 const packs=[
-{id:'credits_100',label:'100 credits',price:'¥500',desc:'少しだけ追加したい時に。'},
-{id:'credits_300',label:'300 credits',price:'¥1,300',desc:'追加の試作や再生成に。'},
-{id:'credits_500',label:'500 credits',price:'¥2,000',desc:'検証をまとめて進めたい時に。'},
-{id:'credits_1000',label:'1,000 credits',price:'¥3,600',desc:'月間枠を超えて作りたい時に。'},
-{id:'credits_3000',label:'3,000 credits',price:'¥9,800',desc:'案件用の追加生成に。'}
+{id:'credits_100',label:'100 credits',price:'¥500',desc:''},
+{id:'credits_300',label:'300 credits',price:'¥1,300',desc:''},
+{id:'credits_500',label:'500 credits',price:'¥2,000',desc:''},
+{id:'credits_1000',label:'1,000 credits',price:'¥3,600',desc:''},
+{id:'credits_3000',label:'3,000 credits',price:'¥9,800',desc:''}
 ];
 let billing='monthly';
 function creditLabel(p){if(p.cls==='free')return '初回クレジット';return billing==='annual'?'年間クレジット':'月間クレジット'}
