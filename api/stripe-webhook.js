@@ -102,6 +102,9 @@ async function handleCheckoutCompleted(db, session) {
     return { ok: true, skipped: 'unpaid' };
   }
   const meta = metaFromSession(session);
+  if (session.customer && meta.userId) {
+    try { await db.from('profiles').update({ stripe_customer_id: session.customer }).eq('id', meta.userId); } catch (_) {}
+  }
   if (!meta.userId || !(meta.credits > 0)) return { ok: true, skipped: 'no-metadata' };
 
   if (meta.purchaseType === 'subscription') {
