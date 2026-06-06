@@ -29,6 +29,7 @@ export type GenerationTask = CreateTaskInput & {
   providerTaskId?: string;
   status: TaskStatus;
   outputVideoUrl?: string;
+  watermarkedUrl?: string;
   error?: string;
   costCredits: number;
   createdAt: string;
