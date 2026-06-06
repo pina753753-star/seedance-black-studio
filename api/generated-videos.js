@@ -91,7 +91,31 @@ async function readGeneratedVideos(db, limit) {
   return { rows: (data || []).map(normalizeGeneratedRow).filter(Boolean), error: null };
 }
 
-async function readFlowvidHistory(db, limit) {
+async function readFlowvidHistory(db, limit, userId) {
+  if (userId) {
+    const { data, error } = await db
+      .from('generation_tasks')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .not('output_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) return { rows: [], error: error.message };
+    const rows = (data || []).map(task => ({
+      id: task.id,
+      job_id: task.api_task_id || task.id,
+      status: 'completed',
+      prompt: task.prompt || '',
+      mode: task.mode || '',
+      video_url: task.output_url || '',
+      reference_urls: [],
+      settings: task.settings || {},
+      created_at: task.created_at,
+      updated_at: task.updated_at
+    }));
+    return { rows: rows.map(normalizeHistoryRow).filter(Boolean), error: null };
+  }
   const { data, error } = await db
     .from('flowvid_video_history')
     .select('*')
