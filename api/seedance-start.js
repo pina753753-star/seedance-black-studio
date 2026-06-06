@@ -97,12 +97,27 @@ async function getUserFromToken(token) {
 async function checkAndDeduct(db, userId, creditCost, taskId) {
   const { data: bal, error: readErr } = await db
     .from('credit_balances')
-    .select('free_credits,subscription_credits,purchased_credits')
+    .select('free_credits,subscription_credits,purchased_credits,subscription_expires_at,purchased_expires_at')
     .eq('user_id', userId)
     .maybeSingle();
 
   if (readErr) return { ok: false, error: readErr.message };
   if (!bal) return { ok: false, error: 'クレジット残高が見つかりません' };
+
+  const now = new Date();
+  const expiredFields = {};
+  if (bal.subscription_expires_at && new Date(bal.subscription_expires_at) < now) {
+    expiredFields.subscription_credits = 0;
+    bal.subscription_credits = 0;
+  }
+  if (bal.purchased_expires_at && new Date(bal.purchased_expires_at) < now) {
+    expiredFields.purchased_credits = 0;
+    bal.purchased_credits = 0;
+  }
+  if (Object.keys(expiredFields).length > 0) {
+    expiredFields.updated_at = now.toISOString();
+    await db.from('credit_balances').update(expiredFields).eq('user_id', userId);
+  }
 
   const free = Number(bal.free_credits || 0);
   const sub = Number(bal.subscription_credits || 0);
