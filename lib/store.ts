@@ -81,6 +81,7 @@ function dbRowToTask(row: Record<string, unknown>): GenerationTask {
     status: normalizeProviderStatus(row.status),
     providerTaskId: row.api_task_id as string | undefined,
     outputVideoUrl: row.output_url as string | undefined,
+    watermarkedUrl: row.watermarked_url as string | undefined,
     error: row.error_message as string | undefined,
     assets: [],
     createdAt: row.created_at as string,
