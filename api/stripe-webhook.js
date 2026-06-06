@@ -43,6 +43,16 @@ async function alreadyProcessed(db, reason) {
 // Adds `credits` to the given pool (subscription_credits | purchased_credits)
 // and records a credit_transactions row. The reason carries the Stripe id so
 // repeated webhook deliveries do not double-grant.
+function calcExpiresAt(pool) {
+  const now = new Date();
+  if (pool === 'subscription_credits') {
+    return new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999).toISOString();
+  }
+  if (pool === 'purchased_credits') {
+    return new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000).toISOString();
+  }
+  return null;
+}
 async function grantCredits(db, { userId, credits, pool, creditType, reason, relatedId, plan }) {
   if (!userId || !(credits > 0)) return { ok: false, skipped: 'no-credits' };
 
@@ -60,11 +70,15 @@ async function grantCredits(db, { userId, credits, pool, creditType, reason, rel
   if (!bal) {
     const insertRow = { user_id: userId, free_credits: 0, subscription_credits: 0, purchased_credits: 0 };
     insertRow[pool] = credits;
+    const expiresAt = calcExpiresAt(pool);
+    if (expiresAt) insertRow[pool === 'subscription_credits' ? 'subscription_expires_at' : 'purchased_expires_at'] = expiresAt;
     const { error: insErr } = await db.from('credit_balances').insert(insertRow);
     if (insErr) return { ok: false, error: insErr.message };
   } else {
     const current = Number(bal[pool] || 0);
     const update = { [pool]: current + credits, updated_at: new Date().toISOString() };
+    const expiresAt = calcExpiresAt(pool);
+    if (expiresAt) update[pool === 'subscription_credits' ? 'subscription_expires_at' : 'purchased_expires_at'] = expiresAt;
     const { error: updErr } = await db.from('credit_balances').update(update).eq('user_id', userId);
     if (updErr) return { ok: false, error: updErr.message };
   }
