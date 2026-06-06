@@ -91,6 +91,17 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="./auth-config.js?v=3844d5ea2"></script>
+<script>
+(async function(){
+  try{
+    const cfg=window.FLOWVID_AUTH||{};
+    if(!cfg.supabaseUrl||!cfg.supabaseAnonKey){location.href='./login.html';return}
+    const client=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
+    const{data}=await client.auth.getSession();
+    if(!data?.session){location.href='./login.html';return}
+  }catch(_){location.href='./login.html'}
+})();
+</script>
 <script src="./flowvid-history.js?v=112"></script>
 <script src="./flowvid-open-inline.js?v=1"></script>
 
