@@ -156,7 +156,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       await db.from(HISTORY_TABLE).upsert(row, { onConflict: 'job_id' });
     }
 
-    return { estimatedCredits, finalCredits, costUsd, delta, shortfall };
+    return { estimatedCredits, finalCredits, costUsd, delta, shortfall, userId: task.user_id };
   } catch (_) {
     return null;
   }
@@ -480,6 +480,40 @@ module.exports = async function handler(req, res) {
     let finalCreditsResult = null;
     if (done) {
       finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+    }
+
+    // Apply watermark for free users on successful completion
+    if (done && videoUrl && finalCreditsResult?.userId) {
+      try {
+        const db2 = dbClient();
+        if (db2) {
+          const { data: bal } = await db2
+            .from('credit_balances')
+            .select('subscription_credits,purchased_credits')
+            .eq('user_id', finalCreditsResult.userId)
+            .maybeSingle();
+          const isFreeUser = !bal || (Number(bal.subscription_credits || 0) === 0 && Number(bal.purchased_credits || 0) === 0);
+          if (isFreeUser) {
+            const wmRes = await fetch(`${process.env.WATERMARK_SERVER_URL}/watermark`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-watermark-secret': process.env.WATERMARK_SECRET || ''
+              },
+              body: JSON.stringify({ videoUrl, jobId: resolvedJobId })
+            });
+            if (wmRes.ok) {
+              const wmData = await wmRes.json();
+              if (wmData?.watermarkedUrl) {
+                await db2.from(HISTORY_TABLE).upsert(
+                  { job_id: resolvedJobId, watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() },
+                  { onConflict: 'job_id' }
+                );
+              }
+            }
+          }
+        }
+      } catch (_) {}
     }
 
     // Refund credits on terminal failure:
