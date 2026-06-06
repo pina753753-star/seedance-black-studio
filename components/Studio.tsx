@@ -30,6 +30,7 @@ type Task = {
   aspectRatio: AspectRatio;
   status: "queued" | "processing" | "succeeded" | "failed";
   outputVideoUrl?: string;
+  watermarkedUrl?: string;
   error?: string;
   costCredits: number;
   createdAt: string;
@@ -437,10 +438,10 @@ export function Studio() {
                     <div className="rounded-2xl bg-white/5 px-2 py-2">{task.costCredits}cr</div>
                   </div>
 
-                  {task.outputVideoUrl && (
+                  {(task.watermarkedUrl || task.outputVideoUrl) && (
                     <video
                       controls
-                      src={task.outputVideoUrl}
+                      src={task.watermarkedUrl ?? task.outputVideoUrl}
                       className="mb-3 aspect-video w-full rounded-2xl bg-black object-cover"
                     />
                   )}
