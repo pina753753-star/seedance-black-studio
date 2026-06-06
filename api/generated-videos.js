@@ -133,6 +133,20 @@ module.exports = async function handler(req, res) {
     const db = dbClient();
     if (!db) return res.status(200).json({ ok: true, rows: [], note: 'Missing Supabase key' });
 
+    // 認証チェック
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    let userId = null;
+    if (token) {
+      try {
+        const { createClient: cc } = require('@supabase/supabase-js');
+        const userClient = cc(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
+        const { data: { user } } = await userClient.auth.getUser(token);
+        userId = user?.id || null;
+      } catch (_) {}
+    }
+    if (!userId) return res.status(200).json({ ok: true, rows: [] });
+
     const [generated, history] = await Promise.all([
       readGeneratedVideos(db, limit),
       readFlowvidHistory(db, limit)
