@@ -39,9 +39,10 @@ module.exports = async function handler(req, res) {
 
   if (req.method === 'GET') {
     const deviceId = cleanString(req.query.deviceId || req.query.device_id || '', 300);
+    if (!deviceId) return res.status(200).json({ ok: true, rows: [] });
     const limit = Math.max(1, Math.min(50, Number(req.query.limit || 20)));
     let query = db.from(TABLE).select('*').order('created_at', { ascending: false }).limit(limit);
-    if (deviceId) query = query.eq('device_id', deviceId);
+    query = query.eq('device_id', deviceId);
     const { data, error } = await query;
     if (error) return res.status(500).json({ ok: false, error: error.message, table: TABLE });
     return res.status(200).json({ ok: true, rows: data || [] });
