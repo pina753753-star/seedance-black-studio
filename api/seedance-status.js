@@ -509,6 +509,9 @@ module.exports = async function handler(req, res) {
                   { job_id: resolvedJobId, watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() },
                   { onConflict: 'job_id' }
                 );
+                await db2.from('generation_tasks').update(
+                  { watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() }
+                ).eq('api_task_id', resolvedJobId);
               }
             }
           }
