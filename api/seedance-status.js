@@ -493,6 +493,7 @@ module.exports = async function handler(req, res) {
             .eq('api_task_id', resolvedJobId)
             .maybeSingle()
           ).data?.user_id;
+          console.log('[watermark] done:', done, 'resolvedJobId:', resolvedJobId, 'wmUserId:', wmUserId, 'WATERMARK_SERVER_URL:', process.env.WATERMARK_SERVER_URL);
           if (wmUserId) {
             const { data: bal } = await db2
               .from('credit_balances')
@@ -500,8 +501,11 @@ module.exports = async function handler(req, res) {
               .eq('user_id', wmUserId)
               .maybeSingle();
             const isFreeUser = !bal || (Number(bal.subscription_credits || 0) === 0 && Number(bal.purchased_credits || 0) === 0);
+            console.log('[watermark] bal:', JSON.stringify(bal), 'isFreeUser:', isFreeUser);
             if (isFreeUser) {
-              const wmRes = await fetch(`${process.env.WATERMARK_SERVER_URL}/watermark`, {
+              const wmUrl = `${process.env.WATERMARK_SERVER_URL}/watermark`;
+              console.log('[watermark] sending request to:', wmUrl);
+              const wmRes = await fetch(wmUrl, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -509,8 +513,10 @@ module.exports = async function handler(req, res) {
                 },
                 body: JSON.stringify({ videoUrl, jobId: resolvedJobId })
               });
+              console.log('[watermark] wmRes.status:', wmRes.status, 'wmRes.ok:', wmRes.ok);
               if (wmRes.ok) {
                 const wmData = await wmRes.json();
+                console.log('[watermark] wmData:', JSON.stringify(wmData));
                 if (wmData?.watermarkedUrl) {
                   await db2.from(HISTORY_TABLE).upsert(
                     { job_id: resolvedJobId, watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() },
@@ -520,11 +526,16 @@ module.exports = async function handler(req, res) {
                     { watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() }
                   ).eq('api_task_id', resolvedJobId);
                 }
+              } else {
+                const wmErrText = await wmRes.text().catch(() => '');
+                console.log('[watermark] error response:', wmErrText.slice(0, 300));
               }
             }
           }
         }
-      } catch (_) {}
+      } catch (wmErr) {
+        console.log('[watermark] caught error:', wmErr?.message || String(wmErr));
+      }
     }
 
     // Refund credits on terminal failure:
