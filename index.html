@@ -23,14 +23,6 @@
 </section>
 
 <section id="gallery">
-  <div class="galleryTitle"><h2>作れる動画</h2></div>
-  <div class="tabs">
-    <button class="active" data-category="recommended">おすすめ</button>
-    <button data-category="cases">商品CM</button>
-    <button data-category="reference">リファレンス</button>
-    <button data-category="short">SNS動画</button>
-    <button data-category="anime">キャラ動画</button>
-  </div>
   <div class="grid" id="sampleGrid"></div>
 </section>
 
@@ -77,20 +69,7 @@ document.getElementById('menuBtn').onclick=()=>drawer.classList.add('open');
 document.getElementById('shade').onclick=()=>drawer.classList.remove('open');
 document.getElementById('drawerClose').onclick=()=>drawer.classList.remove('open');
 
-const samples={
-  recommended:[['Product CM','#059669','#f59e0b'],['Beauty sample','#be185d','#f0abfc'],['Smartphone vertical','#2563eb','#7c3aed'],['Neon motion','#0e7490','#db2777'],['SNS ad','#ea580c','#b91c1c'],['Fashion film','#64748b','#8b5cf6'],['Nature story','#65a30d','#0891b2'],['Art concept','#b45309','#1d4ed8']],
-  cases:[['Brand promo','#0f766e','#f59e0b'],['App launch','#1d4ed8','#7c3aed'],['Travel reel','#0284c7','#65a30d'],['Food ad','#dc2626','#f97316']],
-  reference:[['Same character','#7c3aed','#06b6d4'],['Voice reference','#9333ea','#f59e0b'],['Camera motion','#0e7490','#2563eb'],['Style match','#be185d','#8b5cf6']],
-  short:[['TikTok hook','#db2777','#f97316'],['Product 5 sec','#059669','#facc15'],['Story opening','#7c3aed','#2563eb'],['Loop motion','#dc2626','#9333ea']],
-  anime:[['Anime opening','#ea580c','#dc2626'],['Magic battle','#7c3aed','#06b6d4'],['School scene','#2563eb','#f0abfc'],['Hero reveal','#b45309','#9333ea']]
-};
-
 const grid=document.getElementById('sampleGrid');
-let realSamples=[];
-
-function colorCard([title,c1,c2]){
-  return `<div class="sample" data-title="${title}" style="--c1:${c1};--c2:${c2}"></div>`;
-}
 
 function videoSrc(sample){
   if(sample?.src)return sample.src;
@@ -106,30 +85,24 @@ function videoSampleCard(sample){
   return `<button class="realVideo" data-sample-src="${src}" type="button"><video autoplay muted loop playsinline preload="auto" src="${src}"></video></button>`;
 }
 
-function render(category){
-  const cards=samples[category].map(colorCard);
-  if(category==='recommended'&&realSamples.length)cards.unshift(...realSamples.map(videoSampleCard));
-  grid.innerHTML=cards.join('');
-  grid.querySelectorAll('.realVideo video').forEach(v=>{
-    v.muted=true;v.loop=true;v.playsInline=true;
-    v.setAttribute('muted','');v.setAttribute('playsinline','');
-    v.play().catch(()=>{});
-  });
-}
-
 async function loadRealSamples(){
   try{
-    const res=await fetch('/api/generated-videos?limit=20&public=true',{cache:'no-store'});
+    const res=await fetch('/api/generated-videos?limit=2&public=true',{cache:'no-store'});
     const data=await res.json();
     const rows=Array.isArray(data.rows)?data.rows:[];
     const seen=new Set();
-    realSamples=rows.filter(v=>v.status==='completed'&&(v.video_uri||v.video_url||v.url||v.src)).filter(v=>{
+    const realSamples=rows.filter(v=>v.status==='completed'&&(v.video_uri||v.video_url||v.url||v.src)).filter(v=>{
       const src=videoSrc(v);
       if(!src||seen.has(src))return false;
       seen.add(src);return true;
-    }).slice(0,6);
-    render(document.querySelector('.tabs .active')?.dataset.category||'recommended');
-  }catch(_){realSamples=[];}
+    }).slice(0,2);
+    grid.innerHTML=realSamples.map(videoSampleCard).join('');
+    grid.querySelectorAll('.realVideo video').forEach(v=>{
+      v.muted=true;v.loop=true;v.playsInline=true;
+      v.setAttribute('muted','');v.setAttribute('playsinline','');
+      v.play().catch(()=>{});
+    });
+  }catch(_){grid.innerHTML='';}
 }
 
 let _ovTimer=null;
@@ -168,12 +141,7 @@ _ovVid.addEventListener('play',_wakeOvClose);
 _ovVid.addEventListener('pause',()=>{document.getElementById('overlayClose').classList.add('on');clearTimeout(_ovTimer);});
 _ovVid.addEventListener('ended',()=>{document.getElementById('overlayClose').classList.add('on');clearTimeout(_ovTimer);});
 
-document.querySelectorAll('.tabs button').forEach(btn=>btn.onclick=()=>{
-  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');render(btn.dataset.category);
-});
-
-render('recommended');loadRealSamples();
+loadRealSamples();
 </script>
 </body>
 </html>
