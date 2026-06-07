@@ -510,7 +510,7 @@ module.exports = async function handler(req, res) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-watermark-secret': process.env.WATERMARK_SECRET || ''
+                  'Authorization': `Bearer ${process.env.WATERMARK_SECRET || ''}`
                 },
                 body: JSON.stringify({ videoUrl, jobId: resolvedJobId })
               });
