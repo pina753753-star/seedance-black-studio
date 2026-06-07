@@ -483,35 +483,43 @@ module.exports = async function handler(req, res) {
     }
 
     // Apply watermark for free users on successful completion
-    if (done && videoUrl && finalCreditsResult?.userId) {
+    if (done && videoUrl) {
       try {
         const db2 = dbClient();
         if (db2) {
-          const { data: bal } = await db2
-            .from('credit_balances')
-            .select('subscription_credits,purchased_credits')
-            .eq('user_id', finalCreditsResult.userId)
-            .maybeSingle();
-          const isFreeUser = !bal || (Number(bal.subscription_credits || 0) === 0 && Number(bal.purchased_credits || 0) === 0);
-          if (isFreeUser) {
-            const wmRes = await fetch(`${process.env.WATERMARK_SERVER_URL}/watermark`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-watermark-secret': process.env.WATERMARK_SECRET || ''
-              },
-              body: JSON.stringify({ videoUrl, jobId: resolvedJobId })
-            });
-            if (wmRes.ok) {
-              const wmData = await wmRes.json();
-              if (wmData?.watermarkedUrl) {
-                await db2.from(HISTORY_TABLE).upsert(
-                  { job_id: resolvedJobId, watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() },
-                  { onConflict: 'job_id' }
-                );
-                await db2.from('generation_tasks').update(
-                  { watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() }
-                ).eq('api_task_id', resolvedJobId);
+          const wmUserId = finalCreditsResult?.userId || (await db2
+            .from('generation_tasks')
+            .select('user_id')
+            .eq('api_task_id', resolvedJobId)
+            .maybeSingle()
+          ).data?.user_id;
+          if (wmUserId) {
+            const { data: bal } = await db2
+              .from('credit_balances')
+              .select('subscription_credits,purchased_credits')
+              .eq('user_id', wmUserId)
+              .maybeSingle();
+            const isFreeUser = !bal || (Number(bal.subscription_credits || 0) === 0 && Number(bal.purchased_credits || 0) === 0);
+            if (isFreeUser) {
+              const wmRes = await fetch(`${process.env.WATERMARK_SERVER_URL}/watermark`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-watermark-secret': process.env.WATERMARK_SECRET || ''
+                },
+                body: JSON.stringify({ videoUrl, jobId: resolvedJobId })
+              });
+              if (wmRes.ok) {
+                const wmData = await wmRes.json();
+                if (wmData?.watermarkedUrl) {
+                  await db2.from(HISTORY_TABLE).upsert(
+                    { job_id: resolvedJobId, watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() },
+                    { onConflict: 'job_id' }
+                  );
+                  await db2.from('generation_tasks').update(
+                    { watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() }
+                  ).eq('api_task_id', resolvedJobId);
+                }
               }
             }
           }
