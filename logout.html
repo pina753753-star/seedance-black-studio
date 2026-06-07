@@ -27,6 +27,8 @@
           await client.auth.signOut();
         }
       }catch(e){}
+      const clearKeys=['flowvidGenerateDraft','flowvidHistory','flowvidLastSeedanceJobId','flowvidLastSeedancePollingUrl','flowvidLastSeedancePrompt','flowvidLastSeedanceMode','flowvidGenerateMode','flowvidDeviceId','flowvidFavoriteJobs','flowvidHiddenVideos','plan','flowvidPlan'];
+      clearKeys.forEach(k=>localStorage.removeItem(k));
       setTimeout(()=>{location.href='./index.html'},500);
     })();
   </script>
