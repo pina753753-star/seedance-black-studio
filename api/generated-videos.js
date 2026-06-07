@@ -173,7 +173,7 @@ module.exports = async function handler(req, res) {
 
     const [generated, history] = await Promise.all([
       readGeneratedVideos(db, limit),
-      readFlowvidHistory(db, limit)
+      readFlowvidHistory(db, limit, userId)
     ]);
 
     const byUrl = new Map();
