@@ -495,13 +495,14 @@ module.exports = async function handler(req, res) {
           ).data?.user_id;
           console.log('[watermark] done:', done, 'resolvedJobId:', resolvedJobId, 'wmUserId:', wmUserId, 'WATERMARK_SERVER_URL:', process.env.WATERMARK_SERVER_URL);
           if (wmUserId) {
-            const { data: bal } = await db2
-              .from('credit_balances')
-              .select('subscription_credits,purchased_credits')
-              .eq('user_id', wmUserId)
+            const PAID_PLANS = ['standard'];
+            const { data: profile } = await db2
+              .from('profiles')
+              .select('plan')
+              .eq('id', wmUserId)
               .maybeSingle();
-            const isFreeUser = !bal || (Number(bal.subscription_credits || 0) === 0 && Number(bal.purchased_credits || 0) === 0);
-            console.log('[watermark] bal:', JSON.stringify(bal), 'isFreeUser:', isFreeUser);
+            const isFreeUser = !profile || !PAID_PLANS.includes(profile.plan);
+            console.log('[watermark] profile:', JSON.stringify(profile), 'isFreeUser:', isFreeUser);
             if (isFreeUser) {
               const wmUrl = `${process.env.WATERMARK_SERVER_URL}/watermark`;
               console.log('[watermark] sending request to:', wmUrl);
