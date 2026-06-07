@@ -177,18 +177,9 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, rows: [] });
     }
 
-    const [generated, history] = await Promise.all([
-      readGeneratedVideos(db, limit),
-      readFlowvidHistory(db, limit, userId)
-    ]);
+    const history = await readFlowvidHistory(db, limit, userId);
 
-    const byUrl = new Map();
-    for (const row of [...history.rows, ...generated.rows]) {
-      const key = row.video_url || row.video_uri || row.src;
-      if (!byUrl.has(key)) byUrl.set(key, row);
-    }
-
-    const rows = Array.from(byUrl.values())
+    const rows = history.rows
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, limit);
 
@@ -197,7 +188,6 @@ module.exports = async function handler(req, res) {
       rows,
       sources: {
         flowvid_video_history: { count: history.rows.length, error: history.error },
-        generated_videos: { count: generated.rows.length, error: generated.error },
         hidden_broken_job_ids: Array.from(BROKEN_JOB_IDS)
       }
     });
