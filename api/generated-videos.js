@@ -169,7 +169,13 @@ module.exports = async function handler(req, res) {
         userId = user?.id || null;
       } catch (_) {}
     }
-    if (!userId) return res.status(200).json({ ok: true, rows: [] });
+    if (!userId) {
+      if (req.query.public === 'true') {
+        const generated = await readGeneratedVideos(db, limit);
+        return res.status(200).json({ ok: true, rows: generated.rows });
+      }
+      return res.status(200).json({ ok: true, rows: [] });
+    }
 
     const [generated, history] = await Promise.all([
       readGeneratedVideos(db, limit),
