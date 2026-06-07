@@ -119,7 +119,7 @@ function render(category){
 
 async function loadRealSamples(){
   try{
-    const res=await fetch('/api/generated-videos?limit=20',{cache:'no-store'});
+    const res=await fetch('/api/generated-videos?limit=20&public=true',{cache:'no-store'});
     const data=await res.json();
     const rows=Array.isArray(data.rows)?data.rows:[];
     const seen=new Set();
