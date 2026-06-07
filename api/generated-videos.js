@@ -171,26 +171,8 @@ module.exports = async function handler(req, res) {
     }
     if (!userId) {
       if (req.query.public === 'true') {
-        const { data, error } = await db
-          .from('generation_tasks')
-          .select('*')
-          .eq('status', 'completed')
-          .not('output_url', 'is', null)
-          .order('created_at', { ascending: false })
-          .limit(limit);
-        const rows = (data || []).map(task => normalizeHistoryRow({
-          id: task.id,
-          job_id: task.api_task_id || task.id,
-          status: 'completed',
-          prompt: task.prompt || '',
-          mode: task.mode || '',
-          video_url: task.output_url || '',
-          reference_urls: [],
-          settings: task.settings || {},
-          created_at: task.created_at,
-          updated_at: task.updated_at
-        })).filter(Boolean);
-        return res.status(200).json({ ok: true, rows });
+        const generated = await readGeneratedVideos(db, limit);
+        return res.status(200).json({ ok: true, rows: generated.rows });
       }
       return res.status(200).json({ ok: true, rows: [] });
     }
