@@ -494,6 +494,9 @@ module.exports = async function handler(req, res) {
             .maybeSingle()
           ).data?.user_id;
           console.log('[watermark] done:', done, 'resolvedJobId:', resolvedJobId, 'wmUserId:', wmUserId, 'WATERMARK_SERVER_URL:', process.env.WATERMARK_SERVER_URL);
+          if (!wmUserId) {
+            console.log('[watermark] SKIP: wmUserId is null/undefined. resolvedJobId used for lookup:', resolvedJobId);
+          }
           if (wmUserId) {
             const PAID_PLANS = ['standard'];
             const { data: profile } = await db2
