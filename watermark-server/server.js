@@ -7,7 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-ffmpeg.setFfmpegPath(ffmpegStatic);
+// ffmpeg-static is not used; system ffmpeg is used via Dockerfile
+// ffmpeg.setFfmpegPath(ffmpegStatic);
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
