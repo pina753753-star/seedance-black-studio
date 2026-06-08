@@ -42,7 +42,7 @@ app.post('/watermark', async (req, res) => {
     await new Promise((resolve, reject) => {
       ffmpeg(inputFile)
         .outputOptions([
-          '-vf', "drawtext=text='FlowVid Studio':fontsize=28:fontcolor=white@0.85:x=w-tw-20:y=h-th-20:shadowcolor=black@0.8:shadowx=2:shadowy=2",
+          '-vf', "drawtext=text=FlowVid:fontsize=28:fontcolor=white@0.85:x=w-tw-20:y=h-th-20:shadowcolor=black@0.8:shadowx=2:shadowy=2",
           '-c:a', 'copy',
           '-movflags', '+faststart'
         ])
