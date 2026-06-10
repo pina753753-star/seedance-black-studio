@@ -468,7 +468,35 @@ module.exports = async function handler(req, res) {
     let videoUrl = null;
     let storage = null;
 
-    if (rawVideoUrl) {
+    // Before hitting OpenRouter content URL, check if a Supabase-hosted video already exists in DB
+    if (isCompletedStatus(jobStatus)) {
+      const dbCheck = dbClient();
+      if (dbCheck) {
+        const dbCandidates = [
+          async () => {
+            const { data: task } = await dbCheck.from('generation_tasks').select('output_url').eq('api_task_id', resolvedJobId).maybeSingle();
+            return task?.output_url ? { url: task.output_url, source: 'generation_tasks.output_url' } : null;
+          },
+          async () => {
+            const { data: hist } = await dbCheck.from(HISTORY_TABLE).select('video_url').eq('job_id', resolvedJobId).maybeSingle();
+            return hist?.video_url ? { url: hist.video_url, source: 'flowvid_video_history.video_url' } : null;
+          }
+        ];
+        for (const getCand of dbCandidates) {
+          const cand = await getCand();
+          if (cand && isSupabasePublicUrl(cand.url)) {
+            const publicCheck = await verifyPublicObject(cand.url);
+            if (publicCheck.ok) {
+              videoUrl = cand.url;
+              storage = { ok: true, videoUrl: cand.url, skipped: true, reason: 'already-persistent-db', source: cand.source, publicCheck };
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!videoUrl && rawVideoUrl) {
       storage = await persistVideo({ jobId: resolvedJobId, videoUrl: rawVideoUrl, apiKey });
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
