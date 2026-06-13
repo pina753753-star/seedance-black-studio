@@ -468,7 +468,22 @@ module.exports = async function handler(req, res) {
     let videoUrl = null;
     let storage = null;
 
-    if (rawVideoUrl) {
+    // Before hitting OpenRouter content URL, check if a Supabase-hosted video already exists in DB
+    if (isCompletedStatus(jobStatus)) {
+      const dbCheck = dbClient();
+      if (dbCheck) {
+        const { data: task } = await dbCheck.from('generation_tasks').select('output_url').eq('api_task_id', resolvedJobId).maybeSingle();
+        if (task?.output_url && isSupabasePublicUrl(task.output_url)) {
+          const publicCheck = await verifyPublicObject(task.output_url);
+          if (publicCheck.ok) {
+            videoUrl = task.output_url;
+            storage = { ok: true, videoUrl: task.output_url, skipped: true, reason: 'already-persistent-db', source: 'generation_tasks.output_url', publicCheck };
+          }
+        }
+      }
+    }
+
+    if (!videoUrl && rawVideoUrl) {
       storage = await persistVideo({ jobId: resolvedJobId, videoUrl: rawVideoUrl, apiKey });
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
