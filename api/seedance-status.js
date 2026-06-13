@@ -472,25 +472,12 @@ module.exports = async function handler(req, res) {
     if (isCompletedStatus(jobStatus)) {
       const dbCheck = dbClient();
       if (dbCheck) {
-        const dbCandidates = [
-          async () => {
-            const { data: task } = await dbCheck.from('generation_tasks').select('output_url').eq('api_task_id', resolvedJobId).maybeSingle();
-            return task?.output_url ? { url: task.output_url, source: 'generation_tasks.output_url' } : null;
-          },
-          async () => {
-            const { data: hist } = await dbCheck.from(HISTORY_TABLE).select('video_url').eq('job_id', resolvedJobId).maybeSingle();
-            return hist?.video_url ? { url: hist.video_url, source: 'flowvid_video_history.video_url' } : null;
-          }
-        ];
-        for (const getCand of dbCandidates) {
-          const cand = await getCand();
-          if (cand && isSupabasePublicUrl(cand.url)) {
-            const publicCheck = await verifyPublicObject(cand.url);
-            if (publicCheck.ok) {
-              videoUrl = cand.url;
-              storage = { ok: true, videoUrl: cand.url, skipped: true, reason: 'already-persistent-db', source: cand.source, publicCheck };
-              break;
-            }
+        const { data: task } = await dbCheck.from('generation_tasks').select('output_url').eq('api_task_id', resolvedJobId).maybeSingle();
+        if (task?.output_url && isSupabasePublicUrl(task.output_url)) {
+          const publicCheck = await verifyPublicObject(task.output_url);
+          if (publicCheck.ok) {
+            videoUrl = task.output_url;
+            storage = { ok: true, videoUrl: task.output_url, skipped: true, reason: 'already-persistent-db', source: 'generation_tasks.output_url', publicCheck };
           }
         }
       }
