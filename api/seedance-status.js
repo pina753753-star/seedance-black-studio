@@ -266,7 +266,7 @@ async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
     .from('credit_transactions')
     .select('credit_type,amount')
     .eq('related_task_id', task.id)
-    .eq('reason', 'video_generation');
+    .in('reason', ['video_generation', 'cost_based_adjustment']);
 
   if (!deductions || deductions.length === 0) return; // Nothing to refund
 
