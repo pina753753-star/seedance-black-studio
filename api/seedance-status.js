@@ -347,23 +347,40 @@ function openRouterContentUrl(id) {
 
 async function verifyPublicObject(publicUrl) {
   try {
-    const response = await fetch(publicUrl, { method: 'GET' });
-    const contentType = response.headers.get('content-type') || '';
-    const bytes = Number(response.headers.get('content-length') || 0);
-    const body = await response.arrayBuffer();
-    const actualBytes = body.byteLength;
-
-    if (!response.ok) {
-      return { ok: false, status: response.status, contentType, bytes: actualBytes, error: 'public-url-not-readable' };
+    // Try HEAD first to avoid downloading the full video body
+    const headRes = await fetch(publicUrl, { method: 'HEAD' });
+    const headContentType = headRes.headers.get('content-type') || '';
+    const headContentLength = Number(headRes.headers.get('content-length') || 0);
+    if (headRes.ok && /video|octet-stream/i.test(headContentType) && headContentLength >= 1024) {
+      return { ok: true, status: headRes.status, contentType: headContentType, bytes: headContentLength, checkMethod: 'HEAD', sampledBytes: 0 };
     }
-    if (actualBytes < 1024) {
-      return { ok: false, status: response.status, contentType, bytes: actualBytes, error: 'stored-file-too-small' };
+
+    // HEAD insufficient — fall back to Range GET, headers only (no body reading)
+    const rangeRes = await fetch(publicUrl, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
+    const contentType = rangeRes.headers.get('content-type') || '';
+
+    // Discard body immediately without reading
+    await rangeRes.body?.cancel().catch(() => {});
+
+    // Parse total file size: prefer Content-Range (206), fall back to Content-Length (200)
+    const contentRange = rangeRes.headers.get('content-range') || '';
+    const totalMatch = contentRange.match(/\/(\d+)$/);
+    const totalBytes = totalMatch ? Number(totalMatch[1]) : Number(rangeRes.headers.get('content-length') || 0);
+
+    if (!rangeRes.ok && rangeRes.status !== 206) {
+      return { ok: false, status: rangeRes.status, contentType, bytes: totalBytes, error: 'public-url-not-readable', checkMethod: 'RANGE', sampledBytes: 0 };
+    }
+    if (!totalBytes) {
+      return { ok: false, status: rangeRes.status, contentType, bytes: 0, error: 'stored-file-size-unknown', checkMethod: 'RANGE', sampledBytes: 0 };
+    }
+    if (totalBytes < 1024) {
+      return { ok: false, status: rangeRes.status, contentType, bytes: totalBytes, error: 'stored-file-too-small', checkMethod: 'RANGE', sampledBytes: 0 };
     }
     if (!/video|octet-stream/i.test(contentType)) {
-      return { ok: false, status: response.status, contentType, bytes: actualBytes || bytes, error: 'stored-file-is-not-video' };
+      return { ok: false, status: rangeRes.status, contentType, bytes: totalBytes, error: 'stored-file-is-not-video', checkMethod: 'RANGE', sampledBytes: 0 };
     }
 
-    return { ok: true, status: response.status, contentType, bytes: actualBytes || bytes };
+    return { ok: true, status: rangeRes.status, contentType, bytes: totalBytes, checkMethod: 'RANGE', sampledBytes: 0 };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
