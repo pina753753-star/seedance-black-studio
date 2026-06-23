@@ -33,22 +33,128 @@ function extractCostUsd(data) {
   return null;
 }
 
-// Refund delta back to subscription_credits (highest-priority pool).
+// Refund delta back to the pools it was originally consumed from, in reverse
+// consumption order (purchased → free → subscription).
+// Only video_generation transactions with negative amounts are used to reconstruct
+// the original breakdown; any other reason is excluded.
+// If the breakdown cannot be determined, the balance is left unchanged.
 async function creditDeltaRefund(db, userId, taskId, amount) {
-  if (amount <= 0) return;
-  try {
-    const { data: bal } = await db.from('credit_balances')
-      .select('subscription_credits').eq('user_id', userId).maybeSingle();
-    if (!bal) return;
-    await db.from('credit_balances').update({
-      subscription_credits: Number(bal.subscription_credits || 0) + amount,
-      updated_at: new Date().toISOString()
-    }).eq('user_id', userId);
-    await db.from('credit_transactions').insert({
-      user_id: userId, amount, credit_type: 'subscription',
-      reason: 'cost_based_refund', related_task_id: taskId
+  if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) return;
+
+  // Reconstruct original consumption breakdown from credit_transactions
+  const { data: origTx, error: txError } = await db
+    .from('credit_transactions')
+    .select('credit_type,amount')
+    .eq('related_task_id', taskId)
+    .eq('reason', 'video_generation');
+
+  if (txError || !origTx || origTx.length === 0) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
     });
-  } catch (_) {}
+    return;
+  }
+
+  // Accumulate per-pool consumption (negative amounts only)
+  let usedSub = 0, usedFree = 0, usedPurchased = 0;
+  for (const tx of origTx) {
+    const a = Number(tx.amount || 0);
+    if (!Number.isFinite(a) || a >= 0) continue; // skip non-negative rows
+    const abs = Math.abs(a);
+    if (tx.credit_type === 'subscription') usedSub      += abs;
+    else if (tx.credit_type === 'free')    usedFree     += abs;
+    else if (tx.credit_type === 'purchased') usedPurchased += abs;
+  }
+
+  const usedTotal = usedSub + usedFree + usedPurchased;
+  if (usedTotal === 0) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Guard: refund must not exceed what was originally consumed
+  if (amount > usedTotal) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Distribute refund in reverse consumption order: purchased → free → subscription
+  let remaining = amount;
+  const refundPurchased    = Math.min(remaining, usedPurchased); remaining -= refundPurchased;
+  const refundFree         = Math.min(remaining, usedFree);      remaining -= refundFree;
+  const refundSubscription = Math.min(remaining, usedSub);       remaining -= refundSubscription;
+
+  // Integrity check: remaining must be 0 after distribution
+  if (remaining !== 0) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Read current balance
+  const { data: bal, error: balError } = await db
+    .from('credit_balances')
+    .select('subscription_credits,free_credits,purchased_credits')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (balError || !bal) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Capture read values for optimistic lock WHERE conditions
+  const currentSubscription = Number(bal.subscription_credits || 0);
+  const currentFree         = Number(bal.free_credits         || 0);
+  const currentPurchased    = Number(bal.purchased_credits    || 0);
+
+  // Build update payload — only touch pools that receive a refund
+  const updateFields = { updated_at: new Date().toISOString() };
+  if (refundSubscription > 0) updateFields.subscription_credits = currentSubscription + refundSubscription;
+  if (refundFree         > 0) updateFields.free_credits          = currentFree         + refundFree;
+  if (refundPurchased    > 0) updateFields.purchased_credits     = currentPurchased    + refundPurchased;
+
+  // Optimistic lock: WHERE includes all three read values so a concurrent change
+  // causes 0 rows to be matched, preventing double-update.
+  const { data: updateResult, error: updateError } = await db
+    .from('credit_balances')
+    .update(updateFields)
+    .eq('user_id', userId)
+    .eq('subscription_credits', currentSubscription)
+    .eq('free_credits',         currentFree)
+    .eq('purchased_credits',    currentPurchased)
+    .select('user_id');
+
+  if (updateError || !Array.isArray(updateResult) || updateResult.length !== 1) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'concurrent_balance_update'
+    });
+    return;
+  }
+
+  // Record per-pool refund transactions — only after confirmed balance update
+  const txRows = [];
+  if (refundSubscription > 0) txRows.push({ user_id: userId, amount: refundSubscription, credit_type: 'subscription', reason: 'cost_based_refund', related_task_id: taskId });
+  if (refundFree         > 0) txRows.push({ user_id: userId, amount: refundFree,         credit_type: 'free',         reason: 'cost_based_refund', related_task_id: taskId });
+  if (refundPurchased    > 0) txRows.push({ user_id: userId, amount: refundPurchased,     credit_type: 'purchased',    reason: 'cost_based_refund', related_task_id: taskId });
+  if (txRows.length) {
+    const { error: insertError } = await db.from('credit_transactions').insert(txRows);
+    if (insertError) {
+      console.warn('[seedance-status] credit_delta_refund_ledger_failed', { taskId });
+    }
+  }
 }
 
 // Charge additional delta. Returns shortfall (0 if fully charged).
@@ -117,12 +223,13 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       ? { settings: (({ result_wait, ...rest }) => rest)(task.settings) }
       : {};
 
-    // Atomic claim — prevents double-settlement on concurrent polls
+    // Atomic claim — only matches non-terminal states so concurrent polls cannot
+    // both succeed: the second caller finds status='completed' and gets 0 rows.
     const { data: claimed } = await db
       .from('generation_tasks')
       .update({ status: 'completed', output_url: videoUrl, ...settingsUpdate, updated_at: new Date().toISOString() })
       .eq('id', task.id)
-      .in('status', ['queued', 'processing', 'completed'])
+      .in('status', ['queued', 'processing'])
       .select('id');
     if (!claimed || claimed.length === 0) return null;
 
