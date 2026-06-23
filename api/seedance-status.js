@@ -33,22 +33,112 @@ function extractCostUsd(data) {
   return null;
 }
 
-// Refund delta back to subscription_credits (highest-priority pool).
+// Refund delta back to the pools it was originally consumed from, in reverse
+// consumption order (purchased → free → subscription).
+// Only video_generation transactions with negative amounts are used to reconstruct
+// the original breakdown; any other reason is excluded.
+// If the breakdown cannot be determined, the balance is left unchanged.
 async function creditDeltaRefund(db, userId, taskId, amount) {
-  if (amount <= 0) return;
-  try {
-    const { data: bal } = await db.from('credit_balances')
-      .select('subscription_credits').eq('user_id', userId).maybeSingle();
-    if (!bal) return;
-    await db.from('credit_balances').update({
-      subscription_credits: Number(bal.subscription_credits || 0) + amount,
-      updated_at: new Date().toISOString()
-    }).eq('user_id', userId);
-    await db.from('credit_transactions').insert({
-      user_id: userId, amount, credit_type: 'subscription',
-      reason: 'cost_based_refund', related_task_id: taskId
+  if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) return;
+
+  // Reconstruct original consumption breakdown from credit_transactions
+  const { data: origTx, error: txError } = await db
+    .from('credit_transactions')
+    .select('credit_type,amount')
+    .eq('related_task_id', taskId)
+    .eq('reason', 'video_generation');
+
+  if (txError || !origTx || origTx.length === 0) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
     });
-  } catch (_) {}
+    return;
+  }
+
+  // Accumulate per-pool consumption (negative amounts only)
+  let usedSub = 0, usedFree = 0, usedPurchased = 0;
+  for (const tx of origTx) {
+    const a = Number(tx.amount || 0);
+    if (!Number.isFinite(a) || a >= 0) continue; // skip non-negative rows
+    const abs = Math.abs(a);
+    if (tx.credit_type === 'subscription') usedSub      += abs;
+    else if (tx.credit_type === 'free')    usedFree     += abs;
+    else if (tx.credit_type === 'purchased') usedPurchased += abs;
+  }
+
+  const usedTotal = usedSub + usedFree + usedPurchased;
+  if (usedTotal === 0) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Guard: refund must not exceed what was originally consumed
+  if (amount > usedTotal) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Distribute refund in reverse consumption order: purchased → free → subscription
+  let remaining = amount;
+  const refundPurchased    = Math.min(remaining, usedPurchased); remaining -= refundPurchased;
+  const refundFree         = Math.min(remaining, usedFree);      remaining -= refundFree;
+  const refundSubscription = Math.min(remaining, usedSub);       remaining -= refundSubscription;
+
+  // Integrity check: remaining must be 0 after distribution
+  if (remaining !== 0) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Read current balance
+  const { data: bal, error: balError } = await db
+    .from('credit_balances')
+    .select('subscription_credits,free_credits,purchased_credits')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (balError || !bal) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Build update payload — only touch pools that receive a refund
+  const updateFields = { updated_at: new Date().toISOString() };
+  if (refundSubscription > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + refundSubscription;
+  if (refundFree         > 0) updateFields.free_credits          = Number(bal.free_credits          || 0) + refundFree;
+  if (refundPurchased    > 0) updateFields.purchased_credits     = Number(bal.purchased_credits     || 0) + refundPurchased;
+
+  const { error: updateError } = await db
+    .from('credit_balances')
+    .update(updateFields)
+    .eq('user_id', userId);
+
+  if (updateError) {
+    console.warn('[seedance-status] credit_delta_refund_skipped', {
+      taskId,
+      reason: 'usage_breakdown_unavailable'
+    });
+    return;
+  }
+
+  // Record per-pool refund transactions (only for pools with a positive refund)
+  const txRows = [];
+  if (refundSubscription > 0) txRows.push({ user_id: userId, amount: refundSubscription, credit_type: 'subscription', reason: 'cost_based_refund', related_task_id: taskId });
+  if (refundFree         > 0) txRows.push({ user_id: userId, amount: refundFree,         credit_type: 'free',         reason: 'cost_based_refund', related_task_id: taskId });
+  if (refundPurchased    > 0) txRows.push({ user_id: userId, amount: refundPurchased,     credit_type: 'purchased',    reason: 'cost_based_refund', related_task_id: taskId });
+  if (txRows.length) await db.from('credit_transactions').insert(txRows);
 }
 
 // Charge additional delta. Returns shortfall (0 if fully charged).
