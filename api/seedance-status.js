@@ -315,56 +315,69 @@ async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
 
 function isResultWaitExpired(wait) {
   if (!wait || !wait.started_at) return false;
-  const elapsed = Date.now() - new Date(wait.started_at).getTime();
-  return elapsed >= RESULT_WAIT_MIN_MS && Number(wait.attempts || 0) >= RESULT_WAIT_MIN_ATTEMPTS;
+  const startedMs = new Date(wait.started_at).getTime();
+  if (!Number.isFinite(startedMs)) return false;
+  const elapsed = Date.now() - startedMs;
+  const attempts = Number(wait.attempts);
+  if (!Number.isFinite(attempts) || !Number.isInteger(attempts) || attempts < 0) return false;
+  return elapsed >= RESULT_WAIT_MIN_MS && attempts >= RESULT_WAIT_MIN_ATTEMPTS;
 }
 
 // Read-modify-write settings.result_wait for a queued/processing task.
-// Only increments attempts when ≥10 s have passed since last attempt (prevents rapid-fire inflation).
-// Returns { taskId, wait } when a matching task is found, or null otherwise.
+// Returns structured state: { state: 'ok'|'not_found'|'db_error'|'stale', taskId?, wait? }
+// Only increments attempts and last_attempt_at when ≥10 s have passed (prevents rapid-fire inflation).
+// When < 10 s since last attempt: returns current wait state without any DB write.
 async function recordResultWait(db, resolvedJobId, reason) {
-  if (!db || !resolvedJobId) return null;
-  try {
-    const { data: task } = await db
-      .from('generation_tasks')
-      .select('id,settings')
-      .eq('api_task_id', resolvedJobId)
-      .in('status', ['queued', 'processing'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!task) return null;
+  if (!db || !resolvedJobId) return { state: 'not_found' };
 
-    const now = new Date().toISOString();
-    const existingSettings = task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings)
-      ? task.settings : {};
-    const existingWait = existingSettings.result_wait && typeof existingSettings.result_wait === 'object' && !Array.isArray(existingSettings.result_wait)
-      ? existingSettings.result_wait : {};
+  const { data: task, error: selectError } = await db
+    .from('generation_tasks')
+    .select('id,settings')
+    .eq('api_task_id', resolvedJobId)
+    .in('status', ['queued', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-    const startedAt = existingWait.started_at || now;
-    const lastAttemptAt = existingWait.last_attempt_at || null;
-    const msSinceLast = lastAttemptAt ? (Date.now() - new Date(lastAttemptAt).getTime()) : Infinity;
-    const currentAttempts = Number(existingWait.attempts || 0);
-    const newAttempts = msSinceLast >= RESULT_ATTEMPT_MIN_INTERVAL_MS ? currentAttempts + 1 : currentAttempts;
+  if (selectError) return { state: 'db_error' };
+  if (!task) return { state: 'not_found' };
 
-    const newWait = {
-      started_at: startedAt,
-      attempts: newAttempts,
-      last_attempt_at: now,
-      last_error: String(reason || 'unknown').slice(0, 100)
-    };
+  const now = new Date().toISOString();
+  const existingSettings = task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings)
+    ? task.settings : {};
+  const existingWait = existingSettings.result_wait && typeof existingSettings.result_wait === 'object' && !Array.isArray(existingSettings.result_wait)
+    ? existingSettings.result_wait : {};
 
-    const newSettings = { ...existingSettings, result_wait: newWait };
-    await db
-      .from('generation_tasks')
-      .update({ settings: newSettings, updated_at: now })
-      .eq('id', task.id)
-      .in('status', ['queued', 'processing']);
+  const startedAt = existingWait.started_at || now;
+  const lastAttemptAt = existingWait.last_attempt_at || null;
+  const msSinceLast = lastAttemptAt ? (Date.now() - new Date(lastAttemptAt).getTime()) : Infinity;
+  const currentAttempts = Number(existingWait.attempts || 0);
 
-    return { taskId: task.id, wait: newWait };
-  } catch (_) {
-    return null;
+  if (msSinceLast < RESULT_ATTEMPT_MIN_INTERVAL_MS) {
+    // Too soon — return current state without any DB write
+    return { state: 'ok', taskId: task.id, wait: existingWait };
   }
+
+  const newAttempts = currentAttempts + 1;
+  const newWait = {
+    started_at: startedAt,
+    attempts: newAttempts,
+    last_attempt_at: now,
+    last_error: String(reason || 'unknown').slice(0, 100)
+  };
+
+  const newSettings = { ...existingSettings, result_wait: newWait };
+  const { data: updated, error: updateError } = await db
+    .from('generation_tasks')
+    .update({ settings: newSettings, updated_at: now })
+    .eq('id', task.id)
+    .in('status', ['queued', 'processing'])
+    .select('id');
+
+  if (updateError) return { state: 'db_error' };
+  if (!updated || updated.length === 0) return { state: 'stale', taskId: task.id, wait: existingWait };
+
+  return { state: 'ok', taskId: task.id, wait: newWait };
 }
 
 // ---- end result-wait grace period helpers ----
@@ -578,10 +591,25 @@ module.exports = async function handler(req, res) {
     if (!videoUrl && (isCompletedStatus(jobStatus) || response.status === 404)) {
       const waitReason = response.status === 404 ? 'status-404' : 'completed-no-url';
       const dbWait = dbClient();
-      let waitResult = null;
-      if (dbWait) waitResult = await recordResultWait(dbWait, resolvedJobId, waitReason).catch(() => null);
+      let waitResult = { state: 'db_error' };
+      if (dbWait) waitResult = await recordResultWait(dbWait, resolvedJobId, waitReason).catch(() => ({ state: 'db_error' }));
 
-      if (waitResult !== null) {
+      if (waitResult.state === 'db_error' || waitResult.state === 'stale') {
+        // DB unreachable or task status changed under us — don't refund, keep client polling
+        return res.status(200).json({
+          ok: true,
+          done: false,
+          jobStatus: 'processing',
+          resultPending: true,
+          jobId: resolvedJobId,
+          originalJobId: jobId,
+          pollingUrl,
+          statusUrl,
+          checkedAt: new Date().toISOString()
+        });
+      }
+
+      if (waitResult.state === 'ok') {
         if (!isResultWaitExpired(waitResult.wait)) {
           // Still within grace period — return HTTP 200 so client keeps polling.
           // This prevents a 404 status code from causing the client to stop immediately.
@@ -598,21 +626,42 @@ module.exports = async function handler(req, res) {
           });
         }
 
-        // Grace period expired: one final re-check before committing to a refund
+        // Grace period expired: final re-check by task ID before committing to a refund
         const dbFinal = dbClient();
+        let finalCheckOk = false;
         if (dbFinal) {
-          const { data: tFinal } = await dbFinal
+          const { data: tFinal, error: finalSelectError } = await dbFinal
             .from('generation_tasks')
-            .select('output_url')
-            .eq('api_task_id', resolvedJobId)
+            .select('id,status,output_url,settings')
+            .eq('id', waitResult.taskId)
             .maybeSingle();
-          if (tFinal?.output_url && isSupabasePublicUrl(tFinal.output_url)) {
+
+          if (finalSelectError || !tFinal) {
+            // DB error or task gone — can't confirm expiry, keep client polling
+            return res.status(200).json({
+              ok: true,
+              done: false,
+              jobStatus: 'processing',
+              resultPending: true,
+              jobId: resolvedJobId,
+              originalJobId: jobId,
+              pollingUrl,
+              statusUrl,
+              checkedAt: new Date().toISOString()
+            });
+          }
+
+          // Re-check DB output_url first
+          if (tFinal.output_url && isSupabasePublicUrl(tFinal.output_url)) {
             const pc = await verifyPublicObject(tFinal.output_url);
             if (pc.ok) {
               videoUrl = tFinal.output_url;
               storage = { ok: true, videoUrl, skipped: true, reason: 'recovered-on-expiry-db' };
+              finalCheckOk = true;
             }
           }
+
+          // Re-check OpenRouter content URL if DB check did not recover
           if (!videoUrl) {
             const expiredContentUrl = openRouterContentUrl(resolvedJobId);
             if (expiredContentUrl) {
@@ -620,19 +669,58 @@ module.exports = async function handler(req, res) {
               if (expiredStorage?.ok && expiredStorage.videoUrl) {
                 videoUrl = expiredStorage.videoUrl;
                 storage = expiredStorage;
+                finalCheckOk = true;
               }
             }
           }
         }
 
-        if (!videoUrl) {
-          // All re-checks failed — refund now
+        if (!finalCheckOk) {
+          // All re-checks failed — attempt refund
           await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', `${waitReason}-timeout`).catch(() => {});
+
+          // Verify refund was committed before returning a failure response
+          const dbVerify = dbClient();
+          if (dbVerify) {
+            const { data: taskAfter, error: verifyError } = await dbVerify
+              .from('generation_tasks')
+              .select('id,status')
+              .eq('id', waitResult.taskId)
+              .maybeSingle();
+
+            if (!verifyError && taskAfter?.status === 'failed') {
+              return res.status(200).json({
+                ok: false,
+                done: false,
+                jobStatus: 'failed',
+                resultPending: false,
+                error: 'video_result_unavailable_after_wait',
+                jobId: resolvedJobId,
+                originalJobId: jobId,
+                pollingUrl,
+                statusUrl,
+                checkedAt: new Date().toISOString()
+              });
+            }
+          }
+          // DB verify error or status not yet 'failed' — keep client polling
+          return res.status(200).json({
+            ok: true,
+            done: false,
+            jobStatus: 'processing',
+            resultPending: true,
+            jobId: resolvedJobId,
+            originalJobId: jobId,
+            pollingUrl,
+            statusUrl,
+            checkedAt: new Date().toISOString()
+          });
         }
         // If videoUrl was recovered above, fall through to normal done=true path
       }
-      // waitResult===null → no matching queued/processing task (invalid jobId, or already terminal)
-      // For the 404+no-task case: fall through; explicit-failed refund logic below handles it if needed
+      // state === 'not_found': no matching queued/processing task
+      // For 404: fall through to res.status(404) response (invalid jobId behavior maintained)
+      // For completed-no-url: fall through to done=false response
     }
     // ---- End recoverable-failure grace period ----
 
