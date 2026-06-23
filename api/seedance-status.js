@@ -6,6 +6,9 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABA
 const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
 const HISTORY_TABLE = 'flowvid_video_history';
 const CREDIT_RATE = 110;
+const RESULT_WAIT_MIN_MS = 5 * 60 * 1000;
+const RESULT_WAIT_MIN_ATTEMPTS = 5;
+const RESULT_ATTEMPT_MIN_INTERVAL_MS = 10 * 1000;
 
 // ---- cost-based credit settlement ----
 
@@ -101,7 +104,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
   try {
     const { data: task } = await db
       .from('generation_tasks')
-      .select('id,user_id,credit_cost,status,prompt,mode')
+      .select('id,user_id,credit_cost,status,prompt,mode,settings')
       .eq('api_task_id', resolvedJobId)
       .in('status', ['queued', 'processing'])
       .order('created_at', { ascending: false })
@@ -109,10 +112,15 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       .maybeSingle();
     if (!task) return null;
 
+    // Remove result_wait from settings on successful completion (only if present)
+    const settingsUpdate = task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings) && 'result_wait' in task.settings
+      ? { settings: (({ result_wait, ...rest }) => rest)(task.settings) }
+      : {};
+
     // Atomic claim — prevents double-settlement on concurrent polls
     const { data: claimed } = await db
       .from('generation_tasks')
-      .update({ status: 'completed', output_url: videoUrl, updated_at: new Date().toISOString() })
+      .update({ status: 'completed', output_url: videoUrl, ...settingsUpdate, updated_at: new Date().toISOString() })
       .eq('id', task.id)
       .in('status', ['queued', 'processing', 'completed'])
       .select('id');
@@ -302,6 +310,64 @@ async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
   if (fromPurchased > 0) txRows.push({ user_id: task.user_id, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: task.id });
   if (txRows.length) await db.from('credit_transactions').insert(txRows);
 }
+
+// ---- result-wait grace period helpers ----
+
+function isResultWaitExpired(wait) {
+  if (!wait || !wait.started_at) return false;
+  const elapsed = Date.now() - new Date(wait.started_at).getTime();
+  return elapsed >= RESULT_WAIT_MIN_MS && Number(wait.attempts || 0) >= RESULT_WAIT_MIN_ATTEMPTS;
+}
+
+// Read-modify-write settings.result_wait for a queued/processing task.
+// Only increments attempts when ≥10 s have passed since last attempt (prevents rapid-fire inflation).
+// Returns { taskId, wait } when a matching task is found, or null otherwise.
+async function recordResultWait(db, resolvedJobId, reason) {
+  if (!db || !resolvedJobId) return null;
+  try {
+    const { data: task } = await db
+      .from('generation_tasks')
+      .select('id,settings')
+      .eq('api_task_id', resolvedJobId)
+      .in('status', ['queued', 'processing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!task) return null;
+
+    const now = new Date().toISOString();
+    const existingSettings = task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings)
+      ? task.settings : {};
+    const existingWait = existingSettings.result_wait && typeof existingSettings.result_wait === 'object' && !Array.isArray(existingSettings.result_wait)
+      ? existingSettings.result_wait : {};
+
+    const startedAt = existingWait.started_at || now;
+    const lastAttemptAt = existingWait.last_attempt_at || null;
+    const msSinceLast = lastAttemptAt ? (Date.now() - new Date(lastAttemptAt).getTime()) : Infinity;
+    const currentAttempts = Number(existingWait.attempts || 0);
+    const newAttempts = msSinceLast >= RESULT_ATTEMPT_MIN_INTERVAL_MS ? currentAttempts + 1 : currentAttempts;
+
+    const newWait = {
+      started_at: startedAt,
+      attempts: newAttempts,
+      last_attempt_at: now,
+      last_error: String(reason || 'unknown').slice(0, 100)
+    };
+
+    const newSettings = { ...existingSettings, result_wait: newWait };
+    await db
+      .from('generation_tasks')
+      .update({ settings: newSettings, updated_at: now })
+      .eq('id', task.id)
+      .in('status', ['queued', 'processing']);
+
+    return { taskId: task.id, wait: newWait };
+  } catch (_) {
+    return null;
+  }
+}
+
+// ---- end result-wait grace period helpers ----
 
 function extFromContentType(contentType) {
   const type = String(contentType || '').toLowerCase();
@@ -505,6 +571,71 @@ module.exports = async function handler(req, res) {
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
 
+    // ---- Recoverable-failure grace period ----
+    // Applies when: status endpoint returned 404, OR OpenRouter says completed but no video URL
+    // yet available. We track wait state in generation_tasks.settings.result_wait and only
+    // trigger a refund after both 5 min elapsed AND 5 failed attempts.
+    if (!videoUrl && (isCompletedStatus(jobStatus) || response.status === 404)) {
+      const waitReason = response.status === 404 ? 'status-404' : 'completed-no-url';
+      const dbWait = dbClient();
+      let waitResult = null;
+      if (dbWait) waitResult = await recordResultWait(dbWait, resolvedJobId, waitReason).catch(() => null);
+
+      if (waitResult !== null) {
+        if (!isResultWaitExpired(waitResult.wait)) {
+          // Still within grace period — return HTTP 200 so client keeps polling.
+          // This prevents a 404 status code from causing the client to stop immediately.
+          return res.status(200).json({
+            ok: true,
+            done: false,
+            jobStatus: 'processing',
+            resultPending: true,
+            jobId: resolvedJobId,
+            originalJobId: jobId,
+            pollingUrl,
+            statusUrl,
+            checkedAt: new Date().toISOString()
+          });
+        }
+
+        // Grace period expired: one final re-check before committing to a refund
+        const dbFinal = dbClient();
+        if (dbFinal) {
+          const { data: tFinal } = await dbFinal
+            .from('generation_tasks')
+            .select('output_url')
+            .eq('api_task_id', resolvedJobId)
+            .maybeSingle();
+          if (tFinal?.output_url && isSupabasePublicUrl(tFinal.output_url)) {
+            const pc = await verifyPublicObject(tFinal.output_url);
+            if (pc.ok) {
+              videoUrl = tFinal.output_url;
+              storage = { ok: true, videoUrl, skipped: true, reason: 'recovered-on-expiry-db' };
+            }
+          }
+          if (!videoUrl) {
+            const expiredContentUrl = openRouterContentUrl(resolvedJobId);
+            if (expiredContentUrl) {
+              const expiredStorage = await persistVideo({ jobId: resolvedJobId, videoUrl: expiredContentUrl, apiKey });
+              if (expiredStorage?.ok && expiredStorage.videoUrl) {
+                videoUrl = expiredStorage.videoUrl;
+                storage = expiredStorage;
+              }
+            }
+          }
+        }
+
+        if (!videoUrl) {
+          // All re-checks failed — refund now
+          await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', `${waitReason}-timeout`).catch(() => {});
+        }
+        // If videoUrl was recovered above, fall through to normal done=true path
+      }
+      // waitResult===null → no matching queued/processing task (invalid jobId, or already terminal)
+      // For the 404+no-task case: fall through; explicit-failed refund logic below handles it if needed
+    }
+    // ---- End recoverable-failure grace period ----
+
     const done = Boolean(videoUrl);
 
     // Settle final credits on successful completion (once, via atomic task claim)
@@ -512,6 +643,26 @@ module.exports = async function handler(req, res) {
     let finalCreditsResult = null;
     if (done) {
       finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+    }
+
+    // Detect late completion: video found but task was already refunded (status='failed')
+    if (done && finalCreditsResult === null) {
+      try {
+        const dbLate = dbClient();
+        if (dbLate) {
+          const { data: taskLate } = await dbLate
+            .from('generation_tasks')
+            .select('id,status')
+            .eq('api_task_id', resolvedJobId)
+            .maybeSingle();
+          if (taskLate?.status === 'failed') {
+            console.warn('[seedance-status] late_completed_after_refund', {
+              jobId: resolvedJobId,
+              taskId: taskLate.id
+            });
+          }
+        }
+      } catch (_) {}
     }
 
     // Apply watermark for free users on successful completion
@@ -574,12 +725,10 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // Refund credits on terminal failure:
-    // - response.ok + isFailedStatus: OpenRouter confirmed the job failed
-    // - response.status === 404: job not found; client treats ≥400 as failed
-    //   and stops polling, so this is the only chance to refund
-    const terminalFailure = (response.ok && isFailedStatus(jobStatus)) || response.status === 404;
-    if (terminalFailure && !done) {
+    // Refund credits on explicit terminal failure (failed/error/cancelled from OpenRouter).
+    // HTTP 404 is now handled by the recoverable-failure grace period block above,
+    // which delays refunds until both 5 min elapsed AND 5 failed attempts.
+    if (response.ok && isFailedStatus(jobStatus) && !done) {
       const orErrorMsg = (data && typeof data === 'object') ? (data.error || data.message || JSON.stringify(data).slice(0, 200)) : String(data || '').slice(0, 200);
       await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', orErrorMsg).catch(() => {});
     }
