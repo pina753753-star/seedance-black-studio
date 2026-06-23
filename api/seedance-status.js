@@ -114,31 +114,47 @@ async function creditDeltaRefund(db, userId, taskId, amount) {
     return;
   }
 
+  // Capture read values for optimistic lock WHERE conditions
+  const currentSubscription = Number(bal.subscription_credits || 0);
+  const currentFree         = Number(bal.free_credits         || 0);
+  const currentPurchased    = Number(bal.purchased_credits    || 0);
+
   // Build update payload — only touch pools that receive a refund
   const updateFields = { updated_at: new Date().toISOString() };
-  if (refundSubscription > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + refundSubscription;
-  if (refundFree         > 0) updateFields.free_credits          = Number(bal.free_credits          || 0) + refundFree;
-  if (refundPurchased    > 0) updateFields.purchased_credits     = Number(bal.purchased_credits     || 0) + refundPurchased;
+  if (refundSubscription > 0) updateFields.subscription_credits = currentSubscription + refundSubscription;
+  if (refundFree         > 0) updateFields.free_credits          = currentFree         + refundFree;
+  if (refundPurchased    > 0) updateFields.purchased_credits     = currentPurchased    + refundPurchased;
 
-  const { error: updateError } = await db
+  // Optimistic lock: WHERE includes all three read values so a concurrent change
+  // causes 0 rows to be matched, preventing double-update.
+  const { data: updateResult, error: updateError } = await db
     .from('credit_balances')
     .update(updateFields)
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .eq('subscription_credits', currentSubscription)
+    .eq('free_credits',         currentFree)
+    .eq('purchased_credits',    currentPurchased)
+    .select('user_id');
 
-  if (updateError) {
+  if (updateError || !Array.isArray(updateResult) || updateResult.length !== 1) {
     console.warn('[seedance-status] credit_delta_refund_skipped', {
       taskId,
-      reason: 'usage_breakdown_unavailable'
+      reason: 'concurrent_balance_update'
     });
     return;
   }
 
-  // Record per-pool refund transactions (only for pools with a positive refund)
+  // Record per-pool refund transactions — only after confirmed balance update
   const txRows = [];
   if (refundSubscription > 0) txRows.push({ user_id: userId, amount: refundSubscription, credit_type: 'subscription', reason: 'cost_based_refund', related_task_id: taskId });
   if (refundFree         > 0) txRows.push({ user_id: userId, amount: refundFree,         credit_type: 'free',         reason: 'cost_based_refund', related_task_id: taskId });
   if (refundPurchased    > 0) txRows.push({ user_id: userId, amount: refundPurchased,     credit_type: 'purchased',    reason: 'cost_based_refund', related_task_id: taskId });
-  if (txRows.length) await db.from('credit_transactions').insert(txRows);
+  if (txRows.length) {
+    const { error: insertError } = await db.from('credit_transactions').insert(txRows);
+    if (insertError) {
+      console.warn('[seedance-status] credit_delta_refund_ledger_failed', { taskId });
+    }
+  }
 }
 
 // Charge additional delta. Returns shortfall (0 if fully charged).
