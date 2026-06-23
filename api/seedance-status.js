@@ -6,6 +6,9 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABA
 const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
 const HISTORY_TABLE = 'flowvid_video_history';
 const CREDIT_RATE = 110;
+const RESULT_WAIT_MIN_MS = 5 * 60 * 1000;
+const RESULT_WAIT_MIN_ATTEMPTS = 5;
+const RESULT_ATTEMPT_MIN_INTERVAL_MS = 10 * 1000;
 
 // ---- cost-based credit settlement ----
 
@@ -101,7 +104,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
   try {
     const { data: task } = await db
       .from('generation_tasks')
-      .select('id,user_id,credit_cost,status,prompt,mode')
+      .select('id,user_id,credit_cost,status,prompt,mode,settings')
       .eq('api_task_id', resolvedJobId)
       .in('status', ['queued', 'processing'])
       .order('created_at', { ascending: false })
@@ -109,10 +112,15 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       .maybeSingle();
     if (!task) return null;
 
+    // Remove result_wait from settings on successful completion (only if present)
+    const settingsUpdate = task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings) && 'result_wait' in task.settings
+      ? { settings: (({ result_wait, ...rest }) => rest)(task.settings) }
+      : {};
+
     // Atomic claim — prevents double-settlement on concurrent polls
     const { data: claimed } = await db
       .from('generation_tasks')
-      .update({ status: 'completed', output_url: videoUrl, updated_at: new Date().toISOString() })
+      .update({ status: 'completed', output_url: videoUrl, ...settingsUpdate, updated_at: new Date().toISOString() })
       .eq('id', task.id)
       .in('status', ['queued', 'processing', 'completed'])
       .select('id');
@@ -302,6 +310,77 @@ async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
   if (fromPurchased > 0) txRows.push({ user_id: task.user_id, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: task.id });
   if (txRows.length) await db.from('credit_transactions').insert(txRows);
 }
+
+// ---- result-wait grace period helpers ----
+
+function isResultWaitExpired(wait) {
+  if (!wait || !wait.started_at) return false;
+  const startedMs = new Date(wait.started_at).getTime();
+  if (!Number.isFinite(startedMs)) return false;
+  const elapsed = Date.now() - startedMs;
+  const attempts = Number(wait.attempts);
+  if (!Number.isFinite(attempts) || !Number.isInteger(attempts) || attempts < 0) return false;
+  return elapsed >= RESULT_WAIT_MIN_MS && attempts >= RESULT_WAIT_MIN_ATTEMPTS;
+}
+
+// Read-modify-write settings.result_wait for a queued/processing task.
+// Returns structured state: { state: 'ok'|'not_found'|'db_error'|'stale', taskId?, wait? }
+// Only increments attempts and last_attempt_at when ≥10 s have passed (prevents rapid-fire inflation).
+// When < 10 s since last attempt: returns current wait state without any DB write.
+async function recordResultWait(db, resolvedJobId, reason) {
+  if (!db || !resolvedJobId) return { state: 'not_found' };
+
+  const { data: task, error: selectError } = await db
+    .from('generation_tasks')
+    .select('id,settings')
+    .eq('api_task_id', resolvedJobId)
+    .in('status', ['queued', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (selectError) return { state: 'db_error' };
+  if (!task) return { state: 'not_found' };
+
+  const now = new Date().toISOString();
+  const existingSettings = task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings)
+    ? task.settings : {};
+  const existingWait = existingSettings.result_wait && typeof existingSettings.result_wait === 'object' && !Array.isArray(existingSettings.result_wait)
+    ? existingSettings.result_wait : {};
+
+  const startedAt = existingWait.started_at || now;
+  const lastAttemptAt = existingWait.last_attempt_at || null;
+  const msSinceLast = lastAttemptAt ? (Date.now() - new Date(lastAttemptAt).getTime()) : Infinity;
+  const currentAttempts = Number(existingWait.attempts || 0);
+
+  if (msSinceLast < RESULT_ATTEMPT_MIN_INTERVAL_MS) {
+    // Too soon — return current state without any DB write
+    return { state: 'ok', taskId: task.id, wait: existingWait };
+  }
+
+  const newAttempts = currentAttempts + 1;
+  const newWait = {
+    started_at: startedAt,
+    attempts: newAttempts,
+    last_attempt_at: now,
+    last_error: String(reason || 'unknown').slice(0, 100)
+  };
+
+  const newSettings = { ...existingSettings, result_wait: newWait };
+  const { data: updated, error: updateError } = await db
+    .from('generation_tasks')
+    .update({ settings: newSettings, updated_at: now })
+    .eq('id', task.id)
+    .in('status', ['queued', 'processing'])
+    .select('id');
+
+  if (updateError) return { state: 'db_error' };
+  if (!updated || updated.length === 0) return { state: 'stale', taskId: task.id, wait: existingWait };
+
+  return { state: 'ok', taskId: task.id, wait: newWait };
+}
+
+// ---- end result-wait grace period helpers ----
 
 function extFromContentType(contentType) {
   const type = String(contentType || '').toLowerCase();
@@ -505,6 +584,146 @@ module.exports = async function handler(req, res) {
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
 
+    // ---- Recoverable-failure grace period ----
+    // Applies when: status endpoint returned 404, OR OpenRouter says completed but no video URL
+    // yet available. We track wait state in generation_tasks.settings.result_wait and only
+    // trigger a refund after both 5 min elapsed AND 5 failed attempts.
+    if (!videoUrl && (isCompletedStatus(jobStatus) || response.status === 404)) {
+      const waitReason = response.status === 404 ? 'status-404' : 'completed-no-url';
+      const dbWait = dbClient();
+      let waitResult = { state: 'db_error' };
+      if (dbWait) waitResult = await recordResultWait(dbWait, resolvedJobId, waitReason).catch(() => ({ state: 'db_error' }));
+
+      if (waitResult.state === 'db_error' || waitResult.state === 'stale') {
+        // DB unreachable or task status changed under us — don't refund, keep client polling
+        return res.status(200).json({
+          ok: true,
+          done: false,
+          jobStatus: 'processing',
+          resultPending: true,
+          jobId: resolvedJobId,
+          originalJobId: jobId,
+          pollingUrl,
+          statusUrl,
+          checkedAt: new Date().toISOString()
+        });
+      }
+
+      if (waitResult.state === 'ok') {
+        if (!isResultWaitExpired(waitResult.wait)) {
+          // Still within grace period — return HTTP 200 so client keeps polling.
+          // This prevents a 404 status code from causing the client to stop immediately.
+          return res.status(200).json({
+            ok: true,
+            done: false,
+            jobStatus: 'processing',
+            resultPending: true,
+            jobId: resolvedJobId,
+            originalJobId: jobId,
+            pollingUrl,
+            statusUrl,
+            checkedAt: new Date().toISOString()
+          });
+        }
+
+        // Grace period expired: final re-check by task ID before committing to a refund
+        const dbFinal = dbClient();
+        let finalCheckOk = false;
+        if (dbFinal) {
+          const { data: tFinal, error: finalSelectError } = await dbFinal
+            .from('generation_tasks')
+            .select('id,status,output_url,settings')
+            .eq('id', waitResult.taskId)
+            .maybeSingle();
+
+          if (finalSelectError || !tFinal) {
+            // DB error or task gone — can't confirm expiry, keep client polling
+            return res.status(200).json({
+              ok: true,
+              done: false,
+              jobStatus: 'processing',
+              resultPending: true,
+              jobId: resolvedJobId,
+              originalJobId: jobId,
+              pollingUrl,
+              statusUrl,
+              checkedAt: new Date().toISOString()
+            });
+          }
+
+          // Re-check DB output_url first
+          if (tFinal.output_url && isSupabasePublicUrl(tFinal.output_url)) {
+            const pc = await verifyPublicObject(tFinal.output_url);
+            if (pc.ok) {
+              videoUrl = tFinal.output_url;
+              storage = { ok: true, videoUrl, skipped: true, reason: 'recovered-on-expiry-db' };
+              finalCheckOk = true;
+            }
+          }
+
+          // Re-check OpenRouter content URL if DB check did not recover
+          if (!videoUrl) {
+            const expiredContentUrl = openRouterContentUrl(resolvedJobId);
+            if (expiredContentUrl) {
+              const expiredStorage = await persistVideo({ jobId: resolvedJobId, videoUrl: expiredContentUrl, apiKey });
+              if (expiredStorage?.ok && expiredStorage.videoUrl) {
+                videoUrl = expiredStorage.videoUrl;
+                storage = expiredStorage;
+                finalCheckOk = true;
+              }
+            }
+          }
+        }
+
+        if (!finalCheckOk) {
+          // All re-checks failed — attempt refund
+          await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', `${waitReason}-timeout`).catch(() => {});
+
+          // Verify refund was committed before returning a failure response
+          const dbVerify = dbClient();
+          if (dbVerify) {
+            const { data: taskAfter, error: verifyError } = await dbVerify
+              .from('generation_tasks')
+              .select('id,status')
+              .eq('id', waitResult.taskId)
+              .maybeSingle();
+
+            if (!verifyError && taskAfter?.status === 'failed') {
+              return res.status(200).json({
+                ok: false,
+                done: false,
+                jobStatus: 'failed',
+                resultPending: false,
+                error: 'video_result_unavailable_after_wait',
+                jobId: resolvedJobId,
+                originalJobId: jobId,
+                pollingUrl,
+                statusUrl,
+                checkedAt: new Date().toISOString()
+              });
+            }
+          }
+          // DB verify error or status not yet 'failed' — keep client polling
+          return res.status(200).json({
+            ok: true,
+            done: false,
+            jobStatus: 'processing',
+            resultPending: true,
+            jobId: resolvedJobId,
+            originalJobId: jobId,
+            pollingUrl,
+            statusUrl,
+            checkedAt: new Date().toISOString()
+          });
+        }
+        // If videoUrl was recovered above, fall through to normal done=true path
+      }
+      // state === 'not_found': no matching queued/processing task
+      // For 404: fall through to res.status(404) response (invalid jobId behavior maintained)
+      // For completed-no-url: fall through to done=false response
+    }
+    // ---- End recoverable-failure grace period ----
+
     const done = Boolean(videoUrl);
 
     // Settle final credits on successful completion (once, via atomic task claim)
@@ -512,6 +731,26 @@ module.exports = async function handler(req, res) {
     let finalCreditsResult = null;
     if (done) {
       finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+    }
+
+    // Detect late completion: video found but task was already refunded (status='failed')
+    if (done && finalCreditsResult === null) {
+      try {
+        const dbLate = dbClient();
+        if (dbLate) {
+          const { data: taskLate } = await dbLate
+            .from('generation_tasks')
+            .select('id,status')
+            .eq('api_task_id', resolvedJobId)
+            .maybeSingle();
+          if (taskLate?.status === 'failed') {
+            console.warn('[seedance-status] late_completed_after_refund', {
+              jobId: resolvedJobId,
+              taskId: taskLate.id
+            });
+          }
+        }
+      } catch (_) {}
     }
 
     // Apply watermark for free users on successful completion
@@ -574,12 +813,10 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // Refund credits on terminal failure:
-    // - response.ok + isFailedStatus: OpenRouter confirmed the job failed
-    // - response.status === 404: job not found; client treats ≥400 as failed
-    //   and stops polling, so this is the only chance to refund
-    const terminalFailure = (response.ok && isFailedStatus(jobStatus)) || response.status === 404;
-    if (terminalFailure && !done) {
+    // Refund credits on explicit terminal failure (failed/error/cancelled from OpenRouter).
+    // HTTP 404 is now handled by the recoverable-failure grace period block above,
+    // which delays refunds until both 5 min elapsed AND 5 failed attempts.
+    if (response.ok && isFailedStatus(jobStatus) && !done) {
       const orErrorMsg = (data && typeof data === 'object') ? (data.error || data.message || JSON.stringify(data).slice(0, 200)) : String(data || '').slice(0, 200);
       await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', orErrorMsg).catch(() => {});
     }
