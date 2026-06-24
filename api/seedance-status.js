@@ -861,6 +861,7 @@ module.exports = async function handler(req, res) {
     }
 
     // Apply watermark for free users on successful completion
+    let responseVideoUrl = videoUrl;
     if (done && videoUrl) {
       try {
         const db2 = dbClient();
@@ -907,6 +908,7 @@ module.exports = async function handler(req, res) {
                   await db2.from('generation_tasks').update(
                     { watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() }
                   ).eq('api_task_id', resolvedJobId);
+                  responseVideoUrl = wmData.watermarkedUrl;
                 }
               } else {
                 const wmErrText = await wmRes.text().catch(() => '');
@@ -938,7 +940,7 @@ module.exports = async function handler(req, res) {
       statusUrl,
       jobStatus,
       done,
-      videoUrl,
+      videoUrl: responseVideoUrl,
       costUsd: costUsd ?? null,
       finalCredits: finalCreditsResult?.finalCredits ?? null,
       estimatedCredits: finalCreditsResult?.estimatedCredits ?? null,
