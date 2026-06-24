@@ -91,70 +91,36 @@ async function readGeneratedVideos(db, limit) {
 }
 
 async function readFlowvidHistory(db, limit, userId) {
-  if (userId) {
-    const { data, error } = await db
-      .from('generation_tasks')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('status', 'completed')
-      .not('output_url', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    if (error) return { rows: [], error: error.message };
-    const rows = (data || []).map(task => {
-      const dur = Number(task.duration_seconds);
-      const watermarkedUrl = validVideoUrl(task.watermarked_url || '');
-      const outputUrl = validVideoUrl(task.output_url || '');
-      return {
-        id: task.id,
-        job_id: task.api_task_id || task.id,
-        status: 'completed',
-        prompt: task.prompt || '',
-        mode: task.mode || '',
-        video_url: watermarkedUrl || outputUrl || '',
-        reference_urls: [],
-        settings: task.settings || {},
-        created_at: task.created_at,
-        updated_at: task.updated_at,
-        duration_seconds: Number.isFinite(dur) && dur > 0 ? dur : 5,
-        aspect_ratio: task.aspect_ratio || '9:16',
-        watermarked_url: task.watermarked_url || ''
-      };
-    });
-    return { rows: rows.map(normalizeHistoryRow).filter(Boolean), error: null };
-  }
+  if (!userId) return { rows: [], error: 'missing_authenticated_user' };
   const { data, error } = await db
-    .from('flowvid_video_history')
+    .from('generation_tasks')
     .select('*')
+    .eq('user_id', userId)
     .eq('status', 'completed')
-    .not('video_url', 'is', null)
-    .order('updated_at', { ascending: false })
+    .not('output_url', 'is', null)
+    .order('created_at', { ascending: false })
     .limit(limit);
-
   if (error) return { rows: [], error: error.message };
-  const rows = (data || []);
-
-  // Find rows missing mode or prompt — backfill from generation_tasks via api_task_id
-  const needsBackfill = rows.filter(r => !r.mode || !r.prompt);
-  if (needsBackfill.length > 0) {
-    const jobIds = needsBackfill.map(r => r.job_id).filter(Boolean);
-    if (jobIds.length > 0) {
-      const { data: tasks } = await db
-        .from('generation_tasks')
-        .select('api_task_id,mode,prompt')
-        .in('api_task_id', jobIds);
-      if (tasks && tasks.length) {
-        const byJobId = new Map(tasks.map(t => [t.api_task_id, t]));
-        for (const row of rows) {
-          const task = byJobId.get(row.job_id);
-          if (!task) continue;
-          if (!row.mode && task.mode) row.mode = task.mode;
-          if (!row.prompt && task.prompt) row.prompt = task.prompt;
-        }
-      }
-    }
-  }
-
+  const rows = (data || []).map(task => {
+    const dur = Number(task.duration_seconds);
+    const watermarkedUrl = validVideoUrl(task.watermarked_url || '');
+    const outputUrl = validVideoUrl(task.output_url || '');
+    return {
+      id: task.id,
+      job_id: task.api_task_id || task.id,
+      status: 'completed',
+      prompt: task.prompt || '',
+      mode: task.mode || '',
+      video_url: watermarkedUrl || outputUrl || '',
+      reference_urls: [],
+      settings: task.settings || {},
+      created_at: task.created_at,
+      updated_at: task.updated_at,
+      duration_seconds: Number.isFinite(dur) && dur > 0 ? dur : 5,
+      aspect_ratio: task.aspect_ratio || '9:16',
+      watermarked_url: task.watermarked_url || ''
+    };
+  });
   return { rows: rows.map(normalizeHistoryRow).filter(Boolean), error: null };
 }
 
@@ -194,7 +160,7 @@ module.exports = async function handler(req, res) {
       ok: true,
       rows,
       sources: {
-        flowvid_video_history: { count: history.rows.length, error: history.error },
+        generation_tasks: { count: history.rows.length, error: history.error },
         hidden_broken_job_ids: Array.from(BROKEN_JOB_IDS)
       }
     });
