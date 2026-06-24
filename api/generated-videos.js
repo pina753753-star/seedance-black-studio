@@ -173,7 +173,7 @@ module.exports = async function handler(req, res) {
         const generated = await readGeneratedVideos(db, limit);
         return res.status(200).json({ ok: true, rows: generated.rows });
       }
-      return res.status(200).json({ ok: true, rows: [] });
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
 
     const history = await readFlowvidHistory(db, limit, userId);
