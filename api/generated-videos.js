@@ -103,13 +103,15 @@ async function readFlowvidHistory(db, limit, userId) {
     if (error) return { rows: [], error: error.message };
     const rows = (data || []).map(task => {
       const dur = Number(task.duration_seconds);
+      const watermarkedUrl = validVideoUrl(task.watermarked_url || '');
+      const outputUrl = validVideoUrl(task.output_url || '');
       return {
         id: task.id,
         job_id: task.api_task_id || task.id,
         status: 'completed',
         prompt: task.prompt || '',
         mode: task.mode || '',
-        video_url: task.watermarked_url || task.output_url || '',
+        video_url: watermarkedUrl || outputUrl || '',
         reference_urls: [],
         settings: task.settings || {},
         created_at: task.created_at,
