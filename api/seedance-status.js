@@ -10,6 +10,14 @@ const RESULT_WAIT_MIN_MS = 5 * 60 * 1000;
 const RESULT_WAIT_MIN_ATTEMPTS = 5;
 const RESULT_ATTEMPT_MIN_INTERVAL_MS = 10 * 1000;
 
+function validWatermarkUrl(url) {
+  const value = String(url || '').trim();
+  if (!/^https:\/\//i.test(value)) return '';
+  if (/\.(mp4|mov|webm)(\?|$)/i.test(value)) return value;
+  if (/\/storage\/v1\/object\/public\//i.test(value)) return value;
+  return '';
+}
+
 // ---- cost-based credit settlement ----
 
 function extractCostUsd(data) {
@@ -861,6 +869,7 @@ module.exports = async function handler(req, res) {
     }
 
     // Apply watermark for free users on successful completion
+    let responseVideoUrl = videoUrl;
     if (done && videoUrl) {
       try {
         const db2 = dbClient();
@@ -899,14 +908,18 @@ module.exports = async function handler(req, res) {
               if (wmRes.ok) {
                 const wmData = await wmRes.json();
                 console.log('[watermark] wmData:', JSON.stringify(wmData));
-                if (wmData?.watermarkedUrl) {
+                const validWmUrl = validWatermarkUrl(wmData?.watermarkedUrl || '');
+                if (validWmUrl) {
                   await db2.from(HISTORY_TABLE).upsert(
-                    { job_id: resolvedJobId, watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() },
+                    { job_id: resolvedJobId, watermarked_url: validWmUrl, updated_at: new Date().toISOString() },
                     { onConflict: 'job_id' }
                   );
                   await db2.from('generation_tasks').update(
-                    { watermarked_url: wmData.watermarkedUrl, updated_at: new Date().toISOString() }
+                    { watermarked_url: validWmUrl, updated_at: new Date().toISOString() }
                   ).eq('api_task_id', resolvedJobId);
+                  responseVideoUrl = validWmUrl;
+                } else if (wmData?.watermarkedUrl) {
+                  console.log('[watermark] invalid watermarkedUrl rejected:', String(wmData.watermarkedUrl).slice(0, 200));
                 }
               } else {
                 const wmErrText = await wmRes.text().catch(() => '');
@@ -938,7 +951,7 @@ module.exports = async function handler(req, res) {
       statusUrl,
       jobStatus,
       done,
-      videoUrl,
+      videoUrl: responseVideoUrl,
       costUsd: costUsd ?? null,
       finalCredits: finalCreditsResult?.finalCredits ?? null,
       estimatedCredits: finalCreditsResult?.estimatedCredits ?? null,

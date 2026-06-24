@@ -101,18 +101,26 @@ async function readFlowvidHistory(db, limit, userId) {
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) return { rows: [], error: error.message };
-    const rows = (data || []).map(task => ({
-      id: task.id,
-      job_id: task.api_task_id || task.id,
-      status: 'completed',
-      prompt: task.prompt || '',
-      mode: task.mode || '',
-      video_url: task.output_url || '',
-      reference_urls: [],
-      settings: task.settings || {},
-      created_at: task.created_at,
-      updated_at: task.updated_at
-    }));
+    const rows = (data || []).map(task => {
+      const dur = Number(task.duration_seconds);
+      const watermarkedUrl = validVideoUrl(task.watermarked_url || '');
+      const outputUrl = validVideoUrl(task.output_url || '');
+      return {
+        id: task.id,
+        job_id: task.api_task_id || task.id,
+        status: 'completed',
+        prompt: task.prompt || '',
+        mode: task.mode || '',
+        video_url: watermarkedUrl || outputUrl || '',
+        reference_urls: [],
+        settings: task.settings || {},
+        created_at: task.created_at,
+        updated_at: task.updated_at,
+        duration_seconds: Number.isFinite(dur) && dur > 0 ? dur : 5,
+        aspect_ratio: task.aspect_ratio || '9:16',
+        watermarked_url: task.watermarked_url || ''
+      };
+    });
     return { rows: rows.map(normalizeHistoryRow).filter(Boolean), error: null };
   }
   const { data, error } = await db
