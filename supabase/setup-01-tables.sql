@@ -6,7 +6,7 @@ create table if not exists public.profiles (
   email text not null,
   display_name text,
   role text not null default 'user' check (role in ('user', 'admin')),
-  plan text not null default 'free' check (plan in ('free', 'standard', 'premium', 'scale', 'team')),
+  plan text not null default 'free' check (plan in ('free', 'standard', 'premium', 'ultimate', 'scale', 'team')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
