@@ -275,8 +275,11 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
         ...settingsBase,
         credit_settlement: { ...(settingsBase.credit_settlement || {}), ...creditMeta }
       };
-      await db.from('generation_tasks').update({ settings: newSettings, updated_at: new Date().toISOString() })
+      const { error: settingsDbErr } = await db.from('generation_tasks').update({ settings: newSettings, updated_at: new Date().toISOString() })
         .eq('id', task.id);
+      if (settingsDbErr) {
+        console.warn('[seedance-status] credit_settlement_settings_save_failed', { jobId: resolvedJobId, error: settingsDbErr.message || String(settingsDbErr) });
+      }
     } catch (settingsErr) {
       console.warn('[seedance-status] credit_settlement_settings_save_failed', { jobId: resolvedJobId, error: settingsErr?.message });
     }
