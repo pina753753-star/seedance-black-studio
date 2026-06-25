@@ -14,7 +14,7 @@
 <main class="wrap">
 <header class="top"><a class="brand" href="./index.html"><img src="/logo.png" alt="FlowVid Studio" style="height:auto;width:120px;display:block"></a><button class="menuBtn" id="menuBtn">☰</button></header>
 <section class="tabs"><button id="subTab" class="tab active">サブスクリプション</button><button id="creditTab" class="tab">追加クレジット</button></section>
-<section id="subscriptionView"><section class="toggle"><button id="annualBtn" class="billing">年額請求</button><button id="monthlyBtn" class="billing active">月額請求</button></section><section class="plans" id="plans"></section></section>
+<section id="subscriptionView"><section class="toggle"><button id="annualBtn" class="billing">年額請求</button><button id="monthlyBtn" class="billing active">月額請求</button></section><p class="note">動画の長さ・解像度・生成方式により消費クレジットは異なります。</p><section class="plans" id="plans"></section></section>
 <section id="creditView" class="hidden"><div class="intro"><span class="member">✦ サブスク会員限定</span><h2>追加クレジット</h2></div><section class="packs" id="packs"></section></section>
 <p class="footer">決済はStripeで安全に処理されます。解約はいつでもマイページから。</p>
 <div id="checkoutMsg" class="checkoutMsg" style="display:none"></div>
@@ -25,9 +25,9 @@
 <script>
 const plans=[
 {cls:'free',name:'Free',monthly:'0',annual:'0',period:'/月',btn:'無料で試す',credits:'100',annualCredits:'100',desc:'先着100名限定',features:['5秒動画1本お試し','ウォーターマークあり保存','追加クレジット購入不可']},
-{cls:'standard',name:'Standard',monthly:'2,980',annual:'35,800',period:'/月',btn:'Standardで始める',credits:'800',annualCredits:'9,600',desc:'月10本目安',features:['月10本目安','ウォーターマークなし保存OK','商用利用OK','追加クレジット購入OK']},
-{cls:'premium',name:'Premium',monthly:'6,980',annual:'83,800',period:'/月',btn:'Premiumにする',credits:'2,400',annualCredits:'28,800',desc:'月30本目安',features:['月30本目安','ウォーターマークなし保存OK','商用利用OK']},
-{cls:'ultimate',name:'Ultimate',monthly:'14,800',annual:'177,600',period:'/月',btn:'Ultimateにする',credits:'5,200',annualCredits:'62,400',desc:'月65本目安',features:['月65本目安','大量生成・検証向け','追加クレジット購入OK'],badge:'おすすめ'},
+{cls:'standard',name:'Standard',monthly:'2,980',annual:'35,800',period:'/月',btn:'Standardで始める',credits:'800',annualCredits:'9,600',desc:'',features:['ウォーターマークなし保存OK','商用利用OK','追加クレジット購入OK']},
+{cls:'premium',name:'Premium',monthly:'6,980',annual:'83,800',period:'/月',btn:'Premiumにする',credits:'2,200',annualCredits:'26,400',desc:'',features:['ウォーターマークなし保存OK','商用利用OK','追加クレジット購入OK']},
+{cls:'ultimate',name:'Ultimate',monthly:'15,800',annual:'189,600',period:'/月',btn:'Ultimateにする',credits:'5,000',annualCredits:'60,000',desc:'',features:['ウォーターマークなし保存OK','商用利用OK','追加クレジット購入OK'],badge:'おすすめ'},
 {cls:'team',name:'Team',monthly:'298,000',annual:'3,576,000',period:'/月',btn:'準備中',credits:'90,000',annualCredits:'1,080,000',desc:'チーム機能は後で対応',features:['複数アカウント','共有クレジット','共有アセット','チーム管理']}
 ];
 const packs=[

@@ -7,8 +7,8 @@ const SITE_URL = process.env.SITE_URL || process.env.VERCEL_URL && `https://${pr
 
 const SUBSCRIPTION_PLANS = {
   standard: { name: 'Standard', amount: 2980, credits: 800, plan: 'standard', env: 'STRIPE_PRICE_STANDARD_MONTHLY' },
-  premium: { name: 'Premium', amount: 6980, credits: 2400, plan: 'premium', env: 'STRIPE_PRICE_PREMIUM_MONTHLY' },
-  ultimate: { name: 'Ultimate', amount: 14800, credits: 5200, plan: 'ultimate', env: 'STRIPE_PRICE_ULTIMATE_MONTHLY' },
+  premium: { name: 'Premium', amount: 6980, credits: 2200, plan: 'premium', env: 'STRIPE_PRICE_PREMIUM_MONTHLY' },
+  ultimate: { name: 'Ultimate', amount: 15800, credits: 5000, plan: 'ultimate', env: 'STRIPE_PRICE_ULTIMATE_MONTHLY' },
   team: { name: 'Team', amount: 298000, credits: 90000, plan: 'team', env: 'STRIPE_PRICE_TEAM_MONTHLY' }
 };
 
