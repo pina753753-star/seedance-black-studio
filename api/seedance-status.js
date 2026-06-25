@@ -879,7 +879,7 @@ module.exports = async function handler(req, res) {
             console.log('[watermark] SKIP: wmUserId is null/undefined. resolvedJobId used for lookup:', resolvedJobId);
           }
           if (wmUserId) {
-            const PAID_PLANS = ['standard'];
+            const PAID_PLANS = ['standard', 'premium', 'ultimate', 'team'];
             const { data: profile } = await db2
               .from('profiles')
               .select('plan')
