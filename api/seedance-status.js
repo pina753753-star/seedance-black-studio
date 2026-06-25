@@ -4,7 +4,6 @@ const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
-const HISTORY_TABLE = 'flowvid_video_history';
 const CREDIT_RATE = 110;
 const RESULT_WAIT_MIN_MS = 5 * 60 * 1000;
 const RESULT_WAIT_MIN_ATTEMPTS = 5;
@@ -212,7 +211,7 @@ async function creditDeltaCharge(db, userId, taskId, amount) {
 }
 
 // Atomically claims the completed task, settles the credit delta, and
-// writes credit metadata to flowvid_video_history.settings.
+// writes credit metadata to generation_tasks.settings.credit_settlement.
 async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
   if (!db || !resolvedJobId) return null;
   try {
@@ -266,17 +265,20 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
     };
     if (taskPrompt) creditMeta.prompt = taskPrompt;
 
-    // Merge into flowvid_video_history.settings (read-then-write to avoid clobbering)
-    if (videoUrl) {
-      const { data: existing } = await db.from(HISTORY_TABLE)
-        .select('settings,prompt').eq('job_id', resolvedJobId).maybeSingle();
-      const merged = { ...(existing?.settings || {}), ...creditMeta };
-      const row = { job_id: resolvedJobId, settings: merged, updated_at: new Date().toISOString() };
-      // Always persist the prompt column so reference-mode history keeps the input prompt
-      if (taskPrompt) row.prompt = taskPrompt;
-      else if (existing?.prompt) row.prompt = existing.prompt;
-      if (task.mode) row.mode = task.mode;
-      await db.from(HISTORY_TABLE).upsert(row, { onConflict: 'job_id' });
+    // Persist credit settlement metadata to generation_tasks.settings.credit_settlement.
+    // Failure is non-fatal: log a warning and keep the successful settlement response intact.
+    try {
+      const settingsBase = settingsUpdate.settings !== undefined
+        ? settingsUpdate.settings
+        : (task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings) ? task.settings : {});
+      const newSettings = {
+        ...settingsBase,
+        credit_settlement: { ...(settingsBase.credit_settlement || {}), ...creditMeta }
+      };
+      await db.from('generation_tasks').update({ settings: newSettings, updated_at: new Date().toISOString() })
+        .eq('id', task.id);
+    } catch (settingsErr) {
+      console.warn('[seedance-status] credit_settlement_settings_save_failed', { jobId: resolvedJobId, error: settingsErr?.message });
     }
 
     return { estimatedCredits, finalCredits, costUsd, delta, shortfall, userId: task.user_id };
@@ -625,18 +627,7 @@ async function persistVideo({ jobId, videoUrl, apiKey }) {
   const publicCheck = await verifyPublicObject(publicUrl);
   if (!publicCheck.ok) return { ok: false, videoUrl: publicUrl, originalUrl: videoUrl, error: 'Uploaded object is not publicly readable as video', bucket: VIDEO_BUCKET, path, publicCheck };
 
-  let historySave = { ok: true };
-  try {
-    const { error } = await db.from(HISTORY_TABLE).upsert(
-      { job_id: jobId, status: 'completed', video_url: publicUrl, updated_at: new Date().toISOString() },
-      { onConflict: 'job_id' }
-    );
-    if (error) historySave = { ok: false, error: error.message };
-  } catch (error) {
-    historySave = { ok: false, error: error?.message || String(error) };
-  }
-
-  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length, publicCheck, historySave };
+  return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length, publicCheck };
 }
 
 module.exports = async function handler(req, res) {
@@ -910,10 +901,6 @@ module.exports = async function handler(req, res) {
                 console.log('[watermark] wmData:', JSON.stringify(wmData));
                 const validWmUrl = validWatermarkUrl(wmData?.watermarkedUrl || '');
                 if (validWmUrl) {
-                  await db2.from(HISTORY_TABLE).upsert(
-                    { job_id: resolvedJobId, watermarked_url: validWmUrl, updated_at: new Date().toISOString() },
-                    { onConflict: 'job_id' }
-                  );
                   await db2.from('generation_tasks').update(
                     { watermarked_url: validWmUrl, updated_at: new Date().toISOString() }
                   ).eq('api_task_id', resolvedJobId);
