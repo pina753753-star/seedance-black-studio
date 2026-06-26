@@ -189,31 +189,48 @@ async function refundCredits(db, userId, { fromSub, fromFree, fromPurchased }, t
   } catch (_) {}
 }
 
+// Atomically reserve a generation task via RPC.
+// The DB function acquires a per-user advisory lock then checks:
+//   1. active (queued/processing) task → rejection_reason: 'active_generation'
+//   2. cooldown (finished_at + 60s > NOW()) → rejection_reason: 'cooldown_active'
+//   3. neither → INSERT with status='queued', returns task_id
+// RPC errors abort task reservation; no direct INSERT fallback is used because
+// that would bypass the active-generation and cooldown checks.
 async function createTask(db, { userId, mode, model, prompt, resolution, duration, aspectRatio, creditCost }) {
   try {
-    const { data, error } = await db.from('generation_tasks').insert({
-      user_id: userId,
-      mode,
-      model: String(model || DEFAULT_MODEL),
-      prompt,
-      resolution,
-      duration_seconds: Number(duration),
-      aspect_ratio: aspectRatio,
-      credit_cost: creditCost,
-      status: 'queued'
-    }).select('id').single();
+    const { data, error } = await db.rpc('reserve_generation_task', {
+      p_user_id:       userId,
+      p_mode:          mode,
+      p_model:         String(model || DEFAULT_MODEL),
+      p_prompt:        prompt,
+      p_resolution:    resolution,
+      p_duration_secs: Number(duration),
+      p_aspect_ratio:  aspectRatio,
+      p_credit_cost:   creditCost
+    });
     if (error) {
-      console.error('[seedance-start] createTask error:', error.message, error.code, error.details);
-      return { id: null, code: error.code || null };
+      console.error('[seedance-start] reserve_generation_task RPC error:', error.message, error.code);
+      // A 23505 propagated by the RPC's INSERT still maps to active_generation.
+      if (error.code === '23505') return { id: null, code: '23505', rejection: 'active_generation' };
+      return { id: null, code: error.code || null, rejection: null };
     }
-    if (!data?.id) {
-      console.error('[seedance-start] createTask: no id returned');
-      return { id: null, code: null };
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) {
+      console.error('[seedance-start] reserve_generation_task: no row returned');
+      return { id: null, code: null, rejection: null };
     }
-    return { id: data.id, code: null };
+    if (row.rejection_reason) {
+      console.log('[seedance-start] reserve_generation_task rejected:', row.rejection_reason, 'retryAfter:', row.retry_after_seconds);
+      return { id: null, code: null, rejection: row.rejection_reason, retryAfterSeconds: row.retry_after_seconds || 0 };
+    }
+    if (!row.task_id) {
+      console.error('[seedance-start] reserve_generation_task: no task_id in response');
+      return { id: null, code: null, rejection: null };
+    }
+    return { id: row.task_id, code: null, rejection: null };
   } catch (err) {
     console.error('[seedance-start] createTask exception:', err?.message);
-    return { id: null, code: null };
+    return { id: null, code: null, rejection: null };
   }
 }
 
@@ -317,19 +334,31 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Create task record — MUST succeed before touching credits or calling OpenRouter.
-    // The partial unique index (queued/processing per user) enforces at-most-one
-    // active generation. Concurrent INSERT returns error code 23505 → HTTP 409.
+    // Reserve task atomically via RPC (advisory lock + active check + cooldown check + INSERT).
+    // The partial unique index (queued/processing per user) remains as a final defence.
+    // Credits and OpenRouter are never touched if reservation is rejected.
     const taskResult = await createTask(db, { userId: user.id, mode, model, prompt, resolution, duration, aspectRatio, creditCost });
     if (!taskResult.id) {
-      if (taskResult.code === '23505') {
+      // active_generation: queued/processing task exists, or 23505 from concurrent INSERT
+      if (taskResult.rejection === 'active_generation' || taskResult.code === '23505') {
         return res.status(409).json({
           ok: false,
           error: 'generation_already_in_progress',
           message: '現在生成中の動画があります。完了後にもう一度お試しください。'
         });
       }
-      console.error('[seedance-start] Aborting: task creation failed, will not deduct credits or call OpenRouter');
+      // cooldown_active: last task finished less than 60 seconds ago
+      if (taskResult.rejection === 'cooldown_active') {
+        const secs = taskResult.retryAfterSeconds || 60;
+        res.setHeader('Retry-After', String(secs));
+        return res.status(429).json({
+          ok: false,
+          error: 'generation_cooldown_active',
+          message: `前回の生成終了から60秒間は再生成できません。あと${secs}秒お待ちください。`,
+          retryAfterSeconds: secs
+        });
+      }
+      console.error('[seedance-start] Aborting: task reservation failed, will not deduct credits or call OpenRouter');
       return res.status(500).json({ ok: false, error: 'タスクの作成に失敗しました。もう一度お試しください。' });
     }
     taskId = taskResult.id;
