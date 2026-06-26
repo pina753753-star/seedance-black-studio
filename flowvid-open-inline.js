@@ -1,4 +1,15 @@
 (function(){
+  function applyFastModelLabel(){
+    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
+    const select=document.getElementById('model');
+    if(!select)return;
+    const option=Array.from(select.options).find(item=>item.value==='bytedance/seedance-2.0-lite');
+    if(option){
+      option.value='bytedance/seedance-2.0-fast';
+      option.textContent='Seedance 2.0 Fast';
+    }
+  }
+
   function ensureGenerateHistory(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.getElementById('history'))return;
@@ -117,5 +128,6 @@
     openOverlay(url);
   },true);
   window.fvOpenOverlay=openOverlay;
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureGenerateHistory);else ensureGenerateHistory();
+  function boot(){applyFastModelLabel();ensureGenerateHistory()}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
