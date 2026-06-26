@@ -1,5 +1,3 @@
-const coreHandler = require('./seedance-start.js');
-
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
 const FAST_MODEL = 'bytedance/seedance-2.0-fast';
 const LEGACY_LITE_MODEL = 'bytedance/seedance-2.0-lite';
@@ -7,9 +5,6 @@ const ALLOWED_MODELS = new Set([DEFAULT_MODEL, FAST_MODEL]);
 const MIN_CREDITS = 50;
 const MAX_CREDITS = 500;
 
-// OpenRouter currently advertises Fast at 0.0000056 versus Standard at
-// 0.000007 for the comparable pricing SKU. FlowVid applies the same 0.8
-// ratio to its existing Standard credit formula.
 const MODEL_CREDIT_MULTIPLIERS = {
   [DEFAULT_MODEL]: 1,
   [FAST_MODEL]: 0.8
@@ -64,9 +59,7 @@ function countReferenceInputs(body, mode) {
 
 function calculateCreditCost({ model, mode, duration, resolution, referenceCount }) {
   let credits;
-
   if (mode === 'storyboard') {
-    // Preserve the existing storyboard price: duration * 12, minimum 50.
     credits = Math.max(MIN_CREDITS, duration * 12);
   } else {
     credits = 80;
@@ -77,16 +70,27 @@ function calculateCreditCost({ model, mode, duration, resolution, referenceCount
     if (mode === 'text_to_video') credits -= 10;
     credits += 15;
   }
-
   const multiplier = MODEL_CREDIT_MULTIPLIERS[model] || 1;
-  return Math.max(
-    MIN_CREDITS,
-    Math.min(MAX_CREDITS, Math.round(credits * multiplier))
-  );
+  return Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, Math.round(credits * multiplier)));
 }
 
-async function handler(req, res) {
-  if (req.method !== 'POST') return coreHandler(req, res);
+function originalStartUrl(req) {
+  const forwardedProto = String(req.headers?.['x-forwarded-proto'] || '').split(',')[0].trim();
+  const protocol = forwardedProto || 'https';
+  const host = String(req.headers?.host || '').trim();
+  if (!host) return null;
+  return `${protocol}://${host}/api/seedance-start`;
+}
+
+module.exports = async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(200).json({
+      ok: true,
+      endpoint: '/api/seedance-start-priced',
+      method: 'POST',
+      allowedModels: Array.from(ALLOWED_MODELS)
+    });
+  }
 
   const body = jsonBody(req);
   const model = normalizeModel(body.model);
@@ -103,35 +107,31 @@ async function handler(req, res) {
   const duration = normalizeDuration(body.duration || body.duration_seconds);
   const resolution = normalizeResolution(body.resolution);
   const referenceCount = countReferenceInputs(body, mode);
-  const creditCost = calculateCreditCost({
-    model,
-    mode,
-    duration,
-    resolution,
-    referenceCount
-  });
+  const creditCost = calculateCreditCost({model, mode, duration, resolution, referenceCount});
+  const target = originalStartUrl(req);
+  if (!target) return res.status(500).json({ok:false,error:'Missing request host'});
 
-  const clientEstimate = Math.round(Number(body.estimated_credits) || 0);
-  if (clientEstimate && clientEstimate !== creditCost) {
-    console.warn(
-      '[seedance-start-priced] client estimate mismatch:',
-      clientEstimate,
-      'server:',
-      creditCost,
-      'model:',
-      model
-    );
+  try {
+    const upstream = await fetch(target, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: String(req.headers?.authorization || '')
+      },
+      body: JSON.stringify({...body, model, estimated_credits: creditCost})
+    });
+    const text = await upstream.text();
+    const contentType = upstream.headers.get('content-type');
+    const retryAfter = upstream.headers.get('retry-after');
+    if (contentType) res.setHeader('Content-Type', contentType);
+    if (retryAfter) res.setHeader('Retry-After', retryAfter);
+    return res.status(upstream.status).send(text);
+  } catch (error) {
+    console.error('[seedance-start-priced] proxy error:', error?.message);
+    return res.status(502).json({
+      ok: false,
+      error: 'generation_start_proxy_failed',
+      message: '生成開始処理への接続に失敗しました。再度生成せず、ログを確認してください。'
+    });
   }
-
-  req.body = {
-    ...body,
-    model,
-    estimated_credits: creditCost
-  };
-
-  return coreHandler(req, res);
-}
-
-module.exports = handler;
-module.exports.calculateCreditCost = calculateCreditCost;
-module.exports.normalizeModel = normalizeModel;
+};
