@@ -5,6 +5,9 @@
   const FAVORITES_KEY='flowvidFavoriteJobs';
   const LAST_JOB_KEY='flowvidLastSeedanceJobId';
   const HIDDEN_KEY='flowvidHiddenVideos';
+  const STANDARD_MODEL='bytedance/seedance-2.0';
+  const FAST_MODEL='bytedance/seedance-2.0-fast';
+  const LEGACY_LITE_MODEL='bytedance/seedance-2.0-lite';
   const originalFetch=window.fetch.bind(window);
 
   function $(id){return document.getElementById(id)}
@@ -67,7 +70,7 @@
   async function loadHistory(filterMode){const h=$('history');if(!h)return;_lastFilterMode=filterMode;style();h.innerHTML='<div class="empty">履歴を読み込み中...</div>';try{let _fvToken='';try{const _fvCfg=window.FLOWVID_AUTH||{};if(window.supabase&&_fvCfg.supabaseUrl&&_fvCfg.supabaseAnonKey){if(!window.__flowvidUserClient)window.__flowvidUserClient=window.supabase.createClient(_fvCfg.supabaseUrl,_fvCfg.supabaseAnonKey);const{data:_fvSd}=await window.__flowvidUserClient.auth.getSession();_fvToken=_fvSd?.session?.access_token||''}}catch(_){}const res=await originalFetch('/api/generated-videos?limit=50&t='+Date.now(),{cache:'no-store',headers:_fvToken?{'Authorization':'Bearer '+_fvToken}:{}});const data=await res.json();const hidden=hiddenSet();let items=(data?.rows||[]).map(normalize).filter(it=>it&&!hidden.has(it.url)&&!hidden.has(it.jobId));if(filterMode)items=items.filter(it=>it.mode===filterMode);renderHistory(items)}catch(_){const list=safeJson(localStorage.getItem(HISTORY_KEY),'[]')||[];const hidden2=hiddenSet();let items=list.map(normalize).filter(it=>it&&!hidden2.has(it.url)&&!hidden2.has(it.jobId));if(filterMode)items=items.filter(it=>it.mode===filterMode);renderHistory(items)}}
   window.flowvidLoadHistory=loadHistory;
   function deleteHistory(jobId,url){if(!jobId&&!url)return;if(!confirm('この動画を履歴から削除しますか？\n動画ファイル本体は削除しません。'))return;hideVideo(url||'',jobId||'');loadHistory(_lastFilterMode)}
-  async function saveVideo(url, jobId, button){
+  async function saveVideo(url,jobId,button){
     if(!url)return;
     const originalText=button?.innerHTML||'保存';
     if(button){button.disabled=true;button.innerHTML='保存中'}
@@ -91,7 +94,8 @@
     }
   }
 
-  function credits(){const mode=currentMode();const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const refs=mode==='text_to_video'?0:Math.max(1,getRefs().length||1);let c=80;c+=Math.max(0,duration-5)*15;if(resolution==='1080p')c+=100;if(resolution==='480p')c-=20;if(mode==='reference_to_video')c+=Math.max(0,refs-1)*10;if(mode==='text_to_video')c-=10;c+=15;return Math.max(50,c)}
+  function selectedModel(){const model=$('model')?.value||STANDARD_MODEL;return model===LEGACY_LITE_MODEL?FAST_MODEL:model}
+  function credits(){const mode=currentMode();const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const refs=mode==='text_to_video'?0:Math.max(1,getRefs().length||1);let c=80;c+=Math.max(0,duration-5)*15;if(resolution==='1080p')c+=100;if(resolution==='480p')c-=20;if(mode==='reference_to_video')c+=Math.max(0,refs-1)*10;if(mode==='text_to_video')c-=10;c+=15;const multiplier=selectedModel()===FAST_MODEL?.8:1;return Math.max(50,Math.round(c*multiplier))}
   function updateCreate(){const b=$('create');if(b)b.textContent='作成する ✦ '+credits()}
   function startTimeout(ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);return {signal:c.signal,clear:()=>clearTimeout(t)}}
   async function parseJsonResponse(res){const text=await res.text();try{return text?JSON.parse(text):{}}catch(_){return{ok:false,error:text.slice(0,200)||'Invalid response'}}}
@@ -108,7 +112,7 @@
     if(done)done.classList.remove('show');
     if(now)now.classList.add('show');
     if(job)job.textContent='送信中...';
-    const body={model:$('model')?.value||'bytedance/seedance-2.0',prompt,duration:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',aspect_ratio:$('aspect')?.value||'9:16',generate_audio:true,estimated_credits:credits()};
+    const body={model:selectedModel(),prompt,duration:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',aspect_ratio:$('aspect')?.value||'9:16',generate_audio:true,estimated_credits:credits()};
     if(mode==='image_to_video')body.first_frame_url=refs[0];
     if(mode==='reference_to_video'){
       body.reference_url=refs[0];

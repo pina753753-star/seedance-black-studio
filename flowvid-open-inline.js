@@ -1,4 +1,28 @@
 (function(){
+  const STANDARD_MODEL='bytedance/seedance-2.0';
+  const FAST_MODEL='bytedance/seedance-2.0-fast';
+
+  function applyFastModelPricing(){
+    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
+    const select=document.getElementById('model');
+    if(!select)return;
+    const option=Array.from(select.options).find(item=>item.value==='bytedance/seedance-2.0-lite');
+    if(option){
+      option.value=FAST_MODEL;
+      option.textContent='Seedance 2.0 Fast';
+    }
+    if(typeof window.creditEstimate==='function'&&!window.__flowvidFastCreditEstimate){
+      const standardEstimate=window.creditEstimate;
+      window.creditEstimate=function(){
+        const base=Math.max(50,Number(standardEstimate())||50);
+        const model=document.getElementById('model')?.value||STANDARD_MODEL;
+        return Math.max(50,Math.round(base*(model===FAST_MODEL?0.8:1)));
+      };
+      window.__flowvidFastCreditEstimate=true;
+    }
+    if(typeof window.updateCreditUi==='function')window.updateCreditUi();
+  }
+
   function ensureGenerateHistory(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.getElementById('history'))return;
@@ -18,8 +42,6 @@
     section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode())};
   }
 
-  // Safari standard controls are shown ~3s after last tap when playing,
-  // stay visible when paused. We mirror that for the × button.
   const HIDE_MS = 3200;
   let _hideTimer = null;
 
@@ -33,7 +55,6 @@
       '.fv-inline-video-overlay{position:fixed;inset:0;z-index:99999;background:#000;display:none}',
       '.fv-inline-video-overlay.show{display:block}',
       '.fv-inline-video-overlay>video{width:100vw;height:100dvh;object-fit:contain;background:#000;display:block}',
-      // × button — top-left, matches Safari control bar height area
       '.fv-inline-close{',
       '  position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:14px;z-index:100000;',
       '  width:34px;height:34px;border:0;border-radius:50%;',
@@ -64,21 +85,15 @@
     }
     function onInteraction(){
       showClose();
-      // When paused Safari keeps controls visible — keep × visible too
       if(!video.paused)scheduleHide();
       else clearTimeout(_hideTimer);
     }
 
-    // Mirror Safari: show on any tap, hide after delay when playing
     overlay.addEventListener('touchstart', onInteraction, {passive:true});
     overlay.addEventListener('click', onInteraction);
-
-    // When playback starts, begin hide countdown
     video.addEventListener('play', ()=>{showClose();scheduleHide()});
-    // When paused/ended, keep × visible until next play
     video.addEventListener('pause', ()=>{showClose();clearTimeout(_hideTimer)});
     video.addEventListener('ended', ()=>{showClose();clearTimeout(_hideTimer)});
-
     closeBtn.addEventListener('click', e=>{e.stopPropagation();closeOverlay()});
 
     overlay._showClose=showClose;
@@ -126,5 +141,7 @@
     openOverlay(url);
   },true);
   window.fvOpenOverlay=openOverlay;
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureGenerateHistory);else ensureGenerateHistory();
+  function boot(){applyFastModelPricing();ensureGenerateHistory()}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+  window.addEventListener('pageshow',applyFastModelPricing);
 })();
