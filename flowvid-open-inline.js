@@ -70,20 +70,45 @@
     window.__flowvidGenerationImageResetInstalled=true;
     const originalFetch=window.fetch.bind(window);
     window.fetch=async function(input,init){
-      const response=await originalFetch(input,init);
+      let isSeedanceStart=false;
+      let submittedMode=null;
+      let submittedUrls=[];
       try{
         const url=typeof input==='string'?input:(input&&input.url)||'';
-        if(String(url).includes('/api/seedance-start')&&response.ok){
-          const data=await response.clone().json().catch(()=>null);
-          const hasJob=Boolean(data?.jobId||data?.job_id||data?.pollingUrl||data?.polling_url||data?.response);
-          if(data?.ok!==false&&hasJob){
-            setTimeout(()=>{
-              const mode=document.querySelector('.tabs button.on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
-              if(mode!=='text_to_video')clearUploadedImages();
-            },0);
+        if(String(url).includes('/api/seedance-start')){
+          isSeedanceStart=true;
+          const bodyStr=typeof init?.body==='string'?init.body:'';
+          if(bodyStr){
+            const body=JSON.parse(bodyStr);
+            submittedMode=body.mode||null;
+            if(!submittedMode){
+              if(body.first_frame_url)submittedMode='image_to_video';
+              else if(body.reference_url||body.reference_urls)submittedMode='reference_to_video';
+            }
+            if(submittedMode==='image_to_video'&&body.first_frame_url){
+              submittedUrls=[body.first_frame_url];
+            }else if(submittedMode==='reference_to_video'){
+              const refs=Array.isArray(body.reference_urls)?body.reference_urls:(body.reference_url?[body.reference_url]:[]);
+              refs.forEach(u=>{const s=typeof u==='string'?u:(u&&u.image_url&&u.image_url.url)||'';if(s)submittedUrls.push(s);});
+            }
           }
         }
-      }catch(_){ }
+      }catch(_){}
+      const response=await originalFetch(input,init);
+      if(!isSeedanceStart)return response;
+      try{
+        if(!response.ok)return response;
+        const data=await response.clone().json().catch(()=>null);
+        const hasJob=Boolean(data?.jobId||data?.job_id||data?.pollingUrl||data?.polling_url||data?.response);
+        if(data?.ok===false||!hasJob)return response;
+        if(submittedMode!=='image_to_video'&&submittedMode!=='reference_to_video')return response;
+        if(!submittedUrls.length)return response;
+        setTimeout(()=>{
+          const curSrcs=[...document.querySelectorAll('#assets .thumb img')].map(el=>el.src);
+          const same=submittedUrls.length===curSrcs.length&&submittedUrls.every((u,i)=>curSrcs[i]===u);
+          if(same)clearUploadedImages();
+        },0);
+      }catch(_){}
       return response;
     };
   }
