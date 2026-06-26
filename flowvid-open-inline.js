@@ -1,4 +1,35 @@
 (function(){
+  const STANDARD_MODEL='bytedance/seedance-2.0';
+  const FAST_MODEL='bytedance/seedance-2.0-fast';
+  const LEGACY_LITE_MODEL='bytedance/seedance-2.0-lite';
+
+  function applySeedanceModelPricing(){
+    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
+    const modelSelect=document.getElementById('model');
+    if(!modelSelect)return;
+
+    const legacyOption=Array.from(modelSelect.options).find(option=>option.value===LEGACY_LITE_MODEL);
+    if(legacyOption){
+      legacyOption.value=FAST_MODEL;
+      legacyOption.textContent='Seedance 2.0 Fast';
+    }
+    const fastOption=Array.from(modelSelect.options).find(option=>option.value===FAST_MODEL);
+    if(fastOption)fastOption.textContent='Seedance 2.0 Fast';
+
+    if(typeof window.creditEstimate==='function'&&!window.__flowvidModelCreditPricingApplied){
+      const standardEstimate=window.creditEstimate;
+      window.creditEstimate=function(){
+        const base=Math.max(50,Number(standardEstimate())||50);
+        const model=document.getElementById('model')?.value||STANDARD_MODEL;
+        const multiplier=model===FAST_MODEL?0.8:1;
+        return Math.max(50,Math.round(base*multiplier));
+      };
+      window.__flowvidModelCreditPricingApplied=true;
+    }
+
+    if(typeof window.updateCreditUi==='function')window.updateCreditUi();
+  }
+
   function ensureGenerateHistory(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.getElementById('history'))return;
@@ -126,5 +157,12 @@
     openOverlay(url);
   },true);
   window.fvOpenOverlay=openOverlay;
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureGenerateHistory);else ensureGenerateHistory();
+
+  function boot(){
+    ensureGenerateHistory();
+    applySeedanceModelPricing();
+  }
+
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+  window.addEventListener('pageshow',applySeedanceModelPricing);
 })();
