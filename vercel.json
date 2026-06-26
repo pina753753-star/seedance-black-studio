@@ -1,15 +1,5 @@
 {
-  "routes": [
-    {
-      "src": "/api/seedance-start",
-      "dest": "/api/seedance-start-priced"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/",
-      "dest": "/index.html"
-    }
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" }
   ]
 }
