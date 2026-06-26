@@ -3,16 +3,11 @@
   const FAST_MODEL='bytedance/seedance-2.0-fast';
   const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
 
-  function currentMode(){
-    return document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
-  }
-
   function roundUpToTen(value){
     return Math.max(50,Math.min(500,Math.ceil(Math.max(50,value)/10)*10));
   }
 
   function calculateCredits(){
-    const mode=currentMode();
     const duration=Number(document.getElementById('duration')?.value||5);
     const resolution=document.getElementById('resolution')?.value||'720p';
     const model=document.getElementById('model')?.value||FAST_MODEL;
@@ -20,7 +15,6 @@
     credits+=Math.max(0,duration-5)*15;
     if(resolution==='1080p')credits+=100;
     if(resolution==='480p')credits-=20;
-    if(mode==='text_to_video')credits-=10;
     credits+=15;
     return roundUpToTen(credits*(model===FAST_MODEL?0.8:1));
   }
