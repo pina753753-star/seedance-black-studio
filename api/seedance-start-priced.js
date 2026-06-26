@@ -43,23 +43,12 @@ function normalizeModel(value) {
   return ALLOWED_MODELS.has(migrated) ? migrated : null;
 }
 
-function inputCount(value) {
-  return Array.isArray(value) ? value.filter(Boolean).length : 0;
+function roundUpToTen(value) {
+  const bounded = Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, value));
+  return Math.min(MAX_CREDITS, Math.ceil(bounded / 10) * 10);
 }
 
-function countReferenceInputs(body, mode) {
-  if (mode === 'text_to_video') return 0;
-  const singleReference = body.first_frame_url || body.reference_url ? 1 : 0;
-  return Math.max(
-    1,
-    singleReference,
-    inputCount(body.reference_urls || body.referenceUrls),
-    inputCount(body.input_references),
-    inputCount(body.frame_images)
-  );
-}
-
-function calculateCreditCost({ model, mode, duration, resolution, referenceCount }) {
+function calculateCreditCost({ model, mode, duration, resolution }) {
   let credits;
 
   if (mode === 'storyboard') {
@@ -69,16 +58,12 @@ function calculateCreditCost({ model, mode, duration, resolution, referenceCount
     credits += Math.max(0, duration - 5) * 15;
     if (resolution === '1080p') credits += 100;
     if (resolution === '480p') credits -= 20;
-    if (mode === 'reference_to_video') credits += Math.max(0, referenceCount - 1) * 10;
     if (mode === 'text_to_video') credits -= 10;
     credits += 15;
   }
 
   const multiplier = MODEL_CREDIT_MULTIPLIERS[model] || 1;
-  return Math.max(
-    MIN_CREDITS,
-    Math.min(MAX_CREDITS, Math.round(credits * multiplier))
-  );
+  return roundUpToTen(credits * multiplier);
 }
 
 module.exports = async function handler(req, res) {
@@ -98,13 +83,11 @@ module.exports = async function handler(req, res) {
   const mode = normalizeMode(body.mode);
   const duration = normalizeDuration(body.duration || body.duration_seconds);
   const resolution = normalizeResolution(body.resolution);
-  const referenceCount = countReferenceInputs(body, mode);
   const creditCost = calculateCreditCost({
     model,
     mode,
     duration,
-    resolution,
-    referenceCount
+    resolution
   });
 
   const clientEstimate = Math.round(Number(body.estimated_credits) || 0);
