@@ -2,12 +2,14 @@ const { createClient } = require('@supabase/supabase-js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
+const FAST_MODEL = 'bytedance/seedance-2.0-fast';
+const LEGACY_LITE_MODEL = 'bytedance/seedance-2.0-lite';
+const ALLOWED_MODELS = [DEFAULT_MODEL, FAST_MODEL, LEGACY_LITE_MODEL];
+const MODEL_MULTIPLIERS = { [DEFAULT_MODEL]: 1.0, [FAST_MODEL]: 0.8, [LEGACY_LITE_MODEL]: 0.8 };
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-// Credit cost comes from the client's creditEstimate() display value.
-// Server enforces a safe range to prevent manipulation.
 const MIN_CREDITS = 50;
 const MAX_CREDITS = 500;
 
@@ -37,6 +39,36 @@ function normalizeResolution(value) {
 function normalizeMode(value) {
   const m = String(value || '').trim();
   return ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'].includes(m) ? m : 'reference_to_video';
+}
+
+function normalizeModel(value) {
+  const m = String(value || DEFAULT_MODEL).trim();
+  return ALLOWED_MODELS.includes(m) ? m : DEFAULT_MODEL;
+}
+
+function roundUpToFive(value) {
+  return Math.ceil(Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, value)) / 5) * 5;
+}
+
+function countReferenceInputs(body) {
+  if (Array.isArray(body.reference_urls)) return Math.max(1, body.reference_urls.length);
+  if (body.reference_url) return 1;
+  return 1;
+}
+
+function calculateCreditCost(body, mode, duration, resolution, model) {
+  if (mode === 'storyboard') {
+    return roundUpToFive(Math.max(MIN_CREDITS, duration * 12));
+  }
+  let credits = 80;
+  credits += Math.max(0, duration - 5) * 15;
+  if (resolution === '1080p') credits += 100;
+  if (resolution === '480p') credits -= 20;
+  if (mode === 'reference_to_video') credits += Math.max(0, countReferenceInputs(body) - 1) * 10;
+  if (mode === 'text_to_video') credits -= 10;
+  credits += 15;
+  const multiplier = MODEL_MULTIPLIERS[model] ?? 1.0;
+  return roundUpToFive(credits * multiplier);
 }
 
 function imageObject(url, frameType) {
@@ -311,12 +343,8 @@ module.exports = async function handler(req, res) {
     const aspectRatio = normalizeAspectRatio(body.aspect_ratio || body.aspectRatio);
     const duration = normalizeDuration(body.duration || body.duration_seconds);
     const mode = normalizeMode(body.mode);
-    const model = String(body.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
-
-    // Credit cost is the value shown in the UI (estimated_credits).
-    // Clamped to a safe range to prevent client-side manipulation.
-    const rawCredits = Math.round(Number(body.estimated_credits) || 0);
-    const creditCost = Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, rawCredits)) || MIN_CREDITS;
+    const model = normalizeModel(body.model);
+    const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
 
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db
