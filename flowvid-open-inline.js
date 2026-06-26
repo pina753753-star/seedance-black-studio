@@ -1,53 +1,4 @@
 (function(){
-  const STANDARD_MODEL='bytedance/seedance-2.0';
-  const FAST_MODEL='bytedance/seedance-2.0-fast';
-  const LEGACY_LITE_MODEL='bytedance/seedance-2.0-lite';
-
-  function patchSeedanceStartFetch(){
-    if(window.__flowvidPricedStartFetch)return;
-    window.__flowvidPricedStartFetch=true;
-    const originalFetch=window.fetch.bind(window);
-    window.fetch=function(input,init){
-      const raw=typeof input==='string'?input:(input&&input.url)||'';
-      let isStart=false;
-      try{
-        const parsed=new URL(raw,location.href);
-        isStart=parsed.origin===location.origin&&parsed.pathname==='/api/seedance-start';
-      }catch(_){ }
-      if(!isStart)return originalFetch(input,init);
-      if(typeof input==='string')return originalFetch('/api/seedance-start-priced',init);
-      const replacement=new Request('/api/seedance-start-priced',input);
-      return originalFetch(replacement,init);
-    };
-  }
-
-  function applySeedanceModelPricing(){
-    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
-    const modelSelect=document.getElementById('model');
-    if(!modelSelect)return;
-
-    const legacyOption=Array.from(modelSelect.options).find(option=>option.value===LEGACY_LITE_MODEL);
-    if(legacyOption){
-      legacyOption.value=FAST_MODEL;
-      legacyOption.textContent='Seedance 2.0 Fast';
-    }
-    const fastOption=Array.from(modelSelect.options).find(option=>option.value===FAST_MODEL);
-    if(fastOption)fastOption.textContent='Seedance 2.0 Fast';
-
-    if(typeof window.creditEstimate==='function'&&!window.__flowvidModelCreditPricingApplied){
-      const standardEstimate=window.creditEstimate;
-      window.creditEstimate=function(){
-        const base=Math.max(50,Number(standardEstimate())||50);
-        const model=document.getElementById('model')?.value||STANDARD_MODEL;
-        const multiplier=model===FAST_MODEL?0.8:1;
-        return Math.max(50,Math.round(base*multiplier));
-      };
-      window.__flowvidModelCreditPricingApplied=true;
-    }
-
-    if(typeof window.updateCreditUi==='function')window.updateCreditUi();
-  }
-
   function ensureGenerateHistory(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.getElementById('history'))return;
@@ -67,8 +18,6 @@
     section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode())};
   }
 
-  // Safari standard controls are shown ~3s after last tap when playing,
-  // stay visible when paused. We mirror that for the × button.
   const HIDE_MS = 3200;
   let _hideTimer = null;
 
@@ -108,7 +57,7 @@
     function hideClose(){closeBtn.classList.remove('on')}
     function scheduleHide(){
       clearTimeout(_hideTimer);
-      _hideTimer=setTimeout(hideClose,HIDE_MS);
+      _hideTimer=setTimeout(hideClose, HIDE_MS);
     }
     function onInteraction(){
       showClose();
@@ -116,12 +65,12 @@
       else clearTimeout(_hideTimer);
     }
 
-    overlay.addEventListener('touchstart',onInteraction,{passive:true});
-    overlay.addEventListener('click',onInteraction);
-    video.addEventListener('play',()=>{showClose();scheduleHide()});
-    video.addEventListener('pause',()=>{showClose();clearTimeout(_hideTimer)});
-    video.addEventListener('ended',()=>{showClose();clearTimeout(_hideTimer)});
-    closeBtn.addEventListener('click',e=>{e.stopPropagation();closeOverlay()});
+    overlay.addEventListener('touchstart', onInteraction, {passive:true});
+    overlay.addEventListener('click', onInteraction);
+    video.addEventListener('play', ()=>{showClose();scheduleHide()});
+    video.addEventListener('pause', ()=>{showClose();clearTimeout(_hideTimer)});
+    video.addEventListener('ended', ()=>{showClose();clearTimeout(_hideTimer)});
+    closeBtn.addEventListener('click', e=>{e.stopPropagation();closeOverlay()});
 
     overlay._showClose=showClose;
     return overlay;
@@ -168,13 +117,5 @@
     openOverlay(url);
   },true);
   window.fvOpenOverlay=openOverlay;
-
-  function boot(){
-    ensureGenerateHistory();
-    applySeedanceModelPricing();
-  }
-
-  patchSeedanceStartFetch();
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
-  window.addEventListener('pageshow',applySeedanceModelPricing);
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureGenerateHistory);else ensureGenerateHistory();
 })();
