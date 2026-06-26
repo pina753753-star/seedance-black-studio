@@ -3,6 +3,24 @@
   const FAST_MODEL='bytedance/seedance-2.0-fast';
   const LEGACY_LITE_MODEL='bytedance/seedance-2.0-lite';
 
+  function patchSeedanceStartFetch(){
+    if(window.__flowvidPricedStartFetch)return;
+    window.__flowvidPricedStartFetch=true;
+    const originalFetch=window.fetch.bind(window);
+    window.fetch=function(input,init){
+      const raw=typeof input==='string'?input:(input&&input.url)||'';
+      let isStart=false;
+      try{
+        const parsed=new URL(raw,location.href);
+        isStart=parsed.origin===location.origin&&parsed.pathname==='/api/seedance-start';
+      }catch(_){ }
+      if(!isStart)return originalFetch(input,init);
+      if(typeof input==='string')return originalFetch('/api/seedance-start-priced',init);
+      const replacement=new Request('/api/seedance-start-priced',input);
+      return originalFetch(replacement,init);
+    };
+  }
+
   function applySeedanceModelPricing(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     const modelSelect=document.getElementById('model');
@@ -64,7 +82,6 @@
       '.fv-inline-video-overlay{position:fixed;inset:0;z-index:99999;background:#000;display:none}',
       '.fv-inline-video-overlay.show{display:block}',
       '.fv-inline-video-overlay>video{width:100vw;height:100dvh;object-fit:contain;background:#000;display:block}',
-      // × button — top-left, matches Safari control bar height area
       '.fv-inline-close{',
       '  position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:14px;z-index:100000;',
       '  width:34px;height:34px;border:0;border-radius:50%;',
@@ -91,26 +108,20 @@
     function hideClose(){closeBtn.classList.remove('on')}
     function scheduleHide(){
       clearTimeout(_hideTimer);
-      _hideTimer=setTimeout(hideClose, HIDE_MS);
+      _hideTimer=setTimeout(hideClose,HIDE_MS);
     }
     function onInteraction(){
       showClose();
-      // When paused Safari keeps controls visible — keep × visible too
       if(!video.paused)scheduleHide();
       else clearTimeout(_hideTimer);
     }
 
-    // Mirror Safari: show on any tap, hide after delay when playing
-    overlay.addEventListener('touchstart', onInteraction, {passive:true});
-    overlay.addEventListener('click', onInteraction);
-
-    // When playback starts, begin hide countdown
-    video.addEventListener('play', ()=>{showClose();scheduleHide()});
-    // When paused/ended, keep × visible until next play
-    video.addEventListener('pause', ()=>{showClose();clearTimeout(_hideTimer)});
-    video.addEventListener('ended', ()=>{showClose();clearTimeout(_hideTimer)});
-
-    closeBtn.addEventListener('click', e=>{e.stopPropagation();closeOverlay()});
+    overlay.addEventListener('touchstart',onInteraction,{passive:true});
+    overlay.addEventListener('click',onInteraction);
+    video.addEventListener('play',()=>{showClose();scheduleHide()});
+    video.addEventListener('pause',()=>{showClose();clearTimeout(_hideTimer)});
+    video.addEventListener('ended',()=>{showClose();clearTimeout(_hideTimer)});
+    closeBtn.addEventListener('click',e=>{e.stopPropagation();closeOverlay()});
 
     overlay._showClose=showClose;
     return overlay;
@@ -163,6 +174,7 @@
     applySeedanceModelPricing();
   }
 
+  patchSeedanceStartFetch();
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
   window.addEventListener('pageshow',applySeedanceModelPricing);
 })();
