@@ -1,26 +1,83 @@
 (function(){
   const STANDARD_MODEL='bytedance/seedance-2.0';
   const FAST_MODEL='bytedance/seedance-2.0-fast';
+  const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
+
+  function roundUpToTen(value){
+    return Math.max(50,Math.min(500,Math.ceil(Math.max(50,value)/10)*10));
+  }
+
+  function calculateCredits(){
+    const duration=Number(document.getElementById('duration')?.value||5);
+    const resolution=document.getElementById('resolution')?.value||'720p';
+    const model=document.getElementById('model')?.value||FAST_MODEL;
+    let credits=80;
+    credits+=Math.max(0,duration-5)*15;
+    if(resolution==='1080p')credits+=100;
+    if(resolution==='480p')credits-=20;
+    credits+=15;
+    return roundUpToTen(credits*(model===FAST_MODEL?0.8:1));
+  }
+
+  function syncCreditButton(){
+    const button=document.getElementById('create');
+    if(!button)return;
+    const expected='作成する ✦ '+calculateCredits();
+    if(button.textContent!==expected)button.textContent=expected;
+  }
+
+  function applyPricingDefaults(select){
+    if(localStorage.getItem(DEFAULTS_APPLIED_KEY))return;
+    select.value=FAST_MODEL;
+    const duration=document.getElementById('duration');
+    const resolution=document.getElementById('resolution');
+    if(duration)duration.value='5';
+    if(resolution)resolution.value='720p';
+    localStorage.setItem(DEFAULTS_APPLIED_KEY,'1');
+  }
+
+  function installCreditSync(){
+    if(window.__flowvidCreditSyncInstalled)return;
+    window.__flowvidCreditSyncInstalled=true;
+    ['model','duration','resolution'].forEach(id=>{
+      document.getElementById(id)?.addEventListener('change',()=>setTimeout(syncCreditButton,0));
+    });
+    document.querySelectorAll('[data-mode]').forEach(button=>{
+      button.addEventListener('click',()=>setTimeout(syncCreditButton,0));
+    });
+    const create=document.getElementById('create');
+    if(create){
+      const observer=new MutationObserver(()=>syncCreditButton());
+      observer.observe(create,{childList:true,subtree:true,characterData:true});
+      window.__flowvidCreditButtonObserver=observer;
+    }
+  }
 
   function applyFastModelPricing(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     const select=document.getElementById('model');
     if(!select)return;
-    const option=Array.from(select.options).find(item=>item.value==='bytedance/seedance-2.0-lite');
-    if(option){
-      option.value=FAST_MODEL;
-      option.textContent='Seedance 2.0 Fast';
+
+    const legacyOption=Array.from(select.options).find(item=>item.value==='bytedance/seedance-2.0-lite');
+    if(legacyOption){
+      legacyOption.value=FAST_MODEL;
+      legacyOption.textContent='Seedance 2.0 Fast';
     }
-    if(typeof window.creditEstimate==='function'&&!window.__flowvidFastCreditEstimate){
-      const standardEstimate=window.creditEstimate;
-      window.creditEstimate=function(){
-        const base=Math.max(50,Number(standardEstimate())||50);
-        const model=document.getElementById('model')?.value||STANDARD_MODEL;
-        return Math.max(50,Math.round(base*(model===FAST_MODEL?0.8:1)));
-      };
-      window.__flowvidFastCreditEstimate=true;
-    }
+    const fastOption=Array.from(select.options).find(item=>item.value===FAST_MODEL);
+    if(fastOption)fastOption.textContent='Seedance 2.0 Fast';
+
+    const resolution=document.getElementById('resolution');
+    const option720=Array.from(resolution?.options||[]).find(item=>item.value==='720p');
+    const option1080=Array.from(resolution?.options||[]).find(item=>item.value==='1080p');
+    if(option720)option720.textContent='720p（おすすめ）';
+    if(option1080)option1080.textContent='1080p（高画質・最終出力向け）';
+
+    applyPricingDefaults(select);
+    window.creditEstimate=calculateCredits;
+    window.__flowvidFastCreditEstimate=true;
+    installCreditSync();
     if(typeof window.updateCreditUi==='function')window.updateCreditUi();
+    syncCreditButton();
   }
 
   function ensureGenerateHistory(){
