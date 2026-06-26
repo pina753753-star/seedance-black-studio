@@ -1,4 +1,11 @@
 {
+  "redirects": [
+    {
+      "source": "/api/seedance-start",
+      "destination": "/api/seedance-start-priced",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/", "destination": "/index.html" }
   ]
