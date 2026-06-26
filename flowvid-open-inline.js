@@ -2,6 +2,7 @@
   const STANDARD_MODEL='bytedance/seedance-2.0';
   const FAST_MODEL='bytedance/seedance-2.0-fast';
   const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
+  const DRAFT_KEY='flowvidGenerateDraft';
 
   function roundUpToTen(value){
     return Math.max(50,Math.min(500,Math.ceil(Math.max(50,value)/10)*10));
@@ -24,6 +25,67 @@
     if(!button)return;
     const expected='作成する ✦ '+calculateCredits();
     if(button.textContent!==expected)button.textContent=expected;
+  }
+
+  function clearStoredReferences(){
+    try{
+      const draft=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}');
+      delete draft.referenceUrls;
+      localStorage.setItem(DRAFT_KEY,JSON.stringify(draft));
+    }catch(_){
+      localStorage.removeItem(DRAFT_KEY);
+    }
+  }
+
+  function clearUploadedImages(){
+    const file=document.getElementById('file');
+    if(file)file.value='';
+
+    let guard=0;
+    while(document.querySelector('#assets .thumb')&&guard<12){
+      if(typeof window.removeAsset==='function')window.removeAsset(0);
+      else document.querySelector('#assets .thumb')?.remove();
+      guard++;
+    }
+
+    clearStoredReferences();
+    document.querySelectorAll('#assets .thumb').forEach(el=>el.remove());
+  }
+  window.flowvidClearUploadedImages=clearUploadedImages;
+
+  function installModeImageReset(){
+    if(window.__flowvidModeImageResetInstalled)return;
+    window.__flowvidModeImageResetInstalled=true;
+    document.querySelectorAll('.tabs button[data-mode]').forEach(button=>{
+      button.addEventListener('click',()=>{
+        const current=document.querySelector('.tabs button.on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
+        const next=button.dataset.mode||'';
+        if(current==='reference_to_video'&&next==='image_to_video')clearUploadedImages();
+      },true);
+    });
+  }
+
+  function installGenerationImageReset(){
+    if(window.__flowvidGenerationImageResetInstalled)return;
+    window.__flowvidGenerationImageResetInstalled=true;
+    const originalFetch=window.fetch.bind(window);
+    window.fetch=async function(input,init){
+      const response=await originalFetch(input,init);
+      try{
+        const url=typeof input==='string'?input:(input&&input.url)||'';
+        if(String(url).includes('/api/seedance-start')&&response.ok){
+          const data=await response.clone().json().catch(()=>null);
+          const hasJob=Boolean(data?.jobId||data?.job_id||data?.pollingUrl||data?.polling_url||data?.response);
+          if(data?.ok!==false&&hasJob){
+            setTimeout(()=>{
+              const mode=document.querySelector('.tabs button.on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
+              if(mode!=='text_to_video')clearUploadedImages();
+            },0);
+          }
+        }
+      }catch(_){ }
+      return response;
+    };
   }
 
   function applyPricingDefaults(select){
@@ -76,6 +138,8 @@
     window.creditEstimate=calculateCredits;
     window.__flowvidFastCreditEstimate=true;
     installCreditSync();
+    installModeImageReset();
+    installGenerationImageReset();
     if(typeof window.updateCreditUi==='function')window.updateCreditUi();
     syncCreditButton();
   }
