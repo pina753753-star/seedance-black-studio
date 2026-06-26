@@ -204,16 +204,16 @@ async function createTask(db, { userId, mode, model, prompt, resolution, duratio
     }).select('id').single();
     if (error) {
       console.error('[seedance-start] createTask error:', error.message, error.code, error.details);
-      return null;
+      return { id: null, code: error.code || null };
     }
     if (!data?.id) {
       console.error('[seedance-start] createTask: no id returned');
-      return null;
+      return { id: null, code: null };
     }
-    return data.id;
+    return { id: data.id, code: null };
   } catch (err) {
     console.error('[seedance-start] createTask exception:', err?.message);
-    return null;
+    return { id: null, code: null };
   }
 }
 
@@ -283,12 +283,22 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Create task record — MUST succeed before touching credits or calling OpenRouter
-    const taskId = await createTask(db, { userId: user.id, mode, model, prompt, resolution, duration, aspectRatio, creditCost });
-    if (!taskId) {
+    // Create task record — MUST succeed before touching credits or calling OpenRouter.
+    // The partial unique index (queued/processing per user) enforces at-most-one
+    // active generation. Concurrent INSERT returns error code 23505 → HTTP 409.
+    const taskResult = await createTask(db, { userId: user.id, mode, model, prompt, resolution, duration, aspectRatio, creditCost });
+    if (!taskResult.id) {
+      if (taskResult.code === '23505') {
+        return res.status(409).json({
+          ok: false,
+          error: 'generation_already_in_progress',
+          message: '現在生成中の動画があります。完了後にもう一度お試しください。'
+        });
+      }
       console.error('[seedance-start] Aborting: task creation failed, will not deduct credits or call OpenRouter');
       return res.status(500).json({ ok: false, error: 'タスクの作成に失敗しました。もう一度お試しください。' });
     }
+    const taskId = taskResult.id;
     console.log('[seedance-start] task created:', taskId, 'user:', user.id, 'mode:', mode);
 
     // Deduct credits with optimistic concurrency control (prevents double-deduction)
