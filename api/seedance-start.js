@@ -194,7 +194,8 @@ async function refundCredits(db, userId, { fromSub, fromFree, fromPurchased }, t
 //   1. active (queued/processing) task → rejection_reason: 'active_generation'
 //   2. cooldown (finished_at + 60s > NOW()) → rejection_reason: 'cooldown_active'
 //   3. neither → INSERT with status='queued', returns task_id
-// Falls back to direct INSERT on RPC failure, mapping 23505 → active_generation.
+// RPC errors abort task reservation; no direct INSERT fallback is used because
+// that would bypass the active-generation and cooldown checks.
 async function createTask(db, { userId, mode, model, prompt, resolution, duration, aspectRatio, creditCost }) {
   try {
     const { data, error } = await db.rpc('reserve_generation_task', {
@@ -209,7 +210,7 @@ async function createTask(db, { userId, mode, model, prompt, resolution, duratio
     });
     if (error) {
       console.error('[seedance-start] reserve_generation_task RPC error:', error.message, error.code);
-      // 23505 from a direct INSERT fallback inside the RPC means active_generation
+      // A 23505 propagated by the RPC's INSERT still maps to active_generation.
       if (error.code === '23505') return { id: null, code: '23505', rejection: 'active_generation' };
       return { id: null, code: error.code || null, rejection: null };
     }

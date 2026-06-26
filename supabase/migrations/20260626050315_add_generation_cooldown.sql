@@ -61,13 +61,46 @@
 --    FROM generation_tasks
 --    WHERE status IN ('completed','failed','cancelled')
 --    ORDER BY updated_at DESC LIMIT 20;
+--
+-- 9. Cooldown search index existence (same-name check):
+--    SELECT indexname, indexdef
+--    FROM pg_indexes
+--    WHERE schemaname = 'public'
+--      AND tablename = 'generation_tasks'
+--      AND indexname = 'generation_tasks_user_finished_at_idx';
+--    → If returns a row, index already exists — STOP and investigate before running.
+--
+-- 10. Equivalent index check (different name but same columns):
+--    SELECT indexname, indexdef
+--    FROM pg_indexes
+--    WHERE schemaname = 'public'
+--      AND tablename = 'generation_tasks'
+--      AND indexdef ILIKE '%(user_id, finished_at DESC)%';
+--    → If returns any row, an equivalent index already exists — do NOT add a duplicate.
+--      Skip Step 2 below and verify the existing index covers the same predicate.
+--
+-- 11. Function execution permission (verify after migration):
+--    SELECT grantee, privilege_type
+--    FROM information_schema.role_routine_grants
+--    WHERE routine_schema = 'public'
+--      AND routine_name = 'reserve_generation_task'
+--      AND specific_name LIKE 'reserve_generation_task%';
+--    → Only service_role should have EXECUTE.
 -- ============================================================
 
 -- Step 1: Add finished_at column (nullable, not backfilled for existing rows)
 ALTER TABLE public.generation_tasks
   ADD COLUMN finished_at timestamptz NULL;
 
--- Step 2: Trigger function — sets finished_at once on first terminal transition.
+-- Step 2: Index for cooldown lookup — reserve_generation_task queries MAX(finished_at)
+-- per user on every generation start. Without this index that becomes a sequential scan
+-- once history grows. This index is separate from the partial unique active-task index
+-- (generation_tasks_one_active_per_user_idx), which only covers queued/processing rows.
+CREATE INDEX generation_tasks_user_finished_at_idx
+  ON public.generation_tasks (user_id, finished_at DESC)
+  WHERE finished_at IS NOT NULL;
+
+-- Step 3: Trigger function — sets finished_at once on first terminal transition.
 -- Handles: any → completed, any → failed, any → cancelled.
 -- Does NOT set finished_at when:
 --   - transitioning queued → processing
@@ -97,14 +130,14 @@ BEGIN
 END;
 $$;
 
--- Step 3: Attach trigger
+-- Step 4: Attach trigger
 DROP TRIGGER IF EXISTS trg_generation_task_finished_at ON public.generation_tasks;
 CREATE TRIGGER trg_generation_task_finished_at
   BEFORE UPDATE ON public.generation_tasks
   FOR EACH ROW
   EXECUTE FUNCTION public.set_generation_task_finished_at();
 
--- Step 4: Atomic reservation RPC
+-- Step 5: Atomic reservation RPC
 -- Uses pg_try_advisory_xact_lock (transaction-scoped) keyed on user_id hash
 -- to serialize concurrent requests for the same user within a transaction.
 -- The partial unique index (generation_tasks_one_active_per_user_idx) remains
@@ -206,7 +239,7 @@ BEGIN
 END;
 $$;
 
--- Step 5: Lock down execution permissions
+-- Step 6: Lock down execution permissions
 -- REVOKE from PUBLIC first, then grant only service_role
 REVOKE ALL ON FUNCTION public.reserve_generation_task(uuid, text, text, text, text, integer, text, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.reserve_generation_task(uuid, text, text, text, text, integer, text, integer) FROM anon;
