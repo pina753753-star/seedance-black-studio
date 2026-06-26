@@ -218,12 +218,42 @@ async function createTask(db, { userId, mode, model, prompt, resolution, duratio
 }
 
 async function updateTask(db, taskId, fields) {
-  if (!taskId) return;
+  if (!taskId) return { ok: false, error: 'no taskId' };
   try {
     const { error } = await db.from('generation_tasks').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', taskId);
-    if (error) console.error('[seedance-start] updateTask error:', error.message, 'taskId:', taskId, 'fields:', JSON.stringify(Object.keys(fields)));
+    if (error) {
+      console.error('[seedance-start] updateTask error:', error.message, 'taskId:', taskId, 'fields:', JSON.stringify(Object.keys(fields)));
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
   } catch (err) {
     console.error('[seedance-start] updateTask exception:', err?.message, 'taskId:', taskId);
+    return { ok: false, error: err?.message };
+  }
+}
+
+// Releases a generation reservation by marking it cancelled/failed.
+// Falls back to DELETE if the status update fails, to ensure the partial
+// unique index slot is freed and the user can start a new generation.
+async function releaseTask(db, userId, taskId, status, errorMessage) {
+  if (!taskId) return;
+  const fields = { status: status || 'cancelled' };
+  if (errorMessage) fields.error_message = errorMessage;
+  const upd = await updateTask(db, taskId, fields);
+  if (!upd.ok) {
+    console.error('[seedance-start] releaseTask: updateTask failed, attempting DELETE fallback', 'taskId:', taskId);
+    try {
+      const { error } = await db.from('generation_tasks')
+        .delete()
+        .eq('id', taskId)
+        .eq('user_id', userId)
+        .eq('status', 'queued')
+        .is('api_task_id', null);
+      if (error) console.error('[seedance-start] releaseTask DELETE fallback error:', error.message, 'taskId:', taskId);
+      else console.log('[seedance-start] releaseTask: DELETE fallback succeeded for taskId:', taskId);
+    } catch (err) {
+      console.error('[seedance-start] releaseTask DELETE fallback exception:', err?.message, 'taskId:', taskId);
+    }
   }
 }
 
@@ -250,6 +280,10 @@ module.exports = async function handler(req, res) {
 
   const db = serviceClient();
   if (!db) return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
+
+  let taskId = null;
+  let deduction = null;
+  let orStarted = false;
 
   try {
     const body = jsonBody(req);
@@ -298,14 +332,14 @@ module.exports = async function handler(req, res) {
       console.error('[seedance-start] Aborting: task creation failed, will not deduct credits or call OpenRouter');
       return res.status(500).json({ ok: false, error: 'タスクの作成に失敗しました。もう一度お試しください。' });
     }
-    const taskId = taskResult.id;
+    taskId = taskResult.id;
     console.log('[seedance-start] task created:', taskId, 'user:', user.id, 'mode:', mode);
 
     // Deduct credits with optimistic concurrency control (prevents double-deduction)
-    const deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
+    deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
     if (!deduction.ok) {
       console.error('[seedance-start] credit deduction failed:', deduction.error, 'taskId:', taskId);
-      await updateTask(db, taskId, { status: 'cancelled', error_message: deduction.error });
+      await releaseTask(db, user.id, taskId, 'cancelled');
       return res.status(deduction.insufficient ? 402 : 409).json({
         ok: false,
         error: deduction.error,
@@ -358,7 +392,7 @@ module.exports = async function handler(req, res) {
     } catch (fetchError) {
       console.error('[seedance-start] OpenRouter network error:', fetchError?.message, 'taskId:', taskId);
       await refundCredits(db, user.id, deduction, taskId);
-      await updateTask(db, taskId, { status: 'failed', error_message: fetchError?.message || 'Network error' });
+      await releaseTask(db, user.id, taskId, 'failed', fetchError?.message || 'Network error');
       return res.status(502).json({
         ok: false,
         error: fetchError?.message || 'OpenRouter request failed',
@@ -371,7 +405,7 @@ module.exports = async function handler(req, res) {
       const rawBody = String(text || '');
       console.error('[seedance-start] OpenRouter error body:', response.status, rawBody.slice(0, 500));
       await refundCredits(db, user.id, deduction, taskId);
-      await updateTask(db, taskId, { status: 'failed', error_message: `OpenRouter ${response.status}: ${rawBody.slice(0,200)}` });
+      await releaseTask(db, user.id, taskId, 'failed', `OpenRouter ${response.status}: ${rawBody.slice(0, 200)}`);
       const orMsg = response.status === 403
         ? 'APIキーが無効か、モデルへのアクセス権がありません'
         : response.status === 429
@@ -392,6 +426,20 @@ module.exports = async function handler(req, res) {
     console.log('[seedance-start] OR response keys:', Object.keys(data && typeof data === 'object' ? data : {}));
     console.log('[seedance-start] OR response preview:', JSON.stringify(data).slice(0, 600));
     console.log('[seedance-start] OpenRouter accepted, jobId:', jobId, 'pollingUrl:', orPollingUrl, 'taskId:', taskId);
+
+    if (!jobId && !orPollingUrl) {
+      console.error('[seedance-start] OpenRouter 200 but no jobId or pollingUrl — cannot track job, refunding', 'taskId:', taskId);
+      await refundCredits(db, user.id, deduction, taskId);
+      await releaseTask(db, user.id, taskId, 'failed');
+      return res.status(502).json({
+        ok: false,
+        error: 'OpenRouterから有効なジョブIDが返されませんでした。もう一度お試しください。',
+        creditRefunded: creditCost,
+        checkedAt: new Date().toISOString()
+      });
+    }
+
+    orStarted = true;
     await updateTask(db, taskId, { status: 'processing', api_task_id: jobId || null });
     // Try to persist polling_url for recovery after reload (fails silently if column absent)
     if (orPollingUrl) {
@@ -428,6 +476,11 @@ module.exports = async function handler(req, res) {
       checkedAt: new Date().toISOString()
     });
   } catch (error) {
+    console.error('[seedance-start] unexpected error:', error?.message, 'taskId:', taskId, 'orStarted:', orStarted);
+    if (taskId && !orStarted) {
+      if (deduction?.ok) await refundCredits(db, user.id, deduction, taskId);
+      await releaseTask(db, user.id, taskId, 'failed');
+    }
     return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', checkedAt: new Date().toISOString() });
   }
 };
