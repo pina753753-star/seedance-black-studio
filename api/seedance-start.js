@@ -375,6 +375,7 @@ module.exports = async function handler(req, res) {
 
     // Call OpenRouter
     console.log('[seedance-start] calling OpenRouter, taskId:', taskId, 'model:', payload.model, 'mode:', mode, 'has_refs:', Boolean(payload.input_references?.length), 'has_frames:', Boolean(payload.frame_images?.length));
+    orStarted = true;
     let response, text, data;
     try {
       response = await fetch(OPENROUTER_VIDEO_ENDPOINT, {
@@ -439,16 +440,47 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    orStarted = true;
-    await updateTask(db, taskId, { status: 'processing', api_task_id: jobId || null });
-    // Try to persist polling_url for recovery after reload (fails silently if column absent)
-    if (orPollingUrl) {
+    // Persist tracking info (status, api_task_id, polling_url) in one UPDATE.
+    // Retry up to 3 attempts total. Condition: row must still be active (queued or processing).
+    let trackingPersisted = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const { error: puErr } = await db.from('generation_tasks')
-          .update({ polling_url: orPollingUrl, updated_at: new Date().toISOString() })
-          .eq('id', taskId);
-        if (puErr) console.error('[seedance-start] polling_url store error:', puErr.message, '(column may not exist — safe to ignore)');
-      } catch (_) {}
+        const { data: updRows, error: updErr } = await db.from('generation_tasks')
+          .update({
+            status: 'processing',
+            api_task_id: jobId || null,
+            polling_url: orPollingUrl || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', taskId)
+          .eq('user_id', user.id)
+          .in('status', ['queued', 'processing'])
+          .select('id');
+        if (updErr) {
+          console.error('[seedance-start] tracking persist attempt', attempt, 'DB error:', updErr.message, 'taskId:', taskId);
+        } else if (!updRows || updRows.length === 0) {
+          console.error('[seedance-start] tracking persist attempt', attempt, 'no rows updated', 'taskId:', taskId);
+        } else {
+          console.log('[seedance-start] tracking persisted on attempt', attempt, 'taskId:', taskId);
+          trackingPersisted = true;
+          break;
+        }
+      } catch (persistErr) {
+        console.error('[seedance-start] tracking persist attempt', attempt, 'exception:', persistErr?.message, 'taskId:', taskId);
+      }
+    }
+
+    if (!trackingPersisted) {
+      console.error('[seedance-start] tracking persistence FAILED after 3 attempts — provider started, NOT refunding or releasing', 'taskId:', taskId, 'jobId:', jobId, 'pollingUrl:', orPollingUrl);
+      return res.status(503).json({
+        ok: false,
+        error: 'generation_tracking_persistence_failed',
+        message: '動画生成は開始されましたが、生成情報の保存に失敗しました。再度生成せず、サポートへお問い合わせください。',
+        providerStarted: true,
+        taskId,
+        jobId,
+        pollingUrl: orPollingUrl
+      });
     }
 
     return res.status(202).json({
