@@ -58,7 +58,6 @@ function calculateCreditCost({ model, mode, duration, resolution }) {
     credits += Math.max(0, duration - 5) * 15;
     if (resolution === '1080p') credits += 100;
     if (resolution === '480p') credits -= 20;
-    if (mode === 'text_to_video') credits -= 10;
     credits += 15;
   }
 
