@@ -60,7 +60,7 @@
       button.addEventListener('click',()=>{
         const current=document.querySelector('.tabs button.on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
         const next=button.dataset.mode||'';
-        if(current==='reference_to_video'&&next==='image_to_video')clearUploadedImages();
+        if((current==='reference_to_video'&&next==='image_to_video')||(current==='image_to_video'&&next==='reference_to_video'))clearUploadedImages();
       },true);
     });
   }
