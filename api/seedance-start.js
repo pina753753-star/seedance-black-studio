@@ -373,6 +373,15 @@ module.exports = async function handler(req, res) {
     const duration = normalizeDuration(body.duration || body.duration_seconds);
     const mode = normalizeMode(body.mode);
     const model = normalizeModel(body.model);
+
+    // Fast/Lite + reference_to_video + 1080p is rejected by OpenRouter (confirmed).
+    if ((model === FAST_MODEL || model === LEGACY_LITE_MODEL) && mode === 'reference_to_video' && resolution === '1080p') {
+      return res.status(400).json({
+        ok: false,
+        error: 'unsupported_combination',
+        message: 'Seedance 2.0 Fastのリファレンスモードは1080pに対応していません。720p以下をお選びください。'
+      });
+    }
     const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
 
     // Pre-check balance (read-only, no writes yet)
