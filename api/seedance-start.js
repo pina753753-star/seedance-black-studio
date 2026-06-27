@@ -68,7 +68,8 @@ function calculateCreditCost(body, mode, duration, resolution, model) {
   if (mode === 'text_to_video') credits -= 10;
   credits += 15;
   const multiplier = MODEL_MULTIPLIERS[model] ?? 1.0;
-  return roundUpToFive(credits * multiplier * PRICING_SAFETY_MULTIPLIER);
+  const modeMultiplier = mode === 'reference_to_video' ? PRICING_SAFETY_MULTIPLIER : 1;
+  return roundUpToFive(credits * multiplier * modeMultiplier);
 }
 
 function imageObject(url, frameType) {

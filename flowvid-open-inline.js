@@ -23,7 +23,8 @@
     if(mode==='text_to_video')credits-=10;
     credits+=15;
     const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
-    return roundUpToFive(credits*multiplier*PRICING_SAFETY_MULTIPLIER);
+    const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;
+    return roundUpToFive(credits*multiplier*modeMultiplier);
   }
 
   function syncCreditButton(){
