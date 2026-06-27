@@ -19,7 +19,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
-const { finalizeTask, isSupabasePublicUrl, MAX_RECONCILE_ATTEMPTS } = require('./lib/fal-finalize');
+const { finalizeTask, isSupabasePublicUrl, MAX_RECONCILE_ATTEMPTS } = require('./_lib/fal-finalize');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';

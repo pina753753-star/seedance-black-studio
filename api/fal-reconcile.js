@@ -24,7 +24,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
-const { finalizeTask, isSupabasePublicUrl, MAX_RECONCILE_ATTEMPTS } = require('./lib/fal-finalize');
+const { finalizeTask, isSupabasePublicUrl, MAX_RECONCILE_ATTEMPTS } = require('./_lib/fal-finalize');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -141,7 +141,7 @@ module.exports = async function handler(req, res) {
         try {
           // For completed tasks: only apply watermark (finalizeTask handles this via
           // watermarked_url check + already_has_watermarked_url path)
-          const { applyWatermark } = require('./lib/fal-finalize');
+          const { applyWatermark } = require('./_lib/fal-finalize');
           const wm = await applyWatermark(db, task, task.output_url);
           if (wm.watermarked || wm.skipped) {
             const wmUrl = wm.watermarked ? wm.url : task.output_url;
