@@ -3,16 +3,23 @@
  * GET /api/fal-status?taskId={taskId}
  *
  * Returns the current status of a fal.ai generation task.
- * Primary role: read DB state and return it to the frontend.
  *
- * Fallback role: if a fal CDN URL is in polling_url (webhook fired but user is watching),
- * triggers download+upload+watermark inline so the user sees a result immediately
- * without waiting for the next cron run. This path is idempotent and safe to run
- * concurrently with fal-reconcile.js.
+ * done:true conditions (fal tasks):
+ *   status=completed AND watermarked_url is a valid Supabase URL
+ *   (watermarked_url is always set when status=completed — either Railway-watermarked
+ *    for free users, or a copy of output_url for paid users / no-watermark-server)
+ *
+ * done:false cases:
+ *   - status=queued or processing (watermark pending or not yet started)
+ *   - status=completed but watermarked_url missing (legacy task; reconcile will fix)
+ *   - reconcile_attempts >= MAX (manual review needed; still shown as "processing" to user)
+ *
+ * Never returns fal CDN URLs or raw output_url as the final videoUrl.
+ * Fallback: if polling_url is set (user is watching), calls finalizeTask inline.
  */
 
 const { createClient } = require('@supabase/supabase-js');
-const { finalizeTask, isSupabasePublicUrl, validVideoUrl } = require('./lib/fal-finalize');
+const { finalizeTask, isSupabasePublicUrl, MAX_RECONCILE_ATTEMPTS } = require('./lib/fal-finalize');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -63,15 +70,20 @@ module.exports = async function handler(req, res) {
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
 
-    // ── Completed ─────────────────────────────────────────────────────────────
+    // ── Completed with watermarked_url → done:true ────────────────────────────
+    // watermarked_url is set for both free users (Railway watermark) and paid users
+    // (output_url copy). This is the only path to done:true for fal tasks.
+    if (task.status === 'completed' && task.watermarked_url && isSupabasePublicUrl(task.watermarked_url)) {
+      return res.status(200).json({
+        ok: true, done: true, status: 'completed',
+        videoUrl: task.watermarked_url, taskId
+      });
+    }
+
+    // ── Completed but watermarked_url missing (legacy / race condition) ────────
+    // Do not return done:true. Reconcile cron will apply watermark and set watermarked_url.
     if (task.status === 'completed') {
-      if (task.watermarked_url && isSupabasePublicUrl(task.watermarked_url)) {
-        return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl: task.watermarked_url, taskId });
-      }
-      if (task.output_url && isSupabasePublicUrl(task.output_url)) {
-        return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl: task.output_url, taskId });
-      }
-      // Completed but no persistent URL — fall through to try finalizing
+      return res.status(200).json({ ok: true, done: false, status: 'processing', taskId });
     }
 
     // ── Failed / Cancelled ────────────────────────────────────────────────────
@@ -88,32 +100,40 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // ── Queued / Processing: check for fal CDN URL in polling_url ─────────────
-    // If webhook has fired and fal CDN URL is available, finalize inline
-    // (fallback for when user is watching; reconcile cron handles the background case).
+    // ── Queued / Processing: check if at attempt limit (needs manual review) ──
+    const settings = (task.settings && typeof task.settings === 'object') ? task.settings : {};
+    const attempts = Number(settings.reconcile_attempts || 0);
+    if (attempts >= MAX_RECONCILE_ATTEMPTS) {
+      // Keep user-visible status as "processing" — do not expose internal error details
+      console.warn('[fal-status] task at max attempts, needs review, taskId:', taskId);
+      return res.status(200).json({ ok: true, done: false, status: 'processing', taskId });
+    }
+
+    // ── Queued / Processing: inline finalize if polling_url is set ────────────
+    // Triggered when user is watching and webhook has fired; avoids waiting for next cron.
     if (task.polling_url && !isSupabasePublicUrl(task.polling_url)) {
       console.log('[fal-status] fal CDN URL found, finalizing inline, taskId:', taskId);
       const result = await finalizeTask(db, task);
 
       if (result.ok) {
-        // Re-fetch to get the updated URLs
+        // Re-fetch to get the updated watermarked_url
         const { data: updated } = await db.from('generation_tasks')
-          .select('output_url,watermarked_url')
+          .select('watermarked_url')
           .eq('id', task.id)
           .maybeSingle();
-        const videoUrl = (updated?.watermarked_url && isSupabasePublicUrl(updated.watermarked_url))
-          ? updated.watermarked_url
-          : (updated?.output_url && isSupabasePublicUrl(updated.output_url) ? updated.output_url : null);
-        if (videoUrl) {
-          return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl, taskId });
+        if (updated?.watermarked_url && isSupabasePublicUrl(updated.watermarked_url)) {
+          return res.status(200).json({
+            ok: true, done: true, status: 'completed',
+            videoUrl: updated.watermarked_url, taskId
+          });
         }
       }
-      // Finalize failed — return done:false so client retries (reconcile will pick it up)
-      console.warn('[fal-status] inline finalize failed, returning done:false, taskId:', taskId);
+      // Finalize returned ok:false (watermark failed or upload failed) — client retries
+      console.warn('[fal-status] inline finalize not yet complete, returning done:false, taskId:', taskId);
       return res.status(200).json({ ok: true, done: false, status: 'processing', taskId });
     }
 
-    // ── No fal CDN URL yet — still waiting for webhook ────────────────────────
+    // ── Still waiting for webhook or watermark ─────────────────────────────────
     return res.status(200).json({ ok: true, done: false, status: task.status || 'queued', taskId });
   } catch (err) {
     console.error('[fal-status] error:', err?.message, 'taskId:', taskId);

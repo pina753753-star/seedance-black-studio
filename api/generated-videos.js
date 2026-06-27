@@ -105,6 +105,12 @@ async function readFlowvidHistory(db, limit, userId) {
     const dur = Number(task.duration_seconds);
     const watermarkedUrl = validVideoUrl(task.watermarked_url || '');
     const outputUrl = validVideoUrl(task.output_url || '');
+
+    // fal tasks: only display if watermarked_url is valid.
+    // (fal tasks set watermarked_url on completion — missing means processing not finished.)
+    // OpenRouter tasks: keep existing behavior (watermarked_url preferred, output_url fallback).
+    if (task.api_provider === 'fal' && !watermarkedUrl) return null;
+
     return {
       id: task.id,
       job_id: task.api_task_id || task.id,
@@ -121,7 +127,7 @@ async function readFlowvidHistory(db, limit, userId) {
       watermarked_url: task.watermarked_url || ''
     };
   });
-  return { rows: rows.map(normalizeHistoryRow).filter(Boolean), error: null };
+  return { rows: rows.map(r => r ? normalizeHistoryRow(r) : null).filter(Boolean), error: null };
 }
 
 module.exports = async function handler(req, res) {
