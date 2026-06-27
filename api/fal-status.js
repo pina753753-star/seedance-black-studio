@@ -3,6 +3,7 @@ const { createClient } = require('@supabase/supabase-js');
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const WATERMARK_SERVER_URL = process.env.WATERMARK_SERVER_URL || '';
+const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
 
 function serviceClient() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
@@ -64,6 +65,46 @@ async function applyWatermark(db, task, videoUrl) {
   } catch (_) { return videoUrl; }
 }
 
+// Download a fal CDN video URL and upload to Supabase Storage.
+async function downloadAndUpload(db, videoUrl, taskId) {
+  if (!videoUrl || !/^https?:\/\//i.test(videoUrl)) {
+    return { ok: false, error: 'invalid video URL' };
+  }
+
+  let videoBuffer, contentType;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const dlRes = await fetch(videoUrl, { signal: controller.signal, headers: { 'User-Agent': 'flowvid-studio/1.0' } });
+      if (!dlRes.ok) return { ok: false, error: `video download HTTP ${dlRes.status}` };
+      contentType = dlRes.headers.get('content-type') || 'video/mp4';
+      videoBuffer = Buffer.from(await dlRes.arrayBuffer());
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (e) {
+    return { ok: false, error: `video download failed: ${e?.message}` };
+  }
+
+  if (!videoBuffer || videoBuffer.length < 1000) {
+    return { ok: false, error: `video file too small: ${videoBuffer?.length ?? 0} bytes` };
+  }
+
+  const safeId = String(taskId || '').replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 80);
+  const path = `fal-videos/${safeId}.mp4`;
+  const upload = await db.storage.from(VIDEO_BUCKET).upload(path, videoBuffer, {
+    contentType, cacheControl: '31536000', upsert: true
+  });
+  if (upload.error) return { ok: false, error: `Supabase upload: ${upload.error.message}` };
+
+  const { data: urlData } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
+  const publicUrl = urlData?.publicUrl || '';
+  if (!publicUrl) return { ok: false, error: 'could not get public URL after upload' };
+
+  return { ok: true, publicUrl, bytes: videoBuffer.length };
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
@@ -79,7 +120,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const { data: task, error } = await db.from('generation_tasks')
-      .select('id,user_id,status,output_url,watermarked_url,error_message,api_provider,api_task_id')
+      .select('id,user_id,status,output_url,watermarked_url,polling_url,error_message,api_provider,api_task_id')
       .eq('id', taskId)
       .eq('user_id', user.id)
       .eq('api_provider', 'fal')
@@ -89,18 +130,14 @@ module.exports = async function handler(req, res) {
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
 
     if (task.status === 'completed') {
-      // Return watermarked URL if already set
       if (task.watermarked_url && isSupabasePublicUrl(task.watermarked_url)) {
         return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl: task.watermarked_url, taskId });
       }
-      // Return output_url if it's a persistent Supabase URL
       if (task.output_url && isSupabasePublicUrl(task.output_url)) {
-        // Apply watermark (best-effort, synchronous)
         const finalUrl = await applyWatermark(db, task, task.output_url);
         return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl: finalUrl, taskId });
       }
-      // Completed but Webhook hasn't saved the video URL yet — treat as still processing
-      return res.status(200).json({ ok: true, done: false, status: 'processing', taskId });
+      // completed but no persistent URL yet — fall through to try polling_url
     }
 
     if (task.status === 'failed' || task.status === 'cancelled') {
@@ -116,7 +153,34 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // queued / processing / expired
+    // queued / processing: check if webhook has saved a fal CDN URL as polling_url
+    if (task.polling_url && !isSupabasePublicUrl(task.polling_url)) {
+      console.log('[fal-status] attempting download+upload from polling_url, taskId:', taskId);
+      const uploadResult = await downloadAndUpload(db, task.polling_url, task.id);
+
+      if (!uploadResult.ok) {
+        console.warn('[fal-status] upload failed, will retry on next poll:', uploadResult.error, 'taskId:', taskId);
+        return res.status(200).json({ ok: true, done: false, status: 'processing', taskId });
+      }
+
+      // Mark completed with the permanent Supabase URL and clear polling_url
+      await db.from('generation_tasks')
+        .update({
+          status: 'completed',
+          output_url: uploadResult.publicUrl,
+          polling_url: null,
+          finished_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', task.id);
+
+      console.log('[fal-status] upload success, taskId:', taskId, 'bytes:', uploadResult.bytes);
+
+      const finalUrl = await applyWatermark(db, { ...task, output_url: uploadResult.publicUrl }, uploadResult.publicUrl);
+      return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl: finalUrl, taskId });
+    }
+
+    // queued / processing / expired — no polling_url yet
     return res.status(200).json({ ok: true, done: false, status: task.status || 'queued', taskId });
   } catch (err) {
     console.error('[fal-status] error:', err?.message, 'taskId:', taskId);

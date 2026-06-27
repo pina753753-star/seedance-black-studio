@@ -3,12 +3,10 @@ const crypto = require('crypto');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
 
 const FAL_JWKS_URL = 'https://rest.fal.ai/.well-known/jwks.json';
-const JWKS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const JWKS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-// In-process JWKS cache (ephemeral; resets on cold start, which triggers a fresh fetch)
 let _jwksCache = null;
 let _jwksCachedAt = 0;
 
@@ -17,17 +15,8 @@ function serviceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
 }
 
-// Read the raw request body as a Buffer for signature verification.
-// Vercel Functions (non-Next.js) expose req as a Node IncomingMessage stream;
-// the body has not been consumed before the handler is called.
+// With bodyParser disabled, req is always an unconsumed stream.
 async function getRawBody(req) {
-  // If Vercel has already buffered the body as a string or Buffer, use that directly.
-  if (Buffer.isBuffer(req.body)) return req.body;
-  if (typeof req.body === 'string') return Buffer.from(req.body, 'utf-8');
-  if (req.body && typeof req.body === 'object') {
-    // Already parsed as an object — cannot recover exact raw bytes.
-    return null;
-  }
   return new Promise((resolve, reject) => {
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
@@ -51,13 +40,10 @@ async function fetchJwks() {
   return keys;
 }
 
-// Verify an Ed25519 signature using Node.js built-in crypto.
-// jwkX is the base64url-encoded 32-byte public key from the JWK.
 function verifyED25519(message, signatureHex, jwkX) {
   try {
     const pubKeyBytes = Buffer.from(jwkX, 'base64url');
     if (pubKeyBytes.length !== 32) return false;
-    // Build DER SubjectPublicKeyInfo for Ed25519 (OID 1.3.101.112 = 06 03 2b 65 70)
     const derPrefix = Buffer.from('302a300506032b6570032100', 'hex');
     const pubKeyDer = Buffer.concat([derPrefix, pubKeyBytes]);
     const pubKey = crypto.createPublicKey({ key: pubKeyDer, format: 'der', type: 'spki' });
@@ -76,16 +62,12 @@ async function verifySignature(req, rawBody) {
     return { valid: false, reason: 'missing_required_headers' };
   }
 
-  // Reject requests outside the ±300-second window
   const tsSeconds = Number(timestamp);
   if (!Number.isFinite(tsSeconds) || Math.abs(Date.now() / 1000 - tsSeconds) > 300) {
     return { valid: false, reason: 'timestamp_out_of_window' };
   }
 
-  // SHA-256 of raw body (hex digest)
   const bodyHash = crypto.createHash('sha256').update(rawBody).digest('hex');
-
-  // Message is the four fields joined by newlines (per fal.ai spec)
   const message = [requestId, userId, timestamp, bodyHash].join('\n');
 
   let keys;
@@ -105,58 +87,26 @@ function isSupabasePublicUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) && String(url || '').includes('/storage/v1/object/public/');
 }
 
-async function downloadAndUpload(db, videoUrl, taskId) {
-  if (!videoUrl || !/^https?:\/\//i.test(videoUrl)) {
-    return { ok: false, error: 'invalid video URL' };
-  }
-  // Reject fal status/cancel/result endpoint URLs masquerading as video URLs
-  if (/queue\.fal\.run\/.*\/(status|cancel|result)\b/i.test(videoUrl)) {
-    return { ok: false, error: 'URL is a fal status endpoint, not a downloadable video' };
-  }
-
-  let videoBuffer, contentType;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10s download timeout
-    try {
-      const dlRes = await fetch(videoUrl, { signal: controller.signal, headers: { 'User-Agent': 'flowvid-studio-webhook/1.0' } });
-      if (!dlRes.ok) return { ok: false, error: `video download HTTP ${dlRes.status}` };
-      contentType = dlRes.headers.get('content-type') || 'video/mp4';
-      const arrayBuf = await dlRes.arrayBuffer();
-      videoBuffer = Buffer.from(arrayBuf);
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch (e) {
-    return { ok: false, error: `video download failed: ${e?.message}` };
-  }
-
-  if (!videoBuffer || videoBuffer.length < 1000) {
-    return { ok: false, error: `video file too small: ${videoBuffer?.length ?? 0} bytes` };
-  }
-
-  // Use task ID as filename (safe characters only)
-  const safeId = String(taskId || '').replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 80);
-  const path = `fal-videos/${safeId}.mp4`;
-  const upload = await db.storage.from(VIDEO_BUCKET).upload(path, videoBuffer, {
-    contentType, cacheControl: '31536000', upsert: true
-  });
-  if (upload.error) return { ok: false, error: `Supabase upload: ${upload.error.message}` };
-
-  const { data: urlData } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
-  const publicUrl = urlData?.publicUrl || '';
-  if (!publicUrl) return { ok: false, error: 'could not get public URL after upload' };
-
-  return { ok: true, publicUrl, bytes: videoBuffer.length };
-}
-
+// Returns true if refund succeeded (or was already done), false if it should be retried.
 async function refundCreditsForTask(db, task) {
   try {
+    // Idempotency: skip if refund transaction already recorded
+    const { data: existing } = await db.from('credit_transactions')
+      .select('id').eq('related_task_id', task.id).eq('reason', 'generation_refund').limit(1);
+    if (existing && existing.length > 0) {
+      console.log('[fal-webhook] refund already recorded, taskId:', task.id);
+      return true;
+    }
+
     const { data: txs } = await db.from('credit_transactions')
       .select('amount,credit_type')
       .eq('related_task_id', task.id)
       .eq('reason', 'video_generation');
-    if (!txs || txs.length === 0) return;
+    if (!txs || txs.length === 0) {
+      // No charge found — nothing to refund, treat as success
+      console.log('[fal-webhook] no charge TX found, skipping refund, taskId:', task.id);
+      return true;
+    }
 
     let fromSub = 0, fromFree = 0, fromPurchased = 0;
     for (const tx of txs) {
@@ -169,41 +119,50 @@ async function refundCreditsForTask(db, task) {
     const { data: bal } = await db.from('credit_balances')
       .select('free_credits,subscription_credits,purchased_credits')
       .eq('user_id', task.user_id).maybeSingle();
-    if (!bal) return;
+    if (!bal) {
+      console.error('[fal-webhook] credit_balances row not found, taskId:', task.id);
+      return false;
+    }
 
     const updateFields = { updated_at: new Date().toISOString() };
     if (fromSub > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + fromSub;
     if (fromFree > 0) updateFields.free_credits = Number(bal.free_credits || 0) + fromFree;
     if (fromPurchased > 0) updateFields.purchased_credits = Number(bal.purchased_credits || 0) + fromPurchased;
-    await db.from('credit_balances').update(updateFields).eq('user_id', task.user_id);
+    const { error: balErr } = await db.from('credit_balances').update(updateFields).eq('user_id', task.user_id);
+    if (balErr) {
+      console.error('[fal-webhook] credit_balances update failed:', balErr.message, 'taskId:', task.id);
+      return false;
+    }
 
     const txRows = [];
     if (fromSub > 0) txRows.push({ user_id: task.user_id, amount: fromSub, credit_type: 'subscription', reason: 'generation_refund', related_task_id: task.id });
     if (fromFree > 0) txRows.push({ user_id: task.user_id, amount: fromFree, credit_type: 'free', reason: 'generation_refund', related_task_id: task.id });
     if (fromPurchased > 0) txRows.push({ user_id: task.user_id, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: task.id });
-    if (txRows.length) await db.from('credit_transactions').insert(txRows);
+    if (txRows.length) {
+      const { error: txErr } = await db.from('credit_transactions').insert(txRows);
+      if (txErr) {
+        console.error('[fal-webhook] refund TX insert failed:', txErr.message, 'taskId:', task.id);
+        return false;
+      }
+    }
+
     console.log('[fal-webhook] refund complete, taskId:', task.id, 'total:', fromSub + fromFree + fromPurchased);
+    return true;
   } catch (e) {
-    console.error('[fal-webhook] refund error:', e?.message, 'taskId:', task.id);
+    console.error('[fal-webhook] refund exception:', e?.message, 'taskId:', task.id);
+    return false;
   }
 }
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
-  // Read raw body before any other processing (needed for SHA-256 in signature check)
   let rawBody;
   try { rawBody = await getRawBody(req); } catch (e) {
     console.error('[fal-webhook] raw body read error:', e?.message);
     return res.status(500).json({ ok: false, error: 'body_read_error' });
   }
-  if (!rawBody) {
-    // Body was already parsed as an object by middleware — cannot verify signature
-    console.error('[fal-webhook] raw body unavailable (already parsed as object)');
-    return res.status(500).json({ ok: false, error: 'raw_body_unavailable' });
-  }
 
-  // Verify ED25519 signature before processing payload
   const sigResult = await verifySignature(req, rawBody).catch(e => ({ valid: false, reason: String(e?.message) }));
   if (!sigResult.valid) {
     console.warn('[fal-webhook] signature verification failed:', sigResult.reason);
@@ -216,7 +175,7 @@ module.exports = async function handler(req, res) {
   }
 
   const requestId = String(body.request_id || '').trim();
-  const status = String(body.status || '').trim(); // 'OK' or 'ERROR'
+  const status = String(body.status || '').trim();
   if (!requestId) return res.status(400).json({ ok: false, error: 'missing request_id' });
 
   console.log('[fal-webhook] received, request_id:', requestId, 'status:', status);
@@ -224,9 +183,8 @@ module.exports = async function handler(req, res) {
   const db = serviceClient();
   if (!db) return res.status(500).json({ ok: false, error: 'DB not configured' });
 
-  // Find task by fal request_id stored as api_task_id
   const { data: task, error: findErr } = await db.from('generation_tasks')
-    .select('id,user_id,status,output_url,api_task_id,api_provider')
+    .select('id,user_id,status,output_url,polling_url,api_task_id,api_provider')
     .eq('api_task_id', requestId)
     .eq('api_provider', 'fal')
     .maybeSingle();
@@ -236,32 +194,35 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'db_error' });
   }
   if (!task) {
-    // Not found — could be a stale retry for an already-deleted task. Acknowledge to stop retries.
     console.warn('[fal-webhook] no task for request_id:', requestId);
     return res.status(200).json({ ok: true, message: 'task_not_found_acknowledged' });
-  }
-
-  // Idempotency: task already in a terminal state
-  if (task.status === 'completed' || task.status === 'failed') {
-    console.log('[fal-webhook] task already finalized:', task.status, 'taskId:', task.id);
-    return res.status(200).json({ ok: true, message: 'already_finalized' });
   }
 
   // ── ERROR path ──────────────────────────────────────────────────────────────
   if (status === 'ERROR') {
     const errMsg = String(body.error || 'fal generation failed').slice(0, 500);
-    console.log('[fal-webhook] fal ERROR, taskId:', task.id, 'error:', errMsg);
+    console.log('[fal-webhook] fal ERROR, taskId:', task.id, 'status:', task.status, 'error:', errMsg);
 
-    // Atomic claim: only update if still non-terminal (prevents race with concurrent webhook)
-    const { data: claimed } = await db.from('generation_tasks')
-      .update({ status: 'failed', error_message: errMsg, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', task.id)
-      .in('status', ['queued', 'processing'])
-      .select('id');
-
-    if (claimed && claimed.length > 0) {
-      await refundCreditsForTask(db, task);
+    // Already completed — no action needed
+    if (task.status === 'completed') {
+      return res.status(200).json({ ok: true, message: 'already_completed' });
     }
+
+    // Attempt refund FIRST — if it fails, return 500 so fal retries the webhook
+    const refunded = await refundCreditsForTask(db, task);
+    if (!refunded) {
+      console.error('[fal-webhook] refund failed, returning 500 for retry, taskId:', task.id);
+      return res.status(500).json({ ok: false, error: 'refund_failed_will_retry' });
+    }
+
+    // Refund succeeded — now mark terminal (idempotent: WHERE status IN non-terminal)
+    if (task.status !== 'failed') {
+      await db.from('generation_tasks')
+        .update({ status: 'failed', error_message: errMsg, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', task.id)
+        .in('status', ['queued', 'processing']);
+    }
+
     return res.status(200).json({ ok: true });
   }
 
@@ -272,57 +233,53 @@ module.exports = async function handler(req, res) {
   }
 
   // ── OK path ──────────────────────────────────────────────────────────────────
+
+  // Idempotency: already completed with a persistent URL
+  if (task.status === 'completed' && task.output_url && isSupabasePublicUrl(task.output_url)) {
+    console.log('[fal-webhook] already completed, taskId:', task.id);
+    return res.status(200).json({ ok: true, message: 'already_completed' });
+  }
+
   const videoUrl = body.payload?.video?.url;
   if (!videoUrl || typeof videoUrl !== 'string') {
-    console.error('[fal-webhook] no video URL in payload, taskId:', task.id, 'payload keys:', Object.keys(body.payload || {}));
-    // Mark failed and refund — video is unrecoverable without a URL
-    const { data: claimed } = await db.from('generation_tasks')
-      .update({ status: 'failed', error_message: 'no video URL in webhook payload', finished_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', task.id)
-      .in('status', ['queued', 'processing'])
-      .select('id');
-    if (claimed && claimed.length > 0) await refundCreditsForTask(db, task);
+    console.error('[fal-webhook] no video URL in payload, taskId:', task.id);
+    // No URL = unrecoverable. Refund then mark failed.
+    const refunded = await refundCreditsForTask(db, task);
+    if (!refunded) {
+      console.error('[fal-webhook] refund failed for missing URL case, returning 500, taskId:', task.id);
+      return res.status(500).json({ ok: false, error: 'refund_failed_will_retry' });
+    }
+    if (task.status !== 'failed') {
+      await db.from('generation_tasks')
+        .update({ status: 'failed', error_message: 'no video URL in webhook payload', finished_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', task.id)
+        .in('status', ['queued', 'processing']);
+    }
     return res.status(200).json({ ok: true });
   }
 
-  // Idempotency: output_url already set to a persistent Supabase URL
-  if (task.output_url && isSupabasePublicUrl(task.output_url)) {
-    console.log('[fal-webhook] output_url already persisted, ensuring completed status. taskId:', task.id);
-    await db.from('generation_tasks')
-      .update({ status: 'completed', updated_at: new Date().toISOString() })
-      .eq('id', task.id)
-      .in('status', ['queued', 'processing']);
-    return res.status(200).json({ ok: true, message: 'already_uploaded' });
+  // Idempotency: polling_url already set to the same URL
+  if (task.polling_url === videoUrl) {
+    console.log('[fal-webhook] polling_url already set, taskId:', task.id);
+    return res.status(200).json({ ok: true, message: 'polling_url_already_set' });
   }
 
-  // Download fal video and upload to Supabase Storage for permanent hosting
-  console.log('[fal-webhook] uploading video, taskId:', task.id, 'falUrl:', videoUrl.slice(0, 120));
-  const uploadResult = await downloadAndUpload(db, videoUrl, task.id);
-  if (!uploadResult.ok) {
-    console.error('[fal-webhook] upload failed:', uploadResult.error, 'taskId:', task.id);
-    // Return 500 so fal retries (up to 10 times in 2h per fal retry policy)
-    return res.status(500).json({ ok: false, error: 'upload_failed', detail: uploadResult.error });
-  }
-  console.log('[fal-webhook] upload success, bytes:', uploadResult.bytes, 'taskId:', task.id);
-
-  // Atomic complete claim (WHERE status IN queued/processing prevents double-complete)
-  const { data: claimed } = await db.from('generation_tasks')
-    .update({
-      status: 'completed',
-      output_url: uploadResult.publicUrl,
-      finished_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
+  // Save the fal CDN URL as polling_url and mark processing.
+  // fal-status.js will download+upload to Supabase Storage on the next client poll.
+  const { error: saveErr } = await db.from('generation_tasks')
+    .update({ polling_url: videoUrl, status: 'processing', updated_at: new Date().toISOString() })
     .eq('id', task.id)
-    .in('status', ['queued', 'processing'])
-    .select('id');
+    .in('status', ['queued', 'processing']);
 
-  if (!claimed || claimed.length === 0) {
-    console.warn('[fal-webhook] complete claim found 0 rows (race condition?) taskId:', task.id);
-  } else {
-    console.log('[fal-webhook] task completed, taskId:', task.id, 'url:', uploadResult.publicUrl.slice(0, 80));
+  if (saveErr) {
+    console.error('[fal-webhook] save polling_url failed:', saveErr.message, 'taskId:', task.id);
+    return res.status(500).json({ ok: false, error: 'db_save_error' });
   }
 
-  // Watermark is handled lazily by fal-status.js on the next client poll
+  console.log('[fal-webhook] polling_url saved, taskId:', task.id);
   return res.status(200).json({ ok: true });
 };
+
+// Disable Vercel's automatic body parsing so we receive the raw stream for
+// ED25519 signature verification (SHA-256 of raw bytes must match).
+module.exports.config = { api: { bodyParser: false } };
