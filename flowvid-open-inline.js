@@ -5,7 +5,7 @@
   const DRAFT_KEY='flowvidGenerateDraft';
 
   function roundUpToFive(value){
-    return Math.ceil(Math.max(50,Math.min(500,value))/5)*5;
+    return Math.ceil(Math.max(50,Math.min(400,value))/5)*5;
   }
 
   function calculateCredits(){
@@ -19,7 +19,6 @@
     credits+=Math.max(0,duration-5)*15;
     if(resolution==='1080p')credits+=100;
     if(resolution==='480p')credits-=20;
-    if(mode==='reference_to_video')credits+=Math.max(0,refs-1)*10;
     if(mode==='text_to_video')credits-=10;
     credits+=15;
     const multiplier=model===FAST_MODEL?0.8:1;

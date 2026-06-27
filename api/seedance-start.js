@@ -11,7 +11,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.s
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const MIN_CREDITS = 50;
-const MAX_CREDITS = 500;
+const MAX_CREDITS = 400;
 
 function jsonBody(req) {
   if (typeof req.body === 'string') {
@@ -64,7 +64,6 @@ function calculateCreditCost(body, mode, duration, resolution, model) {
   credits += Math.max(0, duration - 5) * 15;
   if (resolution === '1080p') credits += 100;
   if (resolution === '480p') credits -= 20;
-  if (mode === 'reference_to_video') credits += Math.max(0, countReferenceInputs(body) - 1) * 10;
   if (mode === 'text_to_video') credits -= 10;
   credits += 15;
   const multiplier = MODEL_MULTIPLIERS[model] ?? 1.0;
