@@ -11,5 +11,11 @@
       "src": "/",
       "dest": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/fal-reconcile",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }
