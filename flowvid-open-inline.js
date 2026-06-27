@@ -1,23 +1,30 @@
 (function(){
   const STANDARD_MODEL='bytedance/seedance-2.0';
   const FAST_MODEL='bytedance/seedance-2.0-fast';
+  const PRICING_SAFETY_MULTIPLIER=1.15;
   const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
   const DRAFT_KEY='flowvidGenerateDraft';
 
-  function roundUpToTen(value){
-    return Math.max(50,Math.min(500,Math.ceil(Math.max(50,value)/10)*10));
+  function roundUpToFive(value){
+    return Math.ceil(Math.max(50,Math.min(400,value))/5)*5;
   }
 
   function calculateCredits(){
     const duration=Number(document.getElementById('duration')?.value||5);
     const resolution=document.getElementById('resolution')?.value||'720p';
     const model=document.getElementById('model')?.value||FAST_MODEL;
+    const mode=document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
+    const refs=Math.max(1,document.querySelectorAll('#assets .thumb').length||1);
+    if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));
     let credits=80;
     credits+=Math.max(0,duration-5)*15;
     if(resolution==='1080p')credits+=100;
     if(resolution==='480p')credits-=20;
+    if(mode==='text_to_video')credits-=10;
     credits+=15;
-    return roundUpToTen(credits*(model===FAST_MODEL?0.8:1));
+    const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
+    const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;
+    return roundUpToFive(credits*multiplier*modeMultiplier);
   }
 
   function syncCreditButton(){
@@ -137,6 +144,12 @@
       const observer=new MutationObserver(()=>syncCreditButton());
       observer.observe(create,{childList:true,subtree:true,characterData:true});
       window.__flowvidCreditButtonObserver=observer;
+    }
+    const assets=document.getElementById('assets');
+    if(assets){
+      const assetsObserver=new MutationObserver(()=>setTimeout(syncCreditButton,0));
+      assetsObserver.observe(assets,{childList:true,subtree:true});
+      window.__flowvidAssetsObserver=assetsObserver;
     }
   }
 

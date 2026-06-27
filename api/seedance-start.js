@@ -2,14 +2,17 @@ const { createClient } = require('@supabase/supabase-js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
+const FAST_MODEL = 'bytedance/seedance-2.0-fast';
+const LEGACY_LITE_MODEL = 'bytedance/seedance-2.0-lite';
+const ALLOWED_MODELS = [DEFAULT_MODEL, FAST_MODEL, LEGACY_LITE_MODEL];
+const MODEL_MULTIPLIERS = { [DEFAULT_MODEL]: 1.0, [FAST_MODEL]: 0.8, [LEGACY_LITE_MODEL]: 0.8 };
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-// Credit cost comes from the client's creditEstimate() display value.
-// Server enforces a safe range to prevent manipulation.
 const MIN_CREDITS = 50;
-const MAX_CREDITS = 500;
+const MAX_CREDITS = 400;
+const PRICING_SAFETY_MULTIPLIER = 1.15;
 
 function jsonBody(req) {
   if (typeof req.body === 'string') {
@@ -37,6 +40,36 @@ function normalizeResolution(value) {
 function normalizeMode(value) {
   const m = String(value || '').trim();
   return ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'].includes(m) ? m : 'reference_to_video';
+}
+
+function normalizeModel(value) {
+  const m = String(value || DEFAULT_MODEL).trim();
+  return ALLOWED_MODELS.includes(m) ? m : DEFAULT_MODEL;
+}
+
+function roundUpToFive(value) {
+  return Math.ceil(Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, value)) / 5) * 5;
+}
+
+function countReferenceInputs(body) {
+  if (Array.isArray(body.reference_urls)) return Math.max(1, body.reference_urls.length);
+  if (body.reference_url) return 1;
+  return 1;
+}
+
+function calculateCreditCost(body, mode, duration, resolution, model) {
+  if (mode === 'storyboard') {
+    return roundUpToFive(Math.max(MIN_CREDITS, duration * 12));
+  }
+  let credits = 80;
+  credits += Math.max(0, duration - 5) * 15;
+  if (resolution === '1080p') credits += 100;
+  if (resolution === '480p') credits -= 20;
+  if (mode === 'text_to_video') credits -= 10;
+  credits += 15;
+  const multiplier = MODEL_MULTIPLIERS[model] ?? 1.0;
+  const modeMultiplier = mode === 'reference_to_video' ? PRICING_SAFETY_MULTIPLIER : 1;
+  return roundUpToFive(credits * multiplier * modeMultiplier);
 }
 
 function imageObject(url, frameType) {
@@ -307,16 +340,51 @@ module.exports = async function handler(req, res) {
     const prompt = String(body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ ok: false, error: 'prompt is required' });
 
+    // Reject explicitly invalid inputs before any DB writes or credit deductions.
+    // Absent/empty fields fall through to normalize defaults (backward compat).
+    const VALID_MODES = ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'];
+    const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
+    const rawMode = body.mode;
+    const rawModel = body.model;
+    const rawResolution = body.resolution;
+    const rawDuration = body.duration !== undefined ? body.duration : body.duration_seconds;
+    if (rawMode !== undefined && rawMode !== null && rawMode !== '') {
+      if (!VALID_MODES.includes(String(rawMode).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_mode', message: 'Unsupported generation mode.' });
+      }
+    }
+    if (rawModel !== undefined && rawModel !== null && rawModel !== '') {
+      if (!ALLOWED_MODELS.includes(String(rawModel).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_model', message: 'Unsupported generation model.' });
+      }
+    }
+    if (rawResolution !== undefined && rawResolution !== null && rawResolution !== '') {
+      if (!VALID_RESOLUTIONS.includes(String(rawResolution).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_resolution', message: 'Unsupported resolution.' });
+      }
+    }
+    if (rawDuration !== undefined && rawDuration !== '') {
+      const durNum = Number(rawDuration);
+      if (rawDuration === null || !Number.isFinite(durNum) || !Number.isInteger(durNum) || durNum < 1 || durNum > 15) {
+        return res.status(400).json({ ok: false, error: 'invalid_duration', message: 'Duration must be an integer between 1 and 15.' });
+      }
+    }
+
     const resolution = normalizeResolution(body.resolution);
     const aspectRatio = normalizeAspectRatio(body.aspect_ratio || body.aspectRatio);
     const duration = normalizeDuration(body.duration || body.duration_seconds);
     const mode = normalizeMode(body.mode);
-    const model = String(body.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+    const model = normalizeModel(body.model);
 
-    // Credit cost is the value shown in the UI (estimated_credits).
-    // Clamped to a safe range to prevent client-side manipulation.
-    const rawCredits = Math.round(Number(body.estimated_credits) || 0);
-    const creditCost = Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, rawCredits)) || MIN_CREDITS;
+    // Fast/Lite + reference_to_video + 1080p is rejected by OpenRouter (confirmed).
+    if ((model === FAST_MODEL || model === LEGACY_LITE_MODEL) && mode === 'reference_to_video' && resolution === '1080p') {
+      return res.status(400).json({
+        ok: false,
+        error: 'unsupported_combination',
+        message: 'Seedance 2.0 Fastのリファレンスモードは1080pに対応していません。720p以下をお選びください。'
+      });
+    }
+    const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
 
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db
