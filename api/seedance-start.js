@@ -339,6 +339,36 @@ module.exports = async function handler(req, res) {
     const prompt = String(body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ ok: false, error: 'prompt is required' });
 
+    // Reject explicitly invalid inputs before any DB writes or credit deductions.
+    // Absent/empty fields fall through to normalize defaults (backward compat).
+    const VALID_MODES = ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'];
+    const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
+    const rawMode = body.mode;
+    const rawModel = body.model;
+    const rawResolution = body.resolution;
+    const rawDuration = body.duration !== undefined ? body.duration : body.duration_seconds;
+    if (rawMode !== undefined && rawMode !== null && rawMode !== '') {
+      if (!VALID_MODES.includes(String(rawMode).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_mode', message: 'Unsupported generation mode.' });
+      }
+    }
+    if (rawModel !== undefined && rawModel !== null && rawModel !== '') {
+      if (!ALLOWED_MODELS.includes(String(rawModel).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_model', message: 'Unsupported generation model.' });
+      }
+    }
+    if (rawResolution !== undefined && rawResolution !== null && rawResolution !== '') {
+      if (!VALID_RESOLUTIONS.includes(String(rawResolution).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_resolution', message: 'Unsupported resolution.' });
+      }
+    }
+    if (rawDuration !== undefined && rawDuration !== '') {
+      const durNum = Number(rawDuration);
+      if (rawDuration === null || !Number.isFinite(durNum) || Math.round(durNum) < 1 || Math.round(durNum) > 15) {
+        return res.status(400).json({ ok: false, error: 'invalid_duration', message: 'Duration must be an integer between 1 and 15.' });
+      }
+    }
+
     const resolution = normalizeResolution(body.resolution);
     const aspectRatio = normalizeAspectRatio(body.aspect_ratio || body.aspectRatio);
     const duration = normalizeDuration(body.duration || body.duration_seconds);
