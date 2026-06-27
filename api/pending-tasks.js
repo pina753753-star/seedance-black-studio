@@ -55,7 +55,7 @@ module.exports = async function handler(req, res) {
 
     const { data, error } = await db
       .from('generation_tasks')
-      .select('id,mode,model,prompt,resolution,duration_seconds,aspect_ratio,status,api_task_id,polling_url,created_at')
+      .select('id,mode,model,prompt,resolution,duration_seconds,aspect_ratio,status,api_task_id,polling_url,api_provider,created_at')
       .eq('user_id', user.id)
       .in('status', ['queued', 'processing'])
       .gte('created_at', cutoffIso)
