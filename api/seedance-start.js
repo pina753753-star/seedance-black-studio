@@ -364,7 +364,7 @@ module.exports = async function handler(req, res) {
     }
     if (rawDuration !== undefined && rawDuration !== '') {
       const durNum = Number(rawDuration);
-      if (rawDuration === null || !Number.isFinite(durNum) || Math.round(durNum) < 1 || Math.round(durNum) > 15) {
+      if (rawDuration === null || !Number.isFinite(durNum) || !Number.isInteger(durNum) || durNum < 1 || durNum > 15) {
         return res.status(400).json({ ok: false, error: 'invalid_duration', message: 'Duration must be an integer between 1 and 15.' });
       }
     }
