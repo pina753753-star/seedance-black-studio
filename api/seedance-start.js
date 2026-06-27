@@ -12,6 +12,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const MIN_CREDITS = 50;
 const MAX_CREDITS = 400;
+const PRICING_SAFETY_MULTIPLIER = 1.15;
 
 function jsonBody(req) {
   if (typeof req.body === 'string') {
@@ -67,7 +68,7 @@ function calculateCreditCost(body, mode, duration, resolution, model) {
   if (mode === 'text_to_video') credits -= 10;
   credits += 15;
   const multiplier = MODEL_MULTIPLIERS[model] ?? 1.0;
-  return roundUpToFive(credits * multiplier);
+  return roundUpToFive(credits * multiplier * PRICING_SAFETY_MULTIPLIER);
 }
 
 function imageObject(url, frameType) {

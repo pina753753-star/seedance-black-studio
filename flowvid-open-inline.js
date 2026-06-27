@@ -1,6 +1,7 @@
 (function(){
   const STANDARD_MODEL='bytedance/seedance-2.0';
   const FAST_MODEL='bytedance/seedance-2.0-fast';
+  const PRICING_SAFETY_MULTIPLIER=1.15;
   const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
   const DRAFT_KEY='flowvidGenerateDraft';
 
@@ -21,8 +22,8 @@
     if(resolution==='480p')credits-=20;
     if(mode==='text_to_video')credits-=10;
     credits+=15;
-    const multiplier=model===FAST_MODEL?0.8:1;
-    return roundUpToFive(credits*multiplier);
+    const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
+    return roundUpToFive(credits*multiplier*PRICING_SAFETY_MULTIPLIER);
   }
 
   function syncCreditButton(){
