@@ -94,7 +94,6 @@ async function refundCreditsForTask(db, task, errMsg) {
   try {
     const { data, error } = await db.rpc('refund_generation_task_atomic', {
       p_task_id: task.id,
-      p_failure_reason: 'fal_generation_failed',
       p_error_message: String(errMsg || 'fal generation failed').slice(0, 500)
     });
 
@@ -122,6 +121,10 @@ async function refundCreditsForTask(db, task, errMsg) {
     }
     if (code === 'no_charge_found') {
       console.log('[fal-webhook] no charge TX found, skipping refund, taskId:', task.id);
+      return true;
+    }
+    if (code === 'already_cancelled') {
+      console.log('[fal-webhook] task already cancelled (refunded by fal-start), taskId:', task.id);
       return true;
     }
 
