@@ -100,13 +100,11 @@ async function applyWatermark(db, task, videoUrl) {
     }
 
     if (!WATERMARK_SECRET) {
-      console.warn('[fal-finalize] watermark_secret_missing, calling watermark server without auth');
+      return { watermarked: false, error: 'watermark_secret_missing', url: videoUrl };
     }
-    const wmHeaders = { 'Content-Type': 'application/json' };
-    if (WATERMARK_SECRET) wmHeaders['Authorization'] = `Bearer ${WATERMARK_SECRET}`;
     const wmRes = await fetch(`${WATERMARK_SERVER_URL}/watermark`, {
       method: 'POST',
-      headers: wmHeaders,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${WATERMARK_SECRET}` },
       body: JSON.stringify({ videoUrl, userId: task.user_id })
     });
     if (!wmRes.ok) {

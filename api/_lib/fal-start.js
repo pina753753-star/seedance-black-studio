@@ -3,24 +3,28 @@ const { createClient } = require('@supabase/supabase-js');
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
 const FAL_ENDPOINT_TEXT = 'bytedance/seedance-2.0/text-to-video';
 const FAL_ENDPOINT_IMAGE = 'bytedance/seedance-2.0/image-to-video';
-const PRODUCTION_WEBHOOK_URL = 'https://flowvid-studio.vercel.app/api/fal-webhook';
+const PRODUCTION_HOSTNAME = 'flowvid-studio.vercel.app';
+const PRODUCTION_WEBHOOK_URL = `https://${PRODUCTION_HOSTNAME}/api/fal-webhook`;
 
-function validateWebhookUrl(url) {
-  if (!url || typeof url !== 'string') return false;
-  if (!url.startsWith('https://')) return false;
-  if (url.includes('localhost') || url.includes('127.0.0.1')) return false;
-  if (!url.endsWith('/api/fal-webhook')) return false;
-  return true;
+function validateWebhookUrl(url, vercelEnv) {
+  let parsed;
+  try { parsed = new URL(url); } catch (_) { return null; }
+  if (parsed.protocol !== 'https:') return null;
+  if (parsed.username !== '' || parsed.password !== '') return null;
+  if (parsed.search !== '' || parsed.hash !== '') return null;
+  const host = parsed.hostname.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return null;
+  if (parsed.pathname !== '/api/fal-webhook') return null;
+  if (vercelEnv === 'production' && host !== PRODUCTION_HOSTNAME) return null;
+  if (vercelEnv !== 'production' && host === PRODUCTION_HOSTNAME) return null;
+  return url;
 }
 
 function getWebhookUrl() {
+  const vercelEnv = process.env.VERCEL_ENV || '';
   const explicit = (process.env.FAL_WEBHOOK_URL || '').trim();
-  if (explicit) {
-    return validateWebhookUrl(explicit) ? explicit : null;
-  }
-  if (process.env.VERCEL_ENV === 'production') {
-    return PRODUCTION_WEBHOOK_URL;
-  }
+  if (explicit) return validateWebhookUrl(explicit, vercelEnv);
+  if (vercelEnv === 'production') return PRODUCTION_WEBHOOK_URL;
   return null;
 }
 
