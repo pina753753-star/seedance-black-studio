@@ -1,5 +1,5 @@
-const coreHandler = require('./seedance-start.js');
-const falHandler = require('./fal-start.js');
+const coreHandler = require('./_lib/seedance-start.js');
+const falHandler = require('./_lib/fal-start.js');
 
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
 const FAST_MODEL = 'bytedance/seedance-2.0-fast';

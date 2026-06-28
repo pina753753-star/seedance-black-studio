@@ -5,6 +5,10 @@
       "dest": "/api/seedance-start-priced"
     },
     {
+      "src": "/api/storyboard",
+      "dest": "/api/seedance-status?_r=sb"
+    },
+    {
       "handle": "filesystem"
     },
     {
