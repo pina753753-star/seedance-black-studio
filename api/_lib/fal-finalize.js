@@ -19,6 +19,7 @@
 
 const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
 const WATERMARK_SERVER_URL = process.env.WATERMARK_SERVER_URL || '';
+const WATERMARK_SECRET = process.env.WATERMARK_SECRET || '';
 const MAX_RECONCILE_ATTEMPTS = 5;
 
 function isSupabasePublicUrl(url) {
@@ -98,9 +99,14 @@ async function applyWatermark(db, task, videoUrl) {
       return { watermarked: false, skipped: 'paid_user', url: videoUrl };
     }
 
+    if (!WATERMARK_SECRET) {
+      console.warn('[fal-finalize] watermark_secret_missing, calling watermark server without auth');
+    }
+    const wmHeaders = { 'Content-Type': 'application/json' };
+    if (WATERMARK_SECRET) wmHeaders['Authorization'] = `Bearer ${WATERMARK_SECRET}`;
     const wmRes = await fetch(`${WATERMARK_SERVER_URL}/watermark`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: wmHeaders,
       body: JSON.stringify({ videoUrl, userId: task.user_id })
     });
     if (!wmRes.ok) {

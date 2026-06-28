@@ -116,24 +116,14 @@ async function refundCreditsForTask(db, task) {
       else if (tx.credit_type === 'purchased') fromPurchased += amt;
     }
 
-    const { data: bal } = await db.from('credit_balances')
-      .select('free_credits,subscription_credits,purchased_credits')
-      .eq('user_id', task.user_id).maybeSingle();
-    if (!bal) {
-      console.error('[fal-webhook] credit_balances row not found, taskId:', task.id);
-      return false;
-    }
-
-    const updateFields = { updated_at: new Date().toISOString() };
-    if (fromSub > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + fromSub;
-    if (fromFree > 0) updateFields.free_credits = Number(bal.free_credits || 0) + fromFree;
-    if (fromPurchased > 0) updateFields.purchased_credits = Number(bal.purchased_credits || 0) + fromPurchased;
-    const { error: balErr } = await db.from('credit_balances').update(updateFields).eq('user_id', task.user_id);
-    if (balErr) {
-      console.error('[fal-webhook] credit_balances update failed:', balErr.message, 'taskId:', task.id);
-      return false;
-    }
-
+    // Insert ledger FIRST so that a balance-update failure on the first attempt
+    // is caught by the idempotency check on retry, preventing a double balance update.
+    // Trade-off: if ledger succeeds but balance update fails, the next retry finds the
+    // ledger and returns true without updating the balance (a missed-refund edge case).
+    // This is preferable to a double-refund. Note: without a UNIQUE constraint on
+    // (related_task_id, reason, credit_type) in credit_transactions, truly concurrent
+    // simultaneous calls could still double-insert; a DB-level constraint or RPC would
+    // be needed to fully prevent that rarer case.
     const txRows = [];
     if (fromSub > 0) txRows.push({ user_id: task.user_id, amount: fromSub, credit_type: 'subscription', reason: 'generation_refund', related_task_id: task.id });
     if (fromFree > 0) txRows.push({ user_id: task.user_id, amount: fromFree, credit_type: 'free', reason: 'generation_refund', related_task_id: task.id });
@@ -144,6 +134,26 @@ async function refundCreditsForTask(db, task) {
         console.error('[fal-webhook] refund TX insert failed:', txErr.message, 'taskId:', task.id);
         return false;
       }
+    }
+
+    const { data: bal } = await db.from('credit_balances')
+      .select('free_credits,subscription_credits,purchased_credits')
+      .eq('user_id', task.user_id).maybeSingle();
+    if (!bal) {
+      console.error('[fal-webhook] credit_balances row not found, taskId:', task.id);
+      // Ledger already committed; next retry will find it and return true (idempotent).
+      return false;
+    }
+
+    const updateFields = { updated_at: new Date().toISOString() };
+    if (fromSub > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + fromSub;
+    if (fromFree > 0) updateFields.free_credits = Number(bal.free_credits || 0) + fromFree;
+    if (fromPurchased > 0) updateFields.purchased_credits = Number(bal.purchased_credits || 0) + fromPurchased;
+    const { error: balErr } = await db.from('credit_balances').update(updateFields).eq('user_id', task.user_id);
+    if (balErr) {
+      console.error('[fal-webhook] credit_balances update failed:', balErr.message, 'taskId:', task.id);
+      // Ledger already committed; next retry will find it and return true (idempotent).
+      return false;
     }
 
     console.log('[fal-webhook] refund complete, taskId:', task.id, 'total:', fromSub + fromFree + fromPurchased);

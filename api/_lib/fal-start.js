@@ -3,7 +3,26 @@ const { createClient } = require('@supabase/supabase-js');
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
 const FAL_ENDPOINT_TEXT = 'bytedance/seedance-2.0/text-to-video';
 const FAL_ENDPOINT_IMAGE = 'bytedance/seedance-2.0/image-to-video';
-const FAL_WEBHOOK_URL = 'https://flowvid-studio.vercel.app/api/fal-webhook';
+const PRODUCTION_WEBHOOK_URL = 'https://flowvid-studio.vercel.app/api/fal-webhook';
+
+function validateWebhookUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  if (!url.startsWith('https://')) return false;
+  if (url.includes('localhost') || url.includes('127.0.0.1')) return false;
+  if (!url.endsWith('/api/fal-webhook')) return false;
+  return true;
+}
+
+function getWebhookUrl() {
+  const explicit = (process.env.FAL_WEBHOOK_URL || '').trim();
+  if (explicit) {
+    return validateWebhookUrl(explicit) ? explicit : null;
+  }
+  if (process.env.VERCEL_ENV === 'production') {
+    return PRODUCTION_WEBHOOK_URL;
+  }
+  return null;
+}
 
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
 const FAL_MODES = ['text_to_video', 'image_to_video'];
@@ -189,6 +208,12 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'provider_not_configured', message: '動画生成サービスが設定されていません。' });
   }
 
+  const webhookUrl = getWebhookUrl();
+  if (!webhookUrl) {
+    console.warn('[fal-start] fal_webhook_not_configured, VERCEL_ENV:', process.env.VERCEL_ENV || 'unset');
+    return res.status(500).json({ ok: false, error: 'fal_webhook_not_configured', message: 'fal webhook is not configured for this environment' });
+  }
+
   const token = bearerToken(req);
   const user = await getUserFromToken(token);
   if (!user) return res.status(401).json({ ok: false, error: 'ログインが必要です', redirect: '/login.html' });
@@ -284,7 +309,7 @@ module.exports = async function handler(req, res) {
     if (mode === 'image_to_video') falInput.image_url = imageUrl;
 
     // Submit to fal queue via REST (no SDK dependency)
-    const encodedWebhook = encodeURIComponent(FAL_WEBHOOK_URL);
+    const encodedWebhook = encodeURIComponent(webhookUrl);
     const submitUrl = `${FAL_QUEUE_BASE}/${falEndpoint}?fal_webhook=${encodedWebhook}`;
     console.log('[fal-start] submitting to fal queue, taskId:', taskId, 'endpoint:', falEndpoint);
     falSubmitted = true;
