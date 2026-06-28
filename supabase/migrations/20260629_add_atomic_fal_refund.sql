@@ -68,33 +68,113 @@
 --      AND trigger_name = 'trg_generation_task_finished_at';
 --    → Must return 1 row. If missing, finished_at will not be set automatically.
 --
--- 7. Partial refund state check (must return 0 rows before applying idempotency fix):
+-- 7. Partial/missing/excess refund state check (must return 0 rows).
+--    Uses FULL OUTER JOIN so ALL of the following are detected:
+--      • charge exists, refund exists, but pool amounts differ (partial/excess refund)
+--      • charge exists, no refund row at all (unrefunded)
+--      • refund exists, no charge row at all (refund without charge — data anomaly)
+--    NOTE: Does NOT auto-fix any rows. Do NOT delete or modify rows manually
+--    without understanding why they exist.
 --    WITH charges AS (
---      SELECT related_task_id,
---        SUM(CASE WHEN credit_type='subscription' THEN ABS(amount) ELSE 0 END) AS exp_sub,
---        SUM(CASE WHEN credit_type='free'         THEN ABS(amount) ELSE 0 END) AS exp_free,
---        SUM(CASE WHEN credit_type='purchased'    THEN ABS(amount) ELSE 0 END) AS exp_purch
+--      SELECT
+--        related_task_id,
+--        SUM(CASE WHEN credit_type = 'subscription' AND amount < 0 THEN ABS(amount) ELSE 0 END) AS exp_sub,
+--        SUM(CASE WHEN credit_type = 'free'         AND amount < 0 THEN ABS(amount) ELSE 0 END) AS exp_free,
+--        SUM(CASE WHEN credit_type = 'purchased'    AND amount < 0 THEN ABS(amount) ELSE 0 END) AS exp_purch
 --      FROM public.credit_transactions
---      WHERE reason='video_generation' AND amount < 0
+--      WHERE reason = 'video_generation'
 --      GROUP BY related_task_id
 --    ),
 --    refunds AS (
---      SELECT related_task_id,
---        SUM(CASE WHEN credit_type='subscription' THEN amount ELSE 0 END) AS act_sub,
---        SUM(CASE WHEN credit_type='free'         THEN amount ELSE 0 END) AS act_free,
---        SUM(CASE WHEN credit_type='purchased'    THEN amount ELSE 0 END) AS act_purch
+--      SELECT
+--        related_task_id,
+--        SUM(CASE WHEN credit_type = 'subscription' AND amount > 0 THEN amount ELSE 0 END) AS act_sub,
+--        SUM(CASE WHEN credit_type = 'free'         AND amount > 0 THEN amount ELSE 0 END) AS act_free,
+--        SUM(CASE WHEN credit_type = 'purchased'    AND amount > 0 THEN amount ELSE 0 END) AS act_purch
 --      FROM public.credit_transactions
---      WHERE reason='generation_refund' AND amount > 0
+--      WHERE reason = 'generation_refund'
 --      GROUP BY related_task_id
 --    )
---    SELECT c.related_task_id
+--    SELECT COALESCE(c.related_task_id, r.related_task_id) AS related_task_id
 --    FROM charges c
---    JOIN refunds r ON r.related_task_id = c.related_task_id
---    WHERE c.exp_sub <> r.act_sub
---       OR c.exp_free <> r.act_free
---       OR c.exp_purch <> r.act_purch;
---    → Must return 0 rows. If any rows exist, investigate partial refund state
---      before running this migration.
+--    FULL OUTER JOIN refunds r ON r.related_task_id = c.related_task_id
+--    WHERE COALESCE(c.exp_sub,   0) <> COALESCE(r.act_sub,   0)
+--       OR COALESCE(c.exp_free,  0) <> COALESCE(r.act_free,  0)
+--       OR COALESCE(c.exp_purch, 0) <> COALESCE(r.act_purch, 0);
+--    → Must return 0 rows. If any rows exist, investigate and resolve manually
+--      before running this migration. Do NOT auto-fix, auto-delete, or auto-merge.
+--
+-- 8. Invalid refund amount check (must return 0 rows):
+--    SELECT id, related_task_id, amount, credit_type
+--    FROM public.credit_transactions
+--    WHERE reason = 'generation_refund'
+--      AND amount <= 0;
+--    → Must return 0 rows. Refund rows must have amount > 0.
+--
+-- 9. Unknown refund credit_type check (must return 0 rows):
+--    SELECT id, related_task_id, credit_type
+--    FROM public.credit_transactions
+--    WHERE reason = 'generation_refund'
+--      AND (credit_type IS NULL
+--           OR credit_type NOT IN ('subscription', 'free', 'purchased'));
+--    → Must return 0 rows.
+--
+-- 10. NULL related_task_id refund check (must return 0 rows):
+--     SELECT id, user_id, amount, credit_type
+--     FROM public.credit_transactions
+--     WHERE reason = 'generation_refund'
+--       AND related_task_id IS NULL;
+--     → Must return 0 rows.
+--
+-- 11. Refund row referencing non-existent task (must return 0 rows):
+--     SELECT ct.id, ct.related_task_id
+--     FROM public.credit_transactions ct
+--     LEFT JOIN public.generation_tasks gt ON gt.id = ct.related_task_id
+--     WHERE ct.reason = 'generation_refund'
+--       AND gt.id IS NULL;
+--     → Must return 0 rows.
+--
+-- 12. Refund user_id differs from task user_id (must return 0 rows):
+--     SELECT ct.id, ct.related_task_id, ct.user_id AS refund_user_id, gt.user_id AS task_user_id
+--     FROM public.credit_transactions ct
+--     JOIN public.generation_tasks gt ON gt.id = ct.related_task_id
+--     WHERE ct.reason = 'generation_refund'
+--       AND ct.user_id <> gt.user_id;
+--     → Must return 0 rows.
+--
+-- 13. Charge user_id differs from task user_id (must return 0 rows):
+--     SELECT ct.id, ct.related_task_id, ct.user_id AS charge_user_id, gt.user_id AS task_user_id
+--     FROM public.credit_transactions ct
+--     JOIN public.generation_tasks gt ON gt.id = ct.related_task_id
+--     WHERE ct.reason = 'video_generation'
+--       AND ct.amount < 0
+--       AND ct.user_id <> gt.user_id;
+--     → Must return 0 rows.
+--
+-- 14. Cancelled task with refund ledger (HUMAN REVIEW REQUIRED if rows returned):
+--     SELECT gt.id AS task_id, gt.status, gt.user_id, COUNT(ct.id) AS refund_rows
+--     FROM public.generation_tasks gt
+--     JOIN public.credit_transactions ct ON ct.related_task_id = gt.id
+--     WHERE gt.status = 'cancelled'
+--       AND ct.reason = 'generation_refund'
+--     GROUP BY gt.id, gt.status, gt.user_id;
+--     → This query does NOT need to return 0 rows — cancelled tasks could
+--       legitimately have refund rows from prior code paths. However, if any
+--       rows are returned, STOP and have a human investigate before applying
+--       this migration. Do NOT auto-delete or auto-modify these rows.
+--
+-- 15. Completed task with refund ledger (must return 0 rows):
+--     SELECT gt.id AS task_id, gt.user_id, COUNT(ct.id) AS refund_rows
+--     FROM public.generation_tasks gt
+--     JOIN public.credit_transactions ct ON ct.related_task_id = gt.id
+--     WHERE gt.status = 'completed'
+--       AND ct.reason = 'generation_refund'
+--     GROUP BY gt.id, gt.user_id;
+--     → Must return 0 rows. A completed task must never have a refund.
+--       If any rows exist, STOP and investigate before applying this migration.
+--
+-- ALL PRE-CHECK QUERIES ARE READ-ONLY. Do not run DML against production.
+-- Do not auto-fix, auto-delete, or auto-merge any rows found by these queries.
 -- ============================================================
 
 -- Step 1: Partial unique index — one refund ledger row per task per credit pool.
@@ -157,19 +237,19 @@ BEGIN
     );
   END IF;
 
-  -- 4b. Cancelled tasks were already refunded by fal-start.js before fal was
-  --     invoked (releaseTask → status='cancelled', then refundCredits with
-  --     reason='generation_refund'). If fal was already running, cancellation
-  --     is not allowed, so a fal ERROR webhook for a cancelled task means the
-  --     fal-start.js refund has already been applied.
+  -- 4b. Cancelled tasks: refund state is unknown and cannot be determined safely.
+  --     In fal-start.js, a task is set to cancelled only when credit deduction
+  --     fails (checkAndDeduct returns ok=false), at which point no credits were
+  --     ever deducted and no refund is performed. fal is never called for a
+  --     cancelled task (falSubmitted remains false). A fal ERROR webhook arriving
+  --     for a cancelled task is therefore unexpected — it may indicate a data
+  --     inconsistency, manual DB change, or other unknown state. Treating this
+  --     as success (ok=true) could permanently skip a refund that was needed.
+  --     Raise an exception so the transaction rolls back and fal can retry,
+  --     allowing a human to investigate.
   IF v_task_status = 'cancelled' THEN
-    RETURN jsonb_build_object(
-      'ok', true,
-      'refunded', false,
-      'already_refunded', false,
-      'task_status', 'cancelled',
-      'code', 'already_cancelled'
-    );
+    RAISE EXCEPTION 'cancelled_task_refund_state_unknown'
+      USING ERRCODE = 'data_exception';
   END IF;
 
   -- 5. Pool-level idempotency: compare expected refunds (from charge ledger) with
@@ -214,10 +294,7 @@ BEGIN
     -- Verify pool-level completeness. Mismatch = partial/corrupt state; raise
     -- rather than silently accept — lets the caller retry and surface the issue.
     IF v_ref_sub <> v_from_sub OR v_ref_free <> v_from_free OR v_ref_purch <> v_from_purch THEN
-      RAISE EXCEPTION
-        'refund_state_inconsistent: task=% exp(sub=%,free=%,purch=%) act(sub=%,free=%,purch=%)',
-        p_task_id, v_from_sub, v_from_free, v_from_purch,
-        v_ref_sub, v_ref_free, v_ref_purch
+      RAISE EXCEPTION 'refund_state_inconsistent'
         USING ERRCODE = 'data_exception';
     END IF;
 

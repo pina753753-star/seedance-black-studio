@@ -90,6 +90,7 @@ function isSupabasePublicUrl(url) {
 // Delegates refund + task-failed update to the atomic DB RPC.
 // Returns true if the refund is satisfied (refunded / already_refunded /
 // already_completed / no_charge_found), false if the caller should retry.
+// cancelled tasks raise an exception in the RPC → db.rpc error → false → HTTP 500.
 async function refundCreditsForTask(db, task, errMsg) {
   try {
     const { data, error } = await db.rpc('refund_generation_task_atomic', {
@@ -121,10 +122,6 @@ async function refundCreditsForTask(db, task, errMsg) {
     }
     if (code === 'no_charge_found') {
       console.log('[fal-webhook] no charge TX found, skipping refund, taskId:', task.id);
-      return true;
-    }
-    if (code === 'already_cancelled') {
-      console.log('[fal-webhook] task already cancelled (refunded by fal-start), taskId:', task.id);
       return true;
     }
 
