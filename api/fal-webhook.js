@@ -87,67 +87,46 @@ function isSupabasePublicUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) && String(url || '').includes('/storage/v1/object/public/');
 }
 
-// Returns true if refund succeeded (or was already done), false if it should be retried.
-async function refundCreditsForTask(db, task) {
+// Delegates refund + task-failed update to the atomic DB RPC.
+// Returns true if the refund is satisfied (refunded / already_refunded /
+// already_completed / no_charge_found), false if the caller should retry.
+async function refundCreditsForTask(db, task, errMsg) {
   try {
-    // Idempotency: skip if refund transaction already recorded
-    const { data: existing } = await db.from('credit_transactions')
-      .select('id').eq('related_task_id', task.id).eq('reason', 'generation_refund').limit(1);
-    if (existing && existing.length > 0) {
-      console.log('[fal-webhook] refund already recorded, taskId:', task.id);
-      return true;
+    const { data, error } = await db.rpc('refund_generation_task_atomic', {
+      p_task_id: task.id,
+      p_failure_reason: 'fal_generation_failed',
+      p_error_message: String(errMsg || 'fal generation failed').slice(0, 500)
+    });
+
+    if (error) {
+      console.error('[fal-webhook] RPC error, taskId:', task.id, 'message:', error.message);
+      return false;
+    }
+    if (!data || data.ok !== true) {
+      console.error('[fal-webhook] RPC returned not-ok, taskId:', task.id, 'code:', data?.code);
+      return false;
     }
 
-    const { data: txs } = await db.from('credit_transactions')
-      .select('amount,credit_type')
-      .eq('related_task_id', task.id)
-      .eq('reason', 'video_generation');
-    if (!txs || txs.length === 0) {
-      // No charge found — nothing to refund, treat as success
+    const code = data.code;
+    if (code === 'refunded') {
+      console.log('[fal-webhook] refund complete via RPC, taskId:', task.id);
+      return true;
+    }
+    if (code === 'already_refunded') {
+      console.log('[fal-webhook] refund already recorded (RPC), taskId:', task.id);
+      return true;
+    }
+    if (code === 'already_completed') {
+      console.log('[fal-webhook] task already completed, skip refund, taskId:', task.id);
+      return true;
+    }
+    if (code === 'no_charge_found') {
       console.log('[fal-webhook] no charge TX found, skipping refund, taskId:', task.id);
       return true;
     }
 
-    let fromSub = 0, fromFree = 0, fromPurchased = 0;
-    for (const tx of txs) {
-      const amt = Math.abs(Number(tx.amount || 0));
-      if (tx.credit_type === 'subscription') fromSub += amt;
-      else if (tx.credit_type === 'free') fromFree += amt;
-      else if (tx.credit_type === 'purchased') fromPurchased += amt;
-    }
-
-    const { data: bal } = await db.from('credit_balances')
-      .select('free_credits,subscription_credits,purchased_credits')
-      .eq('user_id', task.user_id).maybeSingle();
-    if (!bal) {
-      console.error('[fal-webhook] credit_balances row not found, taskId:', task.id);
-      return false;
-    }
-
-    const updateFields = { updated_at: new Date().toISOString() };
-    if (fromSub > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + fromSub;
-    if (fromFree > 0) updateFields.free_credits = Number(bal.free_credits || 0) + fromFree;
-    if (fromPurchased > 0) updateFields.purchased_credits = Number(bal.purchased_credits || 0) + fromPurchased;
-    const { error: balErr } = await db.from('credit_balances').update(updateFields).eq('user_id', task.user_id);
-    if (balErr) {
-      console.error('[fal-webhook] credit_balances update failed:', balErr.message, 'taskId:', task.id);
-      return false;
-    }
-
-    const txRows = [];
-    if (fromSub > 0) txRows.push({ user_id: task.user_id, amount: fromSub, credit_type: 'subscription', reason: 'generation_refund', related_task_id: task.id });
-    if (fromFree > 0) txRows.push({ user_id: task.user_id, amount: fromFree, credit_type: 'free', reason: 'generation_refund', related_task_id: task.id });
-    if (fromPurchased > 0) txRows.push({ user_id: task.user_id, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: task.id });
-    if (txRows.length) {
-      const { error: txErr } = await db.from('credit_transactions').insert(txRows);
-      if (txErr) {
-        console.error('[fal-webhook] refund TX insert failed:', txErr.message, 'taskId:', task.id);
-        return false;
-      }
-    }
-
-    console.log('[fal-webhook] refund complete, taskId:', task.id, 'total:', fromSub + fromFree + fromPurchased);
-    return true;
+    console.error('[fal-webhook] RPC unexpected code:', code, 'taskId:', task.id);
+    return false;
   } catch (e) {
     console.error('[fal-webhook] refund exception:', e?.message, 'taskId:', task.id);
     return false;
@@ -208,19 +187,11 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, message: 'already_completed' });
     }
 
-    // Attempt refund FIRST — if it fails, return 500 so fal retries the webhook
-    const refunded = await refundCreditsForTask(db, task);
+    // RPC handles refund + task failed update atomically.
+    const refunded = await refundCreditsForTask(db, task, errMsg);
     if (!refunded) {
       console.error('[fal-webhook] refund failed, returning 500 for retry, taskId:', task.id);
       return res.status(500).json({ ok: false, error: 'refund_failed_will_retry' });
-    }
-
-    // Refund succeeded — now mark terminal (idempotent: WHERE status IN non-terminal)
-    if (task.status !== 'failed') {
-      await db.from('generation_tasks')
-        .update({ status: 'failed', error_message: errMsg, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-        .eq('id', task.id)
-        .in('status', ['queued', 'processing']);
     }
 
     return res.status(200).json({ ok: true });
@@ -243,17 +214,11 @@ module.exports = async function handler(req, res) {
   const videoUrl = body.payload?.video?.url;
   if (!videoUrl || typeof videoUrl !== 'string') {
     console.error('[fal-webhook] no video URL in payload, taskId:', task.id);
-    // No URL = unrecoverable. Refund then mark failed.
-    const refunded = await refundCreditsForTask(db, task);
+    // No URL = unrecoverable. RPC handles refund + task failed update atomically.
+    const refunded = await refundCreditsForTask(db, task, 'no video URL in webhook payload');
     if (!refunded) {
       console.error('[fal-webhook] refund failed for missing URL case, returning 500, taskId:', task.id);
       return res.status(500).json({ ok: false, error: 'refund_failed_will_retry' });
-    }
-    if (task.status !== 'failed') {
-      await db.from('generation_tasks')
-        .update({ status: 'failed', error_message: 'no video URL in webhook payload', finished_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-        .eq('id', task.id)
-        .in('status', ['queued', 'processing']);
     }
     return res.status(200).json({ ok: true });
   }
