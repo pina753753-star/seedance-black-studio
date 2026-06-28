@@ -68,41 +68,97 @@
 --      AND trigger_name = 'trg_generation_task_finished_at';
 --    → Must return 1 row. If missing, finished_at will not be set automatically.
 --
--- 7. Partial/missing/excess refund state check (must return 0 rows).
---    Uses FULL OUTER JOIN so ALL of the following are detected:
---      • charge exists, refund exists, but pool amounts differ (partial/excess refund)
---      • charge exists, no refund row at all (unrefunded)
---      • refund exists, no charge row at all (refund without charge — data anomaly)
---    NOTE: Does NOT auto-fix any rows. Do NOT delete or modify rows manually
---    without understanding why they exist.
---    WITH charges AS (
---      SELECT
---        related_task_id,
---        SUM(CASE WHEN credit_type = 'subscription' AND amount < 0 THEN ABS(amount) ELSE 0 END) AS exp_sub,
---        SUM(CASE WHEN credit_type = 'free'         AND amount < 0 THEN ABS(amount) ELSE 0 END) AS exp_free,
---        SUM(CASE WHEN credit_type = 'purchased'    AND amount < 0 THEN ABS(amount) ELSE 0 END) AS exp_purch
+-- NOTE on prior Query 7 design: an earlier version used a FULL OUTER JOIN across
+-- ALL video_generation charges vs. ALL generation_refund rows. That query treated
+-- "charge exists, no refund" as an anomaly, but a charge without a refund is the
+-- NORMAL state for any task that completed successfully, is still processing, or
+-- was queued. Running that query against production returned 28 rows — these are
+-- expected normal charges, NOT refund anomalies. The query has been split into
+-- 7A (refund consistency check) and 7B (human-review candidate list) below.
+--
+-- 7A. Existing refund pool-level consistency check (must return 0 rows).
+--     Scope: only tasks that already have at least one generation_refund row.
+--     Checks that the refund pool amounts match the original charge amounts exactly.
+--     Detects:
+--       • refund exists, charge missing (refund without a charge — data anomaly)
+--       • subscription amount mismatch (under- or over-refund)
+--       • free amount mismatch
+--       • purchased amount mismatch
+--     Does NOT flag tasks with no refund at all — that is the correct state for
+--     successful, in-progress, or non-failed tasks.
+--     NOTE: Does NOT auto-fix. Do NOT delete or modify rows without investigation.
+--    WITH refund_task_ids AS (
+--      SELECT DISTINCT related_task_id
 --      FROM public.credit_transactions
---      WHERE reason = 'video_generation'
---      GROUP BY related_task_id
+--      WHERE reason = 'generation_refund'
+--        AND related_task_id IS NOT NULL
+--    ),
+--    charges AS (
+--      SELECT
+--        ct.related_task_id,
+--        SUM(CASE WHEN ct.credit_type = 'subscription' AND ct.amount < 0 THEN ABS(ct.amount) ELSE 0 END) AS exp_sub,
+--        SUM(CASE WHEN ct.credit_type = 'free'         AND ct.amount < 0 THEN ABS(ct.amount) ELSE 0 END) AS exp_free,
+--        SUM(CASE WHEN ct.credit_type = 'purchased'    AND ct.amount < 0 THEN ABS(ct.amount) ELSE 0 END) AS exp_purch
+--      FROM public.credit_transactions ct
+--      JOIN refund_task_ids rti ON rti.related_task_id = ct.related_task_id
+--      WHERE ct.reason = 'video_generation'
+--      GROUP BY ct.related_task_id
 --    ),
 --    refunds AS (
 --      SELECT
---        related_task_id,
---        SUM(CASE WHEN credit_type = 'subscription' AND amount > 0 THEN amount ELSE 0 END) AS act_sub,
---        SUM(CASE WHEN credit_type = 'free'         AND amount > 0 THEN amount ELSE 0 END) AS act_free,
---        SUM(CASE WHEN credit_type = 'purchased'    AND amount > 0 THEN amount ELSE 0 END) AS act_purch
---      FROM public.credit_transactions
---      WHERE reason = 'generation_refund'
---      GROUP BY related_task_id
+--        ct.related_task_id,
+--        SUM(CASE WHEN ct.credit_type = 'subscription' AND ct.amount > 0 THEN ct.amount ELSE 0 END) AS act_sub,
+--        SUM(CASE WHEN ct.credit_type = 'free'         AND ct.amount > 0 THEN ct.amount ELSE 0 END) AS act_free,
+--        SUM(CASE WHEN ct.credit_type = 'purchased'    AND ct.amount > 0 THEN ct.amount ELSE 0 END) AS act_purch
+--      FROM public.credit_transactions ct
+--      JOIN refund_task_ids rti ON rti.related_task_id = ct.related_task_id
+--      WHERE ct.reason = 'generation_refund'
+--      GROUP BY ct.related_task_id
 --    )
---    SELECT COALESCE(c.related_task_id, r.related_task_id) AS related_task_id
---    FROM charges c
---    FULL OUTER JOIN refunds r ON r.related_task_id = c.related_task_id
+--    SELECT rti.related_task_id
+--    FROM refund_task_ids rti
+--    LEFT JOIN charges c ON c.related_task_id = rti.related_task_id
+--    LEFT JOIN refunds r ON r.related_task_id = rti.related_task_id
 --    WHERE COALESCE(c.exp_sub,   0) <> COALESCE(r.act_sub,   0)
 --       OR COALESCE(c.exp_free,  0) <> COALESCE(r.act_free,  0)
 --       OR COALESCE(c.exp_purch, 0) <> COALESCE(r.act_purch, 0);
---    → Must return 0 rows. If any rows exist, investigate and resolve manually
+--    → Must return 0 rows. If any rows exist, STOP and investigate manually
 --      before running this migration. Do NOT auto-fix, auto-delete, or auto-merge.
+--
+-- 7B. Failed fal task with charge but no refund — human-review candidates.
+--     Scope: api_provider='fal', status='failed', has video_generation charge,
+--     has NO generation_refund row. Does NOT include completed, processing,
+--     queued, or cancelled tasks.
+--     This is a CANDIDATE list for human review only. A row appearing here does
+--     NOT automatically mean a refund is missing — it may reflect a task that
+--     failed before credits were deducted, or a prior code path that handled
+--     refunds differently. Do NOT auto-refund. Do NOT auto-modify.
+--     If rows are returned: STOP, have a human investigate each task_id, then
+--     decide whether manual remediation is needed before applying this migration.
+--    WITH charge_totals AS (
+--      SELECT related_task_id
+--      FROM public.credit_transactions
+--      WHERE reason = 'video_generation'
+--        AND amount < 0
+--        AND related_task_id IS NOT NULL
+--      GROUP BY related_task_id
+--    ),
+--    refund_tasks AS (
+--      SELECT DISTINCT related_task_id
+--      FROM public.credit_transactions
+--      WHERE reason = 'generation_refund'
+--        AND related_task_id IS NOT NULL
+--    )
+--    SELECT gt.id AS task_id, gt.status, gt.api_provider
+--    FROM public.generation_tasks gt
+--    JOIN charge_totals c ON c.related_task_id = gt.id
+--    LEFT JOIN refund_tasks r ON r.related_task_id = gt.id
+--    WHERE gt.api_provider = 'fal'
+--      AND gt.status = 'failed'
+--      AND r.related_task_id IS NULL;
+--    → 0 rows is the expected outcome, but rows here do NOT automatically
+--      indicate a refund anomaly — human review is required for each task_id.
+--      Do NOT auto-refund. Do NOT auto-modify. STOP if rows are returned.
 --
 -- 8. Invalid refund amount check (must return 0 rows):
 --    SELECT id, related_task_id, amount, credit_type
