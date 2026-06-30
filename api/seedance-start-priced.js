@@ -108,13 +108,5 @@ module.exports = async function handler(req, res) {
     estimated_credits: creditCost
   };
 
-  // Route Standard text_to_video and image_to_video to fal.ai provider.
-  // All other modes/models (Fast, Lite, reference_to_video, storyboard) continue
-  // through the existing OpenRouter path.
-  const FAL_MODES = ['text_to_video', 'image_to_video'];
-  if (model === DEFAULT_MODEL && FAL_MODES.includes(mode)) {
-    return falHandler(req, res);
-  }
-
   return coreHandler(req, res);
 };
