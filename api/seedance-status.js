@@ -241,17 +241,9 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
     if (!claimed || claimed.length === 0) return null;
 
     const estimatedCredits = Number(task.credit_cost || 0);
-    const finalCredits = (costUsd != null && Number.isFinite(Number(costUsd)) && Number(costUsd) > 0)
-      ? Math.ceil(Number(costUsd) * CREDIT_RATE)
-      : estimatedCredits;
-    const delta = finalCredits - estimatedCredits;
-    let shortfall = 0;
-
-    if (delta < 0) {
-      await creditDeltaRefund(db, task.user_id, task.id, Math.abs(delta));
-    } else if (delta > 0) {
-      shortfall = await creditDeltaCharge(db, task.user_id, task.id, delta);
-    }
+    const finalCredits = estimatedCredits;
+    const delta = 0;
+    const shortfall = 0;
 
     const taskPrompt = String(task.prompt || '').trim();
     const creditMeta = {
@@ -259,8 +251,8 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
       final_credits: finalCredits,
       cost_usd: costUsd ?? null,
       credit_rate: CREDIT_RATE,
-      pricing_mode: 'cost_based',
-      shortfall: shortfall || 0,
+      pricing_mode: 'fixed_displayed_price',
+      shortfall: 0,
       settled_at: new Date().toISOString()
     };
     if (taskPrompt) creditMeta.prompt = taskPrompt;
