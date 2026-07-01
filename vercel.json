@@ -15,5 +15,11 @@
       "src": "/",
       "dest": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron-annual-credit-grant",
+      "schedule": "15 0 * * *"
+    }
   ]
 }
