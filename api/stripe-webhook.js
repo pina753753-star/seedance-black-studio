@@ -98,9 +98,8 @@ async function grantCredits(db, { userId, credits, pool, creditType, reason, pla
   }
 
   if (plan) {
-    try {
-      await db.from('profiles').update({ plan }).eq('id', userId);
-    } catch (_) {}
+    const { error: planErr } = await db.from('profiles').update({ plan }).eq('id', userId);
+    if (planErr) console.error('[stripe-webhook] profiles.plan update failed:', planErr.message, 'userId:', userId);
   }
 
   return { ok: true, granted: credits, pool };
@@ -319,6 +318,9 @@ module.exports = async function handler(req, res) {
       result = await handleSubscriptionDeleted(db, event.data.object);
     }
 
+    if (result && !result.ok && !result.skipped) {
+      console.error('[stripe-webhook] handler failed:', event.type, JSON.stringify(result));
+    }
     return res.status(200).json({ ok: true, type: event.type, eventId: event.id, result });
   } catch (e) {
     // Return 500 so Stripe retries on transient failures

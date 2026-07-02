@@ -250,7 +250,7 @@ module.exports = async function handler(req, res) {
 
   } catch (e) {
     const msg = e.message || String(e);
-    // Do not expose raw Stripe error details in production
+    console.error('[stripe-checkout] error:', msg);
     const safe = process.env.VERCEL_ENV === 'production'
       ? '決済の開始に失敗しました。しばらくしてからお試しください。'
       : msg;
