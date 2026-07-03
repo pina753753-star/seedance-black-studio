@@ -190,3 +190,4 @@ $$;
 
 -- Revoke public execute; only service_role may call
 REVOKE ALL ON FUNCTION public.grant_annual_subscription_credits(text, date, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.grant_annual_subscription_credits(text, date, timestamptz) TO service_role;
