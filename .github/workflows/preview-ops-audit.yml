@@ -6,6 +6,13 @@ on:
       - claude/add-annual-embedded-checkout
     paths:
       - .github/workflows/preview-ops-audit.yml
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+    paths:
+      - .github/workflows/preview-ops-audit.yml
 
 permissions:
   contents: read
@@ -17,7 +24,12 @@ concurrency:
 
 jobs:
   audit-vercel-preview:
-    if: github.repository == 'pina753753-star/seedance-black-studio' && github.ref == 'refs/heads/claude/add-annual-embedded-checkout'
+    if: >-
+      github.repository == 'pina753753-star/seedance-black-studio' &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/claude/add-annual-embedded-checkout') ||
+        (github.event_name == 'pull_request' && github.event.pull_request.number == 37 && github.head_ref == 'claude/add-annual-embedded-checkout')
+      )
     environment: preview-ops
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -31,6 +43,7 @@ jobs:
       EXPECTED_SOURCE_DEPLOYMENT: flowvid-studio-8utop1v7n-pina-s-projects.vercel.app
       EXPECTED_SOURCE_SHA: e40e946216de3e295b51749bf845e2a88da8a2cf
       PR_NUMBER: '37'
+      AUDIT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Validate fixed repository and protected environment scope
@@ -44,7 +57,16 @@ jobs:
             exit 1
           }
 
-          test "${GITHUB_REF}" = "refs/heads/${EXPECTED_BRANCH}" || {
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            actual_branch="${GITHUB_REF#refs/heads/}"
+          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            actual_branch="${GITHUB_HEAD_REF:-}"
+          else
+            echo "Blocked: unexpected event."
+            exit 1
+          fi
+
+          test "${actual_branch}" = "${EXPECTED_BRANCH}" || {
             echo "Blocked: unexpected branch."
             exit 1
           }
@@ -59,7 +81,7 @@ jobs:
             exit 1
           }
 
-          echo "Validated repository, branch, and protected secret availability."
+          echo "Validated repository, event, branch, and protected secret availability."
 
       - name: Audit metadata and publish sanitized PR report
         shell: bash
@@ -199,7 +221,7 @@ jobs:
               '',
               'Environment variable values were not decrypted, printed, or included in this report.',
               '',
-              `- Workflow commit: \`${process.env.GITHUB_SHA}\``,
+              `- Workflow commit: \`${process.env.AUDIT_COMMIT}\``,
               `- Workflow run: https://github.com/${repository}/actions/runs/${process.env.GITHUB_RUN_ID}`,
               `- Pinned Preview: https://${expectedDeployment}`,
               ''
