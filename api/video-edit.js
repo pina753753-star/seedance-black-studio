@@ -7,7 +7,6 @@ const { createClient } = require('@supabase/supabase-js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
-const PAID_PLANS = ['standard', 'premium', 'ultimate', 'team', 'scale'];
 
 function dbClient() {
   if (!SUPABASE_URL || !SERVICE_KEY) return null;
@@ -50,13 +49,24 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const { data: profile } = await db
-    .from('profiles')
-    .select('plan')
-    .eq('id', user.id)
+  // Paid-plan gate on server-owned state only. Users cannot write to
+  // credit_balances (SELECT-only RLS); subscription_expires_at is refreshed by
+  // the Stripe webhook (service role) on every paid subscription payment, so a
+  // future timestamp means an active paid subscription. profiles.plan is NOT
+  // consulted here because RLS lets users update their own profile row.
+  // Any missing/unreadable state fails closed to 403.
+  const { data: bal, error: balError } = await db
+    .from('credit_balances')
+    .select('free_credits,subscription_credits,purchased_credits,subscription_expires_at,purchased_expires_at')
+    .eq('user_id', user.id)
     .maybeSingle();
-  const plan = String(profile?.plan || 'free').toLowerCase();
-  if (!PAID_PLANS.includes(plan)) {
+  const now = new Date();
+  const subExpires = bal?.subscription_expires_at ? new Date(bal.subscription_expires_at) : null;
+  const hasActiveSubscription = !balError
+    && subExpires instanceof Date
+    && !Number.isNaN(subExpires.getTime())
+    && subExpires > now;
+  if (!hasActiveSubscription) {
     return res.status(403).json({
       ok: false,
       error: 'VIDEO_EDIT_REQUIRES_PAID_PLAN',
@@ -65,14 +75,10 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const { data: bal } = await db
-    .from('credit_balances')
-    .select('free_credits,subscription_credits,purchased_credits')
-    .eq('user_id', user.id)
-    .maybeSingle();
+  const purchasedExpired = bal?.purchased_expires_at && new Date(bal.purchased_expires_at) < now;
   const balance = Number(bal?.free_credits || 0)
     + Number(bal?.subscription_credits || 0)
-    + Number(bal?.purchased_credits || 0);
+    + (purchasedExpired ? 0 : Number(bal?.purchased_credits || 0));
   if (balance <= 0) {
     return res.status(402).json({
       ok: false,
