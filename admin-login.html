@@ -18,7 +18,7 @@
 <p class="note">このページはメニューには出さない管理者専用URLです。</p>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="./auth-config.js?v=3844d5ea2"></script>
+<script src="./auth-config.js?v=4a1f0c1"></script>
 <script>
 const cfg=window.FLOWVID_AUTH||{};const ready=Boolean(cfg.supabaseUrl&&cfg.supabaseAnonKey);const client=ready?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;const admins=(cfg.adminEmails||[]).map(x=>String(x).toLowerCase());const email=document.getElementById('email');const password=document.getElementById('password');const btn=document.getElementById('submitBtn');const msg=document.getElementById('message');function setMsg(text,type='error'){msg.textContent=text;msg.className='message show '+type;}function isAdmin(mail){return admins.includes(String(mail||'').toLowerCase())}if(!ready){setMsg('SupabaseのURLとanon keyが未設定です。auth-config.js を設定すると管理者ログインが動きます。');btn.disabled=true;}if(client){client.auth.getSession().then(({data})=>{const mail=data.session?.user?.email;if(mail&&isAdmin(mail)){email.value=mail;setMsg('管理者としてログイン済みです。下の「管理画面へ」から進めます。','ok');}});}document.getElementById('adminForm').onsubmit=async(e)=>{e.preventDefault();if(!client)return;const mail=email.value.trim();if(!isAdmin(mail)){setMsg('このメールは管理者として登録されていません。');return;}btn.disabled=true;setMsg('確認中です…','ok');const {data,error}=await client.auth.signInWithPassword({email:mail,password:password.value});btn.disabled=false;if(error){setMsg(error.message);return;}if(!isAdmin(data.user.email)){await client.auth.signOut();setMsg('管理者権限がありません。');return;}location.href='./admin.html';};
 </script>

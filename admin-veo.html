@@ -19,7 +19,7 @@
 </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="./auth-config.js?v=3844d5ea2"></script>
+<script src="./auth-config.js?v=4a1f0c1"></script>
 <script>
 const cfg=window.FLOWVID_AUTH||{};const adminEmails=(cfg.adminEmails||[]).map(v=>String(v).toLowerCase());const authReady=Boolean(cfg.supabaseUrl&&cfg.supabaseAnonKey);const client=authReady?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;const $=id=>document.getElementById(id);let operationName=localStorage.getItem('flowvidVeoOperation')||'';
 function showWarn(t){$('warn').textContent=t;$('warn').classList.add('show');$('page').style.display='none'}

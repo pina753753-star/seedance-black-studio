@@ -6,6 +6,15 @@ window.FLOWVID_AUTH = {
   adminEmails: ["hinaran53@gmail.com"]
 };
 
+window.flowvidSupabaseClient = function(){
+  const cfg=window.FLOWVID_AUTH||{};
+  if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey) return null;
+  if(!window.__flowvidUserClient){
+    window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
+  }
+  return window.__flowvidUserClient;
+};
+
 (function flowvidGeneratePageEnhancements(){
   const GENERATION_CREDIT_COST=80;
   const ACTIVE_TASK_WINDOW_MS=1000*60*60*2;
@@ -94,12 +103,7 @@ window.FLOWVID_AUTH = {
   }
 
   function currentClient(){
-    const cfg=window.FLOWVID_AUTH||{};
-    if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey) return null;
-    if(!window.__flowvidUserClient){
-      window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
-    }
-    return window.__flowvidUserClient;
+    return window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
   }
   function activeMode(){return document.querySelector('.modeTabs button.active')?.dataset.mode || 'reference_to_video'}
   function status(message,bad=false){

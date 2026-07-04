@@ -17,13 +17,12 @@
     <a class="btn" href="./index.html">トップへ戻る</a>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./auth-config.js?v=3844d5ea2"></script>
+  <script src="./auth-config.js?v=4a1f0c1"></script>
   <script>
     (async()=>{
       try{
-        const cfg=window.FLOWVID_AUTH||{};
-        if(cfg.supabaseUrl&&cfg.supabaseAnonKey&&window.supabase){
-          const client=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
+        const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
+        if(client){
           await client.auth.signOut();
         }
       }catch(e){}
