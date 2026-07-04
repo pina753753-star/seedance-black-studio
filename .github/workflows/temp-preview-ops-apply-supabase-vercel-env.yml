@@ -40,7 +40,6 @@ jobs:
       TARGET_BRANCH: claude/add-annual-embedded-checkout
       EXPECTED_PREVIEW_SUPABASE_URL: https://odlrcvygupkjhspnhksf.supabase.co
       PROD_SUPABASE_HOST: jflpjsdjmlkmkqfahxwy.supabase.co
-      SOURCE_DEPLOYMENT: https://flowvid-studio-8utop1v7n-pina-s-projects.vercel.app
 
     steps:
       - name: Validate secrets are present and well-formed (no values printed)
@@ -99,17 +98,36 @@ jobs:
           echo "Preview env names now set for ${TARGET_BRANCH}:"
           npx --yes vercel@latest env ls preview "${TARGET_BRANCH}" --scope "${VERCEL_SCOPE}" --token "${VERCEL_TOKEN}" | awk '{print $1}'
 
-      - name: Redeploy preview deployment
+      - name: Wait for this commit's Git preview deployment to be READY
         id: redeploy
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          out="$(npx --yes vercel@latest redeploy "${SOURCE_DEPLOYMENT}" --target=preview --scope "${VERCEL_SCOPE}" --token "${VERCEL_TOKEN}" --no-color)"
-          url="$(printf '%s\n' "$out" | grep -oE 'https://[a-z0-9.-]+\.vercel\.app' | tail -1)"
-          test -n "$url" || { echo "Blocked: could not extract new preview URL from redeploy output."; exit 1; }
-          echo "New preview URL: $url"
-          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
+          # The push that triggered this workflow also triggers a Vercel Git
+          # preview build for the SAME commit — and by the time it runs the
+          # branch-specific env vars above are already in place, so the build
+          # rewrites public/auth-config.js. Find that deployment via the API
+          # (never a hardcoded old URL) and wait for it to be READY.
+          api="https://api.vercel.com/v6/deployments?app=${VERCEL_PROJECT}&slug=${VERCEL_SCOPE}&target=preview&limit=20"
+          url=""; state=""
+          for i in $(seq 1 30); do
+            resp="$(curl -sS -H "Authorization: Bearer ${VERCEL_TOKEN}" "$api")"
+            row="$(printf '%s' "$resp" | jq -r --arg sha "${GITHUB_SHA}" \
+              '[.deployments[] | select(.meta["githubCommitSha"] == $sha)][0] // empty | "\(.state) \(.url)"')"
+            state="${row%% *}"; url="${row#* }"
+            echo "poll ${i}: deployment for ${GITHUB_SHA:0:7} state=${state:-not-found}"
+            case "$state" in
+              READY) break ;;
+              ERROR|CANCELED)
+                echo "FAIL: Git preview deployment for this commit ended in state ${state} (https://${url})"
+                exit 1 ;;
+              *) sleep 20 ;;
+            esac
+          done
+          test "$state" = "READY" || { echo "FAIL: deployment for ${GITHUB_SHA} not READY after timeout."; exit 1; }
+          echo "Preview deployment READY: https://${url}"
+          echo "preview_url=https://${url}" >> "$GITHUB_OUTPUT"
 
       - name: Verify deployed preview (GET only, no secrets printed)
         shell: bash
