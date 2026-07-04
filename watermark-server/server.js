@@ -165,12 +165,23 @@ app.post('/edit', async (req, res) => {
     // 3) トリミング範囲を確定
     const plans = clips.map((clip, i) => {
       const dur = metas[i].duration;
-      let start = Math.max(0, Number(clip.start) || 0);
+      if (!Number.isFinite(dur) || dur <= 0) {
+        throw new Error(`clip ${i}: could not determine video duration`);
+      }
+      let start = Number(clip.start);
+      if (!Number.isFinite(start)) start = 0;
+      if (start < 0) start = 0;
+      if (start >= dur) {
+        throw new Error(`clip ${i}: trim start (${start}s) is at or beyond video duration (${dur}s) — specify a start within the video`);
+      }
       let end = clip.end != null ? Number(clip.end) : dur;
-      if (!Number.isFinite(end) || end <= 0 || end > dur) end = dur;
-      if (start >= dur) start = 0;
+      if (!Number.isFinite(end)) end = dur;
+      if (end > dur) end = dur;
+      if (end <= start) {
+        throw new Error(`clip ${i}: trim end (${end}s) must be greater than start (${start}s)`);
+      }
       const tdur = end - start;
-      if (tdur < 0.2) throw new Error(`clip ${i}: trim range too short`);
+      if (tdur < 0.2) throw new Error(`clip ${i}: trim range too short (${tdur.toFixed(3)}s, minimum 0.2s)`);
       return { start, end, tdur };
     });
 
