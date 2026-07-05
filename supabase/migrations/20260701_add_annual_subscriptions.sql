@@ -94,10 +94,8 @@ CREATE INDEX IF NOT EXISTS user_subscriptions_next_grant_idx
 -- ────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.grant_annual_subscription_credits(
   p_subscription_id text,
-  p_grant_period     date,        -- YYYY-MM-01 of the month to grant
-  p_next_grant_at    timestamptz, -- next_credit_grant_at after this grant
-  p_expires_at       timestamptz  -- when these credits expire (caller computes:
-                                  -- the actual grant due date + 1 month, clamped)
+  p_grant_period     date,    -- YYYY-MM-01 of the month to grant
+  p_next_grant_at    timestamptz  -- next_credit_grant_at after this grant
 )
 RETURNS text
 LANGUAGE plpgsql
@@ -108,6 +106,7 @@ DECLARE
   v_sub    public.user_subscriptions%ROWTYPE;
   v_exists boolean;
   v_credits integer;
+  v_expires_at timestamptz;
   v_reason text;
 BEGIN
   -- Argument validation
@@ -115,9 +114,6 @@ BEGIN
     RETURN 'invalid';
   END IF;
   IF p_grant_period IS NULL THEN
-    RETURN 'invalid';
-  END IF;
-  IF p_expires_at IS NULL THEN
     RETURN 'invalid';
   END IF;
 
@@ -160,17 +156,15 @@ BEGIN
     RETURN 'duplicate';
   END IF;
 
-  -- Expiry is passed in by the caller: the actual grant due date + 1 month,
-  -- clamped to month-end when the day doesn't exist there. Not a fixed
-  -- "end of month after grant_period" — that would give up to ~2 months
-  -- of validity depending on where in the month the grant fires.
+  -- Expires at end of month after grant_period
+  v_expires_at := (date_trunc('month', p_grant_period) + interval '2 months' - interval '1 second');
 
   -- Lock and update credit_balances (atomic add, no read-modify-write in JS)
   INSERT INTO public.credit_balances (user_id, free_credits, subscription_credits, purchased_credits, subscription_expires_at)
-  VALUES (v_sub.user_id, 0, v_credits, 0, p_expires_at)
+  VALUES (v_sub.user_id, 0, v_credits, 0, v_expires_at)
   ON CONFLICT (user_id) DO UPDATE
     SET subscription_credits   = public.credit_balances.subscription_credits + v_credits,
-        subscription_expires_at = GREATEST(public.credit_balances.subscription_expires_at, p_expires_at),
+        subscription_expires_at = GREATEST(public.credit_balances.subscription_expires_at, v_expires_at),
         updated_at             = now();
 
   -- Record credit transaction
@@ -182,7 +176,7 @@ BEGIN
   INSERT INTO public.annual_credit_grant_log
     (stripe_subscription_id, user_id, grant_period, credits, expires_at)
   VALUES
-    (p_subscription_id, v_sub.user_id, p_grant_period, v_credits, p_expires_at);
+    (p_subscription_id, v_sub.user_id, p_grant_period, v_credits, v_expires_at);
 
   -- Advance next_credit_grant_at
   UPDATE public.user_subscriptions
@@ -195,5 +189,5 @@ END;
 $$;
 
 -- Revoke public execute; only service_role may call
-REVOKE ALL ON FUNCTION public.grant_annual_subscription_credits(text, date, timestamptz, timestamptz) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.grant_annual_subscription_credits(text, date, timestamptz, timestamptz) TO service_role;
+REVOKE ALL ON FUNCTION public.grant_annual_subscription_credits(text, date, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.grant_annual_subscription_credits(text, date, timestamptz) TO service_role;
