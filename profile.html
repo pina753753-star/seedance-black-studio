@@ -50,14 +50,11 @@ async function loadDb(user){const email=user.email||'';$('avatar').textContent=(
   return {plan:(profileRes.data&&profile.plan)||'free',total:Number(b.free_credits||0)+Number(b.subscription_credits||0)+Number(b.purchased_credits||0)};}
 // ---- 決済完了後のplan/credits自動再取得 ----
 // Checkout完了で戻ってきた時だけ、Webhook反映のズレを吸収するため
-// loadDbを短時間ポーリングする。通常アクセスでは一切動作しない。
-let _checkoutPoll=null,_checkoutStatusEl=null;
+// loadDbを裏側で短時間ポーリングする。通常アクセスでは一切動作しない。
+// ユーザー向けメッセージは出さず、反映されたら画面表示だけ自然に更新する。
+let _checkoutPoll=null;
 function checkoutRequested(){const c=(new URLSearchParams(location.search).get('checkout')||'').toLowerCase();return c==='complete'||c==='success';}
-function showCheckoutStatus(msg){if(!_checkoutStatusEl){_checkoutStatusEl=document.createElement('div');_checkoutStatusEl.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:60;background:#1e2230;border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:12px 18px;font-size:13px;font-weight:700;line-height:1.6;white-space:pre-line;color:#f8fafc;box-shadow:0 12px 40px rgba(0,0,0,.55);max-width:calc(100vw - 32px);text-align:center';document.body.appendChild(_checkoutStatusEl);}_checkoutStatusEl.textContent=msg;}
-function hideCheckoutStatus(){if(_checkoutStatusEl){_checkoutStatusEl.remove();_checkoutStatusEl=null;}}
-// 決済完了で戻った時のみ裏で再取得。0〜10秒は無表示、10秒超で軽い待機文言、
-// 30秒到達でリロード＋サポート案内。成功時は無言で表示更新して停止する。
-function startCheckoutPolling(user,base){if(_checkoutPoll||!user||!client)return;const b=base||{plan:'free',total:0};const started=Date.now();let tries=0;const max=10;_checkoutPoll=setInterval(async()=>{tries++;let cur=null;try{cur=await loadDb(user);}catch(_){cur=null;}const changed=cur&&(cur.total>b.total||(cur.plan!=='free'&&cur.plan!==b.plan));if(changed){clearInterval(_checkoutPoll);_checkoutPoll=null;hideCheckoutStatus();}else if(tries>=max){clearInterval(_checkoutPoll);_checkoutPoll=null;showCheckoutStatus('クレジットの反映に時間がかかっています。\nページを再読み込みしてください。\n再読み込み後も数分たって反映されない場合は、ログイン中のメールアドレス、購入プラン、購入日時を添えてサポートへご連絡ください。');}else if(Date.now()-started>=10000){showCheckoutStatus('クレジットの反映に少し時間がかかっています。');}},3000);}
+function startCheckoutPolling(user,base){if(_checkoutPoll||!user||!client)return;const b=base||{plan:'free',total:0};let tries=0;const max=10;_checkoutPoll=setInterval(async()=>{tries++;let cur=null;try{cur=await loadDb(user);}catch(_){cur=null;}const changed=cur&&(cur.total>b.total||(cur.plan!=='free'&&cur.plan!==b.plan));if(changed||tries>=max){clearInterval(_checkoutPoll);_checkoutPoll=null;}},3000);}
 window.addEventListener('beforeunload',()=>{if(_checkoutPoll){clearInterval(_checkoutPoll);_checkoutPoll=null;}});
 if(!authReady){showGuest('SupabaseのURLとanon keyが未設定です。');}else{client.auth.getSession().then(({data,error})=>{if(error||!data.session){showGuest();return;}loadDb(data.session.user).then(base=>{if(checkoutRequested())startCheckoutPolling(data.session.user,base);});});client.auth.onAuthStateChange((_event,session)=>{session?loadDb(session.user):showGuest();});}
 // ---- 生成履歴セクション ----
