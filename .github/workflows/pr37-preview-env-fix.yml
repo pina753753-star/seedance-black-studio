@@ -213,7 +213,7 @@ jobs:
 
             const redeploy = await api(`/v13/deployments?${q}&forceNew=1`, {
               method: 'POST', label: 'redeploy',
-              body: { name: PROJECT_NAME, deploymentId: src.uid || src.id, target: 'preview' }
+              body: { name: PROJECT_NAME, deploymentId: src.uid || src.id }
             });
             const newId = redeploy?.id || redeploy?.uid;
             console.log(`REDEPLOY_NEW id=${newId} url=${redeploy?.url || ''}`);
