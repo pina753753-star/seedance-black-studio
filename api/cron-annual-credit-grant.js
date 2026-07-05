@@ -60,19 +60,56 @@ function authenticate(req) {
  * For months shorter than the anchor day (e.g. anchor=31, next month=Feb),
  * we clamp to the last day of that month (UTC).
  *
+ * IMPORTANT: the year/month are read from currentGrant BEFORE any mutation,
+ * and the target date is built in a single Date.UTC() call. Mutating
+ * currentGrant via setUTCMonth() first (when its own day is 29-31, e.g. a
+ * prior clamp to a long month) can itself overflow into the following month
+ * on short target months, silently skipping a whole grant cycle.
+ *
  * @param {Date} anchorDate  - billing_cycle_anchor as Date
  * @param {Date} currentGrant - the next_credit_grant_at that just fired
  * @returns {Date}
  */
 function nextGrantDate(anchorDate, currentGrant) {
   const anchorDay = anchorDate.getUTCDate();
-  // Advance currentGrant by one calendar month
-  const next = new Date(currentGrant);
-  next.setUTCMonth(next.getUTCMonth() + 1);
-  // Clamp to last day of month if anchorDay overshoots
-  const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
-  next.setUTCDate(Math.min(anchorDay, lastDay));
-  return next;
+  const cur = new Date(currentGrant);
+  const year = cur.getUTCFullYear();
+  const month = cur.getUTCMonth();
+  const lastDayOfTargetMonth = new Date(Date.UTC(year, month + 2, 0)).getUTCDate();
+  return new Date(Date.UTC(
+    year,
+    month + 1,
+    Math.min(anchorDay, lastDayOfTargetMonth),
+    cur.getUTCHours(),
+    cur.getUTCMinutes(),
+    cur.getUTCSeconds()
+  ));
+}
+
+/**
+ * Add exactly one calendar month to a date, clamping the day to the last
+ * day of the target month when it doesn't exist there (e.g. Jan 31 -> Feb 28/29,
+ * not overflowing into March). Used to compute credit expiry as "granted at
+ * + 1 month", not a fixed end-of-month.
+ *
+ * @param {Date} date
+ * @returns {Date}
+ */
+function addOneMonthClamped(date) {
+  const d = new Date(date);
+  const day = d.getUTCDate();
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth();
+  const lastDayOfTargetMonth = new Date(Date.UTC(year, month + 2, 0)).getUTCDate();
+  return new Date(Date.UTC(
+    year,
+    month + 1,
+    Math.min(day, lastDayOfTargetMonth),
+    d.getUTCHours(),
+    d.getUTCMinutes(),
+    d.getUTCSeconds(),
+    d.getUTCMilliseconds()
+  ));
 }
 
 /**
@@ -137,11 +174,17 @@ async function processSubscriptions(db) {
       nextGrantAt = sub.current_period_end;
     }
 
+    // Credits expire exactly 1 month after this grant fires (clamped),
+    // not a fixed "end of the month after next" — this is the actual
+    // due date being fulfilled in this run, not the upcoming one.
+    const expiresAt = addOneMonthClamped(new Date(sub.next_credit_grant_at)).toISOString();
+
     try {
       const { data: rpcResult, error: rpcErr } = await db.rpc('grant_annual_subscription_credits', {
         p_subscription_id: sub.stripe_subscription_id,
         p_grant_period:    grantPeriod,
-        p_next_grant_at:   nextGrantAt
+        p_next_grant_at:   nextGrantAt,
+        p_expires_at:      expiresAt
       });
 
       if (rpcErr) {

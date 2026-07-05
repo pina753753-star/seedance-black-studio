@@ -125,13 +125,20 @@ async function upsertSubscription(db, sub, extraMeta) {
   // For annual subs, compute next_credit_grant_at = anchor + 1 month (first time)
   // Subsequent advances are handled by the Cron RPC.
   // We only set this on insert (upsert does not overwrite if already set).
+  // Day is clamped to the last day of the target month when the anchor day
+  // doesn't exist there (e.g. anchor=Jan 31 -> Feb 28/29, not overflowing
+  // into March like plain Date.UTC(y, m+1, 31) would).
   let nextGrantAt = null;
   if (billingInterval === 'year' && anchor) {
     const anchorDate = new Date(anchor);
+    const anchorDay = anchorDate.getUTCDate();
+    const targetYear = anchorDate.getUTCFullYear();
+    const targetMonth = anchorDate.getUTCMonth() + 1;
+    const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
     nextGrantAt = new Date(Date.UTC(
-      anchorDate.getUTCFullYear(),
-      anchorDate.getUTCMonth() + 1,
-      anchorDate.getUTCDate(),
+      targetYear,
+      targetMonth,
+      Math.min(anchorDay, lastDayOfTargetMonth),
       anchorDate.getUTCHours(),
       anchorDate.getUTCMinutes(),
       anchorDate.getUTCSeconds()
