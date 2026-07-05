@@ -26,10 +26,14 @@ jobs:
       EXPECTED_TEAM_SLUG: pina-s-projects
       EXPECTED_PROJECT_NAME: flowvid-studio
       TARGET_BRANCH: claude/add-annual-embedded-checkout
-      EXPECTED_HEAD_SHA: 306bc8a7d0a617d2c9f759ce6f0ea67a36d8a1f0
+      EXPECTED_HEAD_SHA: 6898570da118b2d417a9e1089df65c9f8e129434
       PREVIEW_ALIAS: flowvid-studio-git-claude-add-annual-emb-abc82f-pina-s-projects.vercel.app
-      FIX_KEY: STRIPE_PRICE_STANDARD_YEARLY
-      FIX_VALUE: price_1ToKBlLdBCVYotQe3ixkY63q
+      FIX_PAIRS: |
+        STRIPE_PRICE_STANDARD_MONTHLY=price_1TpjDzLdBCVYotQeOntuG8nD
+        STRIPE_PRICE_PREMIUM_MONTHLY=price_1TpjENLdBCVYotQeKAn4t672
+        STRIPE_PRICE_PREMIUM_YEARLY=price_1ToPU7LdBCVYotQecFZnF9Kc
+        STRIPE_PRICE_ULTIMATE_MONTHLY=price_1TpjEnLdBCVYotQemzHbT1zt
+        STRIPE_PRICE_ULTIMATE_YEARLY=price_1ToKFiLdBCVYotQeH0e5w0qr
       SUPABASE_PREVIEW_HOST: odlrcvygupkjhspnhksf.supabase.co
       SUPABASE_PROD_HOST: jflpjsdjmlkmkqfahxwy.supabase.co
 
@@ -54,8 +58,10 @@ jobs:
           const BRANCH = process.env.TARGET_BRANCH;
           const EXPECTED_SHA = process.env.EXPECTED_HEAD_SHA;
           const ALIAS = process.env.PREVIEW_ALIAS;
-          const FIX_KEY = process.env.FIX_KEY;
-          const FIX_VALUE = process.env.FIX_VALUE;
+          const FIX_PAIRS = String(process.env.FIX_PAIRS || '')
+            .split('\n').map(l => l.trim()).filter(Boolean)
+            .map(l => { const i = l.indexOf('='); return [l.slice(0, i), l.slice(i + 1)]; })
+            .filter(([k, v]) => /^STRIPE_PRICE_[A-Z_]+$/.test(k) && /^price_[A-Za-z0-9]+$/.test(v));
 
           const AUDIT_KEYS = [
             'STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET',
@@ -165,42 +171,41 @@ jobs:
               && a.class !== 'starts_with_price' && a.class !== 'no-preview-scope' && a.class !== 'missing');
             for (const b of priceBad) console.log(`::warning::NG ${b.key} preview-effective value is ${b.class} (must be price_...)`);
 
-            // 3. Fix exactly one key, Preview + exact branch scope only.
+            // 3. Fix listed STRIPE_PRICE_* keys, Preview + exact branch scope only.
             //    Entries that include the production target are never modified.
-            const fixEntries = envs.filter(e => e?.key === FIX_KEY);
-            const exact = fixEntries.find(e => scopeOf(e) === 'preview-exact-branch');
-            const before = effectiveFor(fixEntries);
-            const beforeVal = before ? await decryptedValue(project.id, before) : undefined;
-            console.log(`FIX_BEFORE class=${before ? classify(beforeVal) : 'missing'} scope=${before ? scopeOf(before) : 'none'}`);
-
-            if (exact && targets(exact).includes('production')) throw new Error('Safety stop: exact entry unexpectedly targets production.');
-
-            const exactVal = exact ? await decryptedValue(project.id, exact) : undefined;
-            if (exact && exactVal === FIX_VALUE) {
-              console.log('FIX_ACTION none (already the desired value)');
-            } else if (exact) {
-              await api(`/v9/projects/${project.id}/env/${exact.id}?${q}`, {
-                method: 'PATCH', label: 'env patch',
-                body: { value: FIX_VALUE, target: ['preview'], gitBranch: BRANCH, type: 'encrypted' }
-              });
-              console.log('FIX_ACTION patched branch-scoped preview entry');
-            } else {
-              await api(`/v10/projects/${project.id}/env?${q}&upsert=true`, {
-                method: 'POST', label: 'env create',
-                body: { key: FIX_KEY, value: FIX_VALUE, target: ['preview'], gitBranch: BRANCH, type: 'encrypted' }
-              });
-              console.log('FIX_ACTION created branch-scoped preview entry');
+            if (!FIX_PAIRS.length) throw new Error('No valid key=value pairs to apply.');
+            for (const [key, value] of FIX_PAIRS) {
+              const fixEntries = envs.filter(e => e?.key === key);
+              const exact = fixEntries.find(e => scopeOf(e) === 'preview-exact-branch');
+              if (exact && targets(exact).includes('production')) throw new Error(`Safety stop: ${key} exact entry unexpectedly targets production.`);
+              const exactVal = exact ? await decryptedValue(project.id, exact) : undefined;
+              if (exact && exactVal === value) {
+                console.log(`FIX ${key}: none (already the desired value)`);
+              } else if (exact) {
+                await api(`/v9/projects/${project.id}/env/${exact.id}?${q}`, {
+                  method: 'PATCH', label: `env patch ${key}`,
+                  body: { value, target: ['preview'], gitBranch: BRANCH, type: 'encrypted' }
+                });
+                console.log(`FIX ${key}: patched branch-scoped preview entry`);
+              } else {
+                await api(`/v10/projects/${project.id}/env?${q}&upsert=true`, {
+                  method: 'POST', label: `env create ${key}`,
+                  body: { key, value, target: ['preview'], gitBranch: BRANCH, type: 'encrypted' }
+                });
+                console.log(`FIX ${key}: created branch-scoped preview entry`);
+              }
             }
 
-            // Re-audit the fixed key
+            // Re-audit the fixed keys
             const list2 = await api(`/v10/projects/${project.id}/env?${q}`, { label: 'env relist' });
             const envs2 = Array.isArray(list2) ? list2 : (list2?.envs || []);
-            const after = envs2.filter(e => e?.key === FIX_KEY).find(e => scopeOf(e) === 'preview-exact-branch');
-            const afterVal = after ? await decryptedValue(project.id, after) : undefined;
-            const afterClass = after ? classify(afterVal) : 'missing';
-            const afterMatches = !!after && afterVal === FIX_VALUE;
-            console.log(`FIX_AFTER class=${afterClass} matchesDesired=${afterMatches}`);
-            if (!afterMatches) throw new Error('Fix verification failed: branch-scoped entry does not hold the desired price ID.');
+            for (const [key, value] of FIX_PAIRS) {
+              const after = envs2.filter(e => e?.key === key).find(e => scopeOf(e) === 'preview-exact-branch');
+              const afterVal = after ? await decryptedValue(project.id, after) : undefined;
+              const ok = !!after && afterVal === value;
+              console.log(`VERIFY ${key}: class=${after ? classify(afterVal) : 'missing'} matchesDesired=${ok}`);
+              if (!ok) throw new Error(`Fix verification failed for ${key}.`);
+            }
 
             // 4. Redeploy latest Preview deployment of the target branch (never production)
             const deps = (await api(`/v6/deployments?${q}&projectId=${project.id}&limit=40&target=preview`, { label: 'deployments list' }))?.deployments || [];
