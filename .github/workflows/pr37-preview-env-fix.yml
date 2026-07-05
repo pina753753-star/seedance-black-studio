@@ -1,0 +1,245 @@
+name: PR37 Preview Env Audit Fix Redeploy
+
+on:
+  push:
+    branches:
+      - claude/flowvid-pr37-preview-audit-h62mzp
+    paths:
+      - .github/workflows/pr37-preview-env-fix.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr37-preview-env-fix
+  cancel-in-progress: false
+
+jobs:
+  audit-fix-redeploy:
+    if: github.repository == 'pina753753-star/seedance-black-studio'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      EXPECTED_TEAM_SLUG: pina-s-projects
+      EXPECTED_PROJECT_NAME: flowvid-studio
+      TARGET_BRANCH: claude/add-annual-embedded-checkout
+      EXPECTED_HEAD_SHA: 306bc8a7d0a617d2c9f759ce6f0ea67a36d8a1f0
+      PREVIEW_ALIAS: flowvid-studio-git-claude-add-annual-emb-abc82f-pina-s-projects.vercel.app
+      FIX_KEY: STRIPE_PRICE_STANDARD_YEARLY
+      FIX_VALUE: price_1ToKBlLdBCVYotQe3ixkY63q
+      SUPABASE_PREVIEW_HOST: odlrcvygupkjhspnhksf.supabase.co
+      SUPABASE_PROD_HOST: jflpjsdjmlkmkqfahxwy.supabase.co
+
+    steps:
+      - name: Guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "${VERCEL_TOKEN:-}" || { echo "Blocked: VERCEL_TOKEN repository secret is unavailable."; exit 1; }
+          echo "Guard passed."
+
+      - name: Audit, fix preview env, redeploy, verify (values never printed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          node <<'NODE'
+          const TOKEN = process.env.VERCEL_TOKEN;
+          const TEAM_SLUG = process.env.EXPECTED_TEAM_SLUG;
+          const PROJECT_NAME = process.env.EXPECTED_PROJECT_NAME;
+          const BRANCH = process.env.TARGET_BRANCH;
+          const EXPECTED_SHA = process.env.EXPECTED_HEAD_SHA;
+          const ALIAS = process.env.PREVIEW_ALIAS;
+          const FIX_KEY = process.env.FIX_KEY;
+          const FIX_VALUE = process.env.FIX_VALUE;
+
+          const AUDIT_KEYS = [
+            'STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET',
+            'STRIPE_PRICE_STANDARD_MONTHLY','STRIPE_PRICE_STANDARD_YEARLY',
+            'STRIPE_PRICE_PRO_MONTHLY','STRIPE_PRICE_PRO_YEARLY',
+            'STRIPE_PRICE_PREMIUM_MONTHLY','STRIPE_PRICE_PREMIUM_YEARLY',
+            'STRIPE_PRICE_ULTIMATE_MONTHLY','STRIPE_PRICE_ULTIMATE_YEARLY',
+            'SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY',
+            'NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY',
+            'SUPABASE_ANON_KEY','SUPABASE_PUBLISHABLE_KEY','CRON_SECRET'
+          ];
+
+          async function api(path, opts = {}) {
+            const res = await fetch(`https://api.vercel.com${path}`, {
+              method: opts.method || 'GET',
+              headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+              body: opts.body ? JSON.stringify(opts.body) : undefined
+            });
+            if (!res.ok) {
+              let hint = '';
+              try { const j = await res.json(); hint = j?.error?.code || ''; } catch {}
+              throw new Error(`${opts.label || path.split('?')[0]} failed: HTTP ${res.status} ${hint}`);
+            }
+            return res.status === 204 ? null : res.json();
+          }
+
+          function classify(v) {
+            if (v === undefined || v === null || v === '') return 'missing-or-unreadable';
+            const s = String(v);
+            if (s.startsWith('sk_test_')) return 'starts_with_sk_test';
+            if (s.startsWith('sk_live_')) return 'starts_with_sk_live';
+            if (s.startsWith('pk_test_')) return 'starts_with_pk_test';
+            if (s.startsWith('pk_live_')) return 'starts_with_pk_live';
+            if (s.startsWith('rk_')) return 'starts_with_rk';
+            if (s.startsWith('price_')) return 'starts_with_price';
+            if (s.startsWith('whsec_')) return 'starts_with_whsec';
+            if (s.startsWith('sb_publishable_')) return 'starts_with_sb_publishable';
+            if (s.startsWith('sb_secret_')) return 'starts_with_sb_secret';
+            if (s.startsWith('eyJ')) return 'jwt_shaped';
+            if (s.includes(process.env.SUPABASE_PREVIEW_HOST)) return 'supabase_preview_url';
+            if (s.includes(process.env.SUPABASE_PROD_HOST)) return 'supabase_production_url';
+            if (s.startsWith('https://')) return 'other_https_url';
+            return 'other_prefix';
+          }
+
+          function targets(e) {
+            if (Array.isArray(e?.target)) return e.target.map(String);
+            if (typeof e?.target === 'string') return [e.target];
+            return [];
+          }
+
+          function scopeOf(e) {
+            const t = targets(e);
+            const prod = t.includes('production'), prev = t.includes('preview');
+            if (prod && prev) return 'shared-production-preview';
+            if (prod) return 'production-only';
+            if (prev && e.gitBranch === BRANCH) return 'preview-exact-branch';
+            if (prev && e.gitBranch) return 'preview-other-branch';
+            if (prev) return 'preview-all-branches';
+            return t.join('+') || 'unknown';
+          }
+
+          // Effective entry for this Preview branch: exact branch > all-branches > shared
+          function effectiveFor(entries) {
+            return entries.find(e => scopeOf(e) === 'preview-exact-branch')
+                || entries.find(e => scopeOf(e) === 'preview-all-branches')
+                || entries.find(e => scopeOf(e) === 'shared-production-preview')
+                || null;
+          }
+
+          async function main() {
+            // 1. Resolve team + project (fixed names only)
+            const teams = (await api('/v2/teams?limit=100', { label: 'team lookup' }))?.teams || [];
+            const team = teams.filter(t => t?.slug === TEAM_SLUG);
+            if (team.length !== 1 || !team[0].id) throw new Error('Expected Vercel team not resolved exactly once.');
+            const teamId = team[0].id;
+            const q = `teamId=${encodeURIComponent(teamId)}`;
+
+            const project = await api(`/v9/projects/${PROJECT_NAME}?${q}`, { label: 'project lookup' });
+            if (project?.name !== PROJECT_NAME || !project?.id) throw new Error('Project mismatch.');
+            console.log(`Project confirmed: ${project.name}`);
+
+            // 2. Audit (decrypt in memory only; values are never printed)
+            const list = await api(`/v10/projects/${project.id}/env?${q}&decrypt=true`, { label: 'env list' });
+            const envs = Array.isArray(list) ? list : (list?.envs || []);
+
+            const audit = [];
+            for (const key of AUDIT_KEYS) {
+              const entries = envs.filter(e => e?.key === key);
+              const eff = effectiveFor(entries);
+              const cls = eff ? classify(eff.value) : (entries.length ? 'no-preview-scope' : 'missing');
+              audit.push({ key, entries: entries.length, scope: eff ? scopeOf(eff) : 'none', class: cls });
+            }
+            console.log('AUDIT_BEFORE ' + JSON.stringify(audit));
+
+            const priceBad = audit.filter(a => a.key.startsWith('STRIPE_PRICE_') && a.entries > 0
+              && a.class !== 'starts_with_price' && a.class !== 'no-preview-scope' && a.class !== 'missing');
+            for (const b of priceBad) console.log(`::warning::NG ${b.key} preview-effective value is ${b.class} (must be price_...)`);
+
+            // 3. Fix exactly one key, Preview + exact branch scope only.
+            //    Entries that include the production target are never modified.
+            const fixEntries = envs.filter(e => e?.key === FIX_KEY);
+            const exact = fixEntries.find(e => scopeOf(e) === 'preview-exact-branch');
+            const before = effectiveFor(fixEntries);
+            console.log(`FIX_BEFORE class=${before ? classify(before.value) : 'missing'} scope=${before ? scopeOf(before) : 'none'}`);
+
+            if (exact && targets(exact).includes('production')) throw new Error('Safety stop: exact entry unexpectedly targets production.');
+
+            if (exact && exact.value === FIX_VALUE) {
+              console.log('FIX_ACTION none (already the desired value)');
+            } else if (exact) {
+              await api(`/v9/projects/${project.id}/env/${exact.id}?${q}`, {
+                method: 'PATCH', label: 'env patch',
+                body: { value: FIX_VALUE, target: ['preview'], gitBranch: BRANCH, type: 'encrypted' }
+              });
+              console.log('FIX_ACTION patched branch-scoped preview entry');
+            } else {
+              await api(`/v10/projects/${project.id}/env?${q}&upsert=true`, {
+                method: 'POST', label: 'env create',
+                body: { key: FIX_KEY, value: FIX_VALUE, target: ['preview'], gitBranch: BRANCH, type: 'encrypted' }
+              });
+              console.log('FIX_ACTION created branch-scoped preview entry');
+            }
+
+            // Re-audit the fixed key
+            const list2 = await api(`/v10/projects/${project.id}/env?${q}&decrypt=true`, { label: 'env relist' });
+            const envs2 = Array.isArray(list2) ? list2 : (list2?.envs || []);
+            const after = envs2.filter(e => e?.key === FIX_KEY).find(e => scopeOf(e) === 'preview-exact-branch');
+            const afterClass = after ? classify(after.value) : 'missing';
+            const afterMatches = !!after && after.value === FIX_VALUE;
+            console.log(`FIX_AFTER class=${afterClass} matchesDesired=${afterMatches}`);
+            if (!afterMatches) throw new Error('Fix verification failed: branch-scoped entry does not hold the desired price ID.');
+
+            // 4. Redeploy latest Preview deployment of the target branch (never production)
+            const deps = (await api(`/v6/deployments?${q}&projectId=${project.id}&limit=40&target=preview`, { label: 'deployments list' }))?.deployments || [];
+            const src = deps.find(d => (d?.meta?.githubCommitRef === BRANCH) && d?.readyState === 'READY');
+            if (!src) throw new Error('No READY preview deployment found for the target branch.');
+            if (src.target === 'production') throw new Error('Safety stop: source deployment is production.');
+            const srcSha = src?.meta?.githubCommitSha || '';
+            console.log(`REDEPLOY_SOURCE url=${src.url} branch=${src.meta.githubCommitRef} sha=${srcSha}`);
+            if (srcSha !== EXPECTED_SHA) throw new Error(`Safety stop: source deployment sha ${srcSha} != expected PR head.`);
+
+            const redeploy = await api(`/v13/deployments?${q}&forceNew=1`, {
+              method: 'POST', label: 'redeploy',
+              body: { name: PROJECT_NAME, deploymentId: src.uid || src.id, target: 'preview' }
+            });
+            const newId = redeploy?.id || redeploy?.uid;
+            console.log(`REDEPLOY_NEW id=${newId} url=${redeploy?.url || ''}`);
+            if ((redeploy?.target || 'preview') === 'production') throw new Error('Safety stop: new deployment targets production.');
+
+            // 5. Poll until READY (max ~8 min)
+            let state = '';
+            for (let i = 0; i < 48; i++) {
+              await new Promise(r => setTimeout(r, 10000));
+              const d = await api(`/v13/deployments/${newId}?${q}`, { label: 'deployment poll' });
+              state = d?.readyState || d?.state || '';
+              if (state === 'READY' || state === 'ERROR' || state === 'CANCELED') break;
+            }
+            console.log(`REDEPLOY_STATE ${state}`);
+            if (state !== 'READY') throw new Error(`Redeploy did not become READY (state=${state}).`);
+
+            // 6. Free GET verification via the branch alias (no POST anywhere)
+            async function check(path) {
+              const res = await fetch(`https://${ALIAS}${path}`, { redirect: 'follow' });
+              const text = await res.text();
+              return { status: res.status, text };
+            }
+            const auth = await check('/auth-config.js');
+            console.log('CHECK auth-config ' + JSON.stringify({
+              status: auth.status,
+              hasPreviewSupabase: auth.text.includes(process.env.SUPABASE_PREVIEW_HOST),
+              hasProdSupabase: auth.text.includes(process.env.SUPABASE_PROD_HOST),
+              hasSecretShape: /sb_secret_|sk_live_|sk_test_/.test(auth.text)
+            }));
+            const cfg = await check('/api/stripe-config');
+            let cfgClass = 'non-json';
+            try { cfgClass = classify(JSON.parse(cfg.text)?.publishableKey); } catch {}
+            console.log('CHECK stripe-config ' + JSON.stringify({ status: cfg.status, publishableKeyClass: cfgClass }));
+            const wh = await check('/api/stripe-webhook');
+            let whJson = null; try { whJson = JSON.parse(wh.text); } catch {}
+            console.log('CHECK stripe-webhook ' + JSON.stringify({ status: wh.status, ok: whJson?.ok, endpoint: whJson?.endpoint, method: whJson?.method }));
+
+            console.log('DONE all steps completed');
+          }
+
+          main().catch(e => { console.error(e.message || String(e)); process.exit(1); });
+          NODE
