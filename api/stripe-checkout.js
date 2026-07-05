@@ -117,11 +117,27 @@ function lineItemForPack(pack) {
   };
 }
 
+// Resolve the origin the checkout was started from, so the return_url goes
+// back to the same host (keeps the login session visible after checkout).
+// Only known FlowVid hosts are allowed; anything else falls back to SITE_URL
+// to avoid open redirects. VERCEL_URL is not used here because it points to
+// the deployment-specific URL, not the alias the user is browsing.
+function requestOrigin(req) {
+  const raw = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '');
+  const host = raw.split(',')[0].trim().toLowerCase();
+  const allowed =
+    host === 'flowvid-studio.vercel.app' ||
+    (host.startsWith('flowvid-studio') && host.endsWith('-pina-s-projects.vercel.app'));
+  if (!allowed || !/^[a-z0-9.-]+$/.test(host)) return SITE_URL;
+  return `https://${host}`;
+}
+
 // Build Stripe Embedded Checkout session params common to all modes.
-function embeddedBase(user) {
+function embeddedBase(user, req) {
+  const origin = requestOrigin(req);
   return {
     ui_mode: 'embedded',
-    return_url: `${SITE_URL}/profile.html?checkout=complete&session_id={CHECKOUT_SESSION_ID}`,
+    return_url: `${origin}/profile.html?checkout=complete&session_id={CHECKOUT_SESSION_ID}`,
     customer_email: user.email || undefined,
     client_reference_id: user.id
   };
@@ -171,7 +187,7 @@ module.exports = async function handler(req, res) {
         };
 
         session = await stripe.checkout.sessions.create({
-          ...embeddedBase(user),
+          ...embeddedBase(user, req),
           mode: 'subscription',
           line_items: [lineItemForAnnual(plan)],
           metadata,
@@ -195,7 +211,7 @@ module.exports = async function handler(req, res) {
         };
 
         session = await stripe.checkout.sessions.create({
-          ...embeddedBase(user),
+          ...embeddedBase(user, req),
           mode: 'subscription',
           line_items: [lineItemForMonthly(plan)],
           metadata,
@@ -229,7 +245,7 @@ module.exports = async function handler(req, res) {
       };
 
       session = await stripe.checkout.sessions.create({
-        ...embeddedBase(user),
+        ...embeddedBase(user, req),
         mode: 'payment',
         line_items: [lineItemForPack(pack)],
         metadata,
