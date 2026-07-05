@@ -138,15 +138,25 @@ jobs:
             if (project?.name !== PROJECT_NAME || !project?.id) throw new Error('Project mismatch.');
             console.log(`Project confirmed: ${project.name}`);
 
+            // Decrypted read of a single env entry (value stays in memory; never printed)
+            async function decryptedValue(projectId, entry) {
+              if (!entry) return undefined;
+              try {
+                const d = await api(`/v1/projects/${projectId}/env/${entry.id}?${q}`, { label: 'env decrypt read' });
+                return d?.value;
+              } catch { return undefined; } // sensitive-type entries cannot be decrypted
+            }
+
             // 2. Audit (decrypt in memory only; values are never printed)
-            const list = await api(`/v10/projects/${project.id}/env?${q}&decrypt=true`, { label: 'env list' });
+            const list = await api(`/v10/projects/${project.id}/env?${q}`, { label: 'env list' });
             const envs = Array.isArray(list) ? list : (list?.envs || []);
 
             const audit = [];
             for (const key of AUDIT_KEYS) {
               const entries = envs.filter(e => e?.key === key);
               const eff = effectiveFor(entries);
-              const cls = eff ? classify(eff.value) : (entries.length ? 'no-preview-scope' : 'missing');
+              const val = eff ? await decryptedValue(project.id, eff) : undefined;
+              const cls = eff ? classify(val) : (entries.length ? 'no-preview-scope' : 'missing');
               audit.push({ key, entries: entries.length, scope: eff ? scopeOf(eff) : 'none', class: cls });
             }
             console.log('AUDIT_BEFORE ' + JSON.stringify(audit));
@@ -160,11 +170,13 @@ jobs:
             const fixEntries = envs.filter(e => e?.key === FIX_KEY);
             const exact = fixEntries.find(e => scopeOf(e) === 'preview-exact-branch');
             const before = effectiveFor(fixEntries);
-            console.log(`FIX_BEFORE class=${before ? classify(before.value) : 'missing'} scope=${before ? scopeOf(before) : 'none'}`);
+            const beforeVal = before ? await decryptedValue(project.id, before) : undefined;
+            console.log(`FIX_BEFORE class=${before ? classify(beforeVal) : 'missing'} scope=${before ? scopeOf(before) : 'none'}`);
 
             if (exact && targets(exact).includes('production')) throw new Error('Safety stop: exact entry unexpectedly targets production.');
 
-            if (exact && exact.value === FIX_VALUE) {
+            const exactVal = exact ? await decryptedValue(project.id, exact) : undefined;
+            if (exact && exactVal === FIX_VALUE) {
               console.log('FIX_ACTION none (already the desired value)');
             } else if (exact) {
               await api(`/v9/projects/${project.id}/env/${exact.id}?${q}`, {
@@ -181,11 +193,12 @@ jobs:
             }
 
             // Re-audit the fixed key
-            const list2 = await api(`/v10/projects/${project.id}/env?${q}&decrypt=true`, { label: 'env relist' });
+            const list2 = await api(`/v10/projects/${project.id}/env?${q}`, { label: 'env relist' });
             const envs2 = Array.isArray(list2) ? list2 : (list2?.envs || []);
             const after = envs2.filter(e => e?.key === FIX_KEY).find(e => scopeOf(e) === 'preview-exact-branch');
-            const afterClass = after ? classify(after.value) : 'missing';
-            const afterMatches = !!after && after.value === FIX_VALUE;
+            const afterVal = after ? await decryptedValue(project.id, after) : undefined;
+            const afterClass = after ? classify(afterVal) : 'missing';
+            const afterMatches = !!after && afterVal === FIX_VALUE;
             console.log(`FIX_AFTER class=${afterClass} matchesDesired=${afterMatches}`);
             if (!afterMatches) throw new Error('Fix verification failed: branch-scoped entry does not hold the desired price ID.');
 
