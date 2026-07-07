@@ -1,0 +1,342 @@
+name: Preview Ops - Vercel Metadata Audit
+
+on:
+  push:
+    branches:
+      - claude/add-annual-embedded-checkout
+    paths:
+      - .github/workflows/preview-ops-audit.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preview-ops-vercel-metadata-audit
+  cancel-in-progress: false
+
+jobs:
+  audit-vercel-preview:
+    if: github.repository == 'pina753753-star/seedance-black-studio' && github.ref == 'refs/heads/claude/add-annual-embedded-checkout'
+    environment: preview-ops
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_TEAM_SLUG: pina-s-projects
+      EXPECTED_PROJECT_NAME: flowvid-studio
+      EXPECTED_BRANCH: claude/add-annual-embedded-checkout
+      EXPECTED_SOURCE_DEPLOYMENT: flowvid-studio-8utop1v7n-pina-s-projects.vercel.app
+      EXPECTED_SOURCE_SHA: e40e946216de3e295b51749bf845e2a88da8a2cf
+      PR_NUMBER: '37'
+
+    steps:
+      - name: Validate fixed repository and allowed branch ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+
+          test "${GITHUB_REPOSITORY}" = "pina753753-star/seedance-black-studio" || {
+            echo "Blocked: unexpected repository."
+            exit 1
+          }
+
+          test "${GITHUB_REF}" = "refs/heads/${EXPECTED_BRANCH}" || {
+            echo "Blocked: unexpected branch ref."
+            exit 1
+          }
+
+          test -n "${VERCEL_TOKEN:-}" || {
+            echo "Blocked: VERCEL_TOKEN is unavailable in preview-ops."
+            exit 1
+          }
+
+          test -n "${GH_TOKEN:-}" || {
+            echo "Blocked: built-in GITHUB_TOKEN is unavailable."
+            exit 1
+          }
+
+          echo "Validated repository, allowed branch ref, and protected secret availability."
+
+      - name: Audit metadata and publish sanitized PR report
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+
+          node <<'NODE'
+          const fs = require('fs');
+
+          const marker = '<!-- preview-ops-vercel-metadata-audit -->';
+          const repo = process.env.GITHUB_REPOSITORY;
+          const expectedBranch = process.env.EXPECTED_BRANCH;
+          const expectedTeamSlug = process.env.EXPECTED_TEAM_SLUG;
+          const expectedProjectName = process.env.EXPECTED_PROJECT_NAME;
+          const expectedDeployment = process.env.EXPECTED_SOURCE_DEPLOYMENT;
+          const expectedSourceSha = process.env.EXPECTED_SOURCE_SHA;
+          const prNumber = process.env.PR_NUMBER;
+          const vercelToken = process.env.VERCEL_TOKEN;
+          const githubToken = process.env.GH_TOKEN;
+
+          const auditedKeys = [
+            'STRIPE_SECRET_KEY',
+            'STRIPE_WEBHOOK_SECRET',
+            'STRIPE_PUBLISHABLE_KEY',
+            'STRIPE_PRICE_STANDARD_YEARLY',
+            'STRIPE_PRICE_PREMIUM_YEARLY',
+            'STRIPE_PRICE_ULTIMATE_YEARLY',
+            'SUPABASE_URL',
+            'SUPABASE_SERVICE_ROLE_KEY',
+            'CRON_SECRET'
+          ];
+
+          const exactBranchKeys = new Set([
+            'STRIPE_SECRET_KEY',
+            'STRIPE_WEBHOOK_SECRET',
+            'STRIPE_PUBLISHABLE_KEY',
+            'STRIPE_PRICE_STANDARD_YEARLY',
+            'STRIPE_PRICE_PREMIUM_YEARLY',
+            'STRIPE_PRICE_ULTIMATE_YEARLY'
+          ]);
+
+          async function fetchJson(url, token, label, options = {}) {
+            const response = await fetch(url, {
+              method: options.method || 'GET',
+              headers: {
+                Accept: 'application/json',
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...(options.github ? { 'X-GitHub-Api-Version': '2022-11-28' } : {})
+              },
+              body: options.body ? JSON.stringify(options.body) : undefined
+            });
+
+            if (!response.ok) {
+              throw new Error(`${label} failed with HTTP ${response.status}. Response body was not printed.`);
+            }
+
+            if (response.status === 204) return null;
+            return response.json();
+          }
+
+          function targets(entry) {
+            if (Array.isArray(entry?.target)) return entry.target.map(String);
+            if (typeof entry?.target === 'string') return [entry.target];
+            return [];
+          }
+
+          function classifyScope(entry) {
+            const value = targets(entry);
+            const branch = entry?.gitBranch || '';
+            const preview = value.includes('preview');
+            const production = value.includes('production');
+
+            if (preview && production) return 'shared-production-preview';
+            if (preview && branch === expectedBranch) return 'preview-exact-branch';
+            if (preview && branch) return 'preview-other-branch';
+            if (preview) return 'preview-all-branches';
+            if (production) return 'production-only';
+            if (value.includes('development')) return 'development-only';
+            return value.length ? value.join('+') : 'unknown';
+          }
+
+          function auditEnvironmentMetadata(envs) {
+            const rows = [];
+            const findings = [];
+
+            for (const key of auditedKeys) {
+              const entries = envs.filter((entry) => entry?.key === key);
+              const scopes = [...new Set(entries.map(classifyScope))];
+              const types = [...new Set(entries.map((entry) => String(entry?.type || 'unknown')))];
+              const exactBranch = entries.some((entry) => targets(entry).includes('preview') && entry?.gitBranch === expectedBranch);
+              const broadPreview = entries.some((entry) => targets(entry).includes('preview') && !entry?.gitBranch);
+              const shared = entries.some((entry) => targets(entry).includes('preview') && targets(entry).includes('production'));
+              const previewApplicable = exactBranch || broadPreview || shared;
+
+              let result = 'ok';
+              if (entries.length === 0) {
+                result = 'missing';
+                findings.push(`${key}: metadata entry is missing.`);
+              } else if (!previewApplicable) {
+                result = 'no-preview-scope';
+                findings.push(`${key}: no Preview-applicable entry was found.`);
+              } else if (shared) {
+                result = 'shared-production-preview';
+                findings.push(`${key}: an entry is shared between Production and Preview.`);
+              } else if (exactBranchKeys.has(key) && !exactBranch) {
+                result = broadPreview ? 'preview-broad-scope' : 'preview-nonexact-scope';
+                findings.push(`${key}: no exact PR #37 branch entry was found.`);
+              }
+
+              rows.push({
+                key,
+                count: entries.length,
+                scopes: scopes.length ? scopes.join(', ') : 'none',
+                types: types.length ? types.join(', ') : 'none',
+                result
+              });
+            }
+
+            return { rows, findings };
+          }
+
+          function reportMarkdown({ rows = [], findings = [], failure = '' }) {
+            const lines = [
+              marker,
+              '# Preview Ops: Vercel Environment Metadata Audit',
+              '',
+              'Values were not decrypted, printed, or included in this report.',
+              '',
+              `- Workflow commit: \`${process.env.GITHUB_SHA}\``,
+              `- Workflow run: https://github.com/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+              `- Pinned Preview: https://${expectedDeployment}`,
+              ''
+            ];
+
+            if (failure) {
+              lines.push('## Result', '', `FAILED: ${failure}`, '');
+            } else {
+              lines.push('| Key | Entries | Scope classification | Type | Result |');
+              lines.push('|---|---:|---|---|---|');
+              for (const row of rows) {
+                lines.push(`| ${row.key} | ${row.count} | ${row.scopes} | ${row.types} | ${row.result} |`);
+              }
+              lines.push('', `Overall: ${findings.length ? 'NEEDS_ATTENTION' : 'PASS'}`, '');
+              if (findings.length) {
+                lines.push('## Findings', '');
+                for (const finding of findings) lines.push(`- ${finding}`);
+                lines.push('');
+              }
+            }
+
+            lines.push(
+              '## Unchanged systems',
+              '',
+              '- Vercel API operations: GET only',
+              '- Environment variable values: not decrypted and not printed',
+              '- Vercel settings and Deployments: unchanged by this workflow',
+              '- Stripe API and Webhook: not called',
+              '- Supabase and production DB: not accessed',
+              '- OpenRouter and video generation: not called',
+              '- New payment: not performed',
+              '- Credits consumed: none',
+              ''
+            );
+
+            return `${lines.join('\n')}\n`;
+          }
+
+          async function publishComment(body) {
+            const comments = await fetchJson(
+              `https://api.github.com/repos/${repo}/issues/${prNumber}/comments?per_page=100`,
+              githubToken,
+              'GitHub PR comment lookup',
+              { github: true }
+            );
+
+            const existing = Array.isArray(comments)
+              ? comments.find((comment) => typeof comment?.body === 'string' && comment.body.includes(marker))
+              : null;
+
+            if (existing?.id) {
+              await fetchJson(
+                `https://api.github.com/repos/${repo}/issues/comments/${existing.id}`,
+                githubToken,
+                'GitHub PR comment update',
+                { github: true, method: 'PATCH', body: { body } }
+              );
+              return;
+            }
+
+            await fetchJson(
+              `https://api.github.com/repos/${repo}/issues/${prNumber}/comments`,
+              githubToken,
+              'GitHub PR comment creation',
+              { github: true, method: 'POST', body: { body } }
+            );
+          }
+
+          async function main() {
+            try {
+              const teamPayload = await fetchJson(
+                'https://api.vercel.com/v2/teams?limit=100',
+                vercelToken,
+                'Vercel team lookup'
+              );
+              const teams = Array.isArray(teamPayload?.teams) ? teamPayload.teams : [];
+              const matchingTeams = teams.filter((team) => team?.slug === expectedTeamSlug);
+              if (matchingTeams.length !== 1 || !matchingTeams[0]?.id) {
+                throw new Error('Expected Vercel team was not resolved exactly once.');
+              }
+              const teamId = matchingTeams[0].id;
+
+              const project = await fetchJson(
+                `https://api.vercel.com/v9/projects/${expectedProjectName}?teamId=${encodeURIComponent(teamId)}`,
+                vercelToken,
+                'Vercel project lookup'
+              );
+              if (project?.name !== expectedProjectName || !project?.id) {
+                throw new Error('Resolved Vercel project does not match the fixed project.');
+              }
+
+              const deployment = await fetchJson(
+                `https://api.vercel.com/v13/deployments/${expectedDeployment}?teamId=${encodeURIComponent(teamId)}`,
+                vercelToken,
+                'Pinned Preview Deployment lookup'
+              );
+              const readyState = deployment?.readyState || deployment?.state || '';
+              const target = deployment?.target || '';
+              const projectName = deployment?.name || deployment?.project?.name || '';
+              const deploymentUrl = deployment?.url || '';
+              const branch = deployment?.meta?.githubCommitRef || deployment?.gitSource?.ref || deployment?.meta?.gitBranch || '';
+              const sha = deployment?.meta?.githubCommitSha || deployment?.gitSource?.sha || '';
+
+              if (readyState !== 'READY') throw new Error(`Pinned Preview is not READY: ${readyState || 'unknown'}.`);
+              if (target === 'production') throw new Error('Pinned deployment unexpectedly targets Production.');
+              if (projectName !== expectedProjectName) throw new Error('Pinned deployment project mismatch.');
+              if (deploymentUrl !== expectedDeployment) throw new Error('Pinned deployment URL mismatch.');
+              if (branch !== expectedBranch) throw new Error('Pinned deployment branch mismatch.');
+              if (sha !== expectedSourceSha) throw new Error('Pinned deployment commit mismatch.');
+
+              const envPayload = await fetchJson(
+                `https://api.vercel.com/v10/projects/${project.id}/env?teamId=${encodeURIComponent(teamId)}&decrypt=false`,
+                vercelToken,
+                'Vercel environment metadata lookup'
+              );
+              const envs = Array.isArray(envPayload)
+                ? envPayload
+                : Array.isArray(envPayload?.envs)
+                  ? envPayload.envs
+                  : [];
+
+              const audit = auditEnvironmentMetadata(envs);
+              const markdown = reportMarkdown(audit);
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown.replace(marker, '').trimStart());
+              await publishComment(markdown);
+
+              for (const finding of audit.findings) {
+                console.log(`::warning title=Preview metadata audit::${finding}`);
+              }
+              console.log(`Audit completed. Overall: ${audit.findings.length ? 'NEEDS_ATTENTION' : 'PASS'}.`);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Unknown audit failure.';
+              const markdown = reportMarkdown({ failure: message });
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown.replace(marker, '').trimStart());
+              try {
+                await publishComment(markdown);
+              } catch (commentError) {
+                const commentMessage = commentError instanceof Error ? commentError.message : 'Unknown PR comment failure.';
+                console.error(`PR comment publication also failed: ${commentMessage}`);
+              }
+              throw error;
+            }
+          }
+
+          main().catch((error) => {
+            console.error(error instanceof Error ? error.message : 'Unknown audit failure.');
+            process.exit(1);
+          });
+          NODE
