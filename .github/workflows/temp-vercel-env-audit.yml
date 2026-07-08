@@ -2,12 +2,17 @@
 # Reads Vercel Project env metadata via the Vercel API and reports only:
 #   - key name, target(s), gitBranch, value classification (prefix only), count
 # Never echoes full secret values. Price IDs are not secrets and are shown in full.
-# workflow_dispatch only — never runs on push/PR events.
+# Runs on push to this branch (path-scoped to this file) and on workflow_dispatch.
 
 name: TEMP - Vercel Env Audit
 
 on:
-  workflow_dispatch: {}
+  push:
+    branches:
+      - claude/temp-vercel-env-audit
+    paths:
+      - ".github/workflows/temp-vercel-env-audit.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
