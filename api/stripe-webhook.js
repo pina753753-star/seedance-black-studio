@@ -272,10 +272,55 @@ async function handleInvoicePaid(db, stripe, invoice) {
   });
 }
 
+// Subscription statuses that mean the subscription is no longer entitling the
+// user to paid features (as opposed to cancel_at_period_end=true, which stays
+// active until the period actually ends). profiles.plan is a display hint only
+// (real entitlement checks use credit_balances.subscription_expires_at), but we
+// still clear it here so a canceled/ended subscription doesn't leave a stale
+// paid plan name on profiles.
+const SUBSCRIPTION_ENDED_STATUSES = ['canceled', 'unpaid', 'incomplete_expired'];
+
+// Statuses that still entitle the user while this particular subscription
+// object is concerned (mirrors the Cron RPC's own 'active'/'past_due' notion
+// of "still valid", plus 'trialing').
+const SUBSCRIPTION_ACTIVE_STATUSES = ['active', 'trialing', 'past_due'];
+
+async function clearProfilePlanIfEnded(db, sub) {
+  const userId = sub.metadata?.user_id || '';
+  if (!userId) return;
+
+  // The subscription that just ended may not be the user's only one — do not
+  // blindly downgrade to free if another subscription for this user is still
+  // active (e.g. an out-of-order webhook for an already-replaced plan).
+  const { data: others, error: lookupErr } = await db
+    .from('user_subscriptions')
+    .select('plan,status,current_period_end')
+    .eq('user_id', userId)
+    .neq('stripe_subscription_id', sub.id)
+    .in('status', SUBSCRIPTION_ACTIVE_STATUSES)
+    .order('current_period_end', { ascending: false, nullsFirst: false });
+
+  if (lookupErr) {
+    console.error('[stripe-webhook] active-subscription lookup failed:', lookupErr.message, 'userId:', userId);
+    return; // Don't touch profiles.plan if we couldn't verify — safe side is to leave it as-is.
+  }
+
+  const stillActive = (others || []).find(
+    (row) => !row.current_period_end || new Date(row.current_period_end) > new Date()
+  );
+
+  const nextPlan = stillActive ? stillActive.plan : 'free';
+  const { error } = await db.from('profiles').update({ plan: nextPlan }).eq('id', userId);
+  if (error) console.error('[stripe-webhook] profiles.plan reset failed:', error.message, 'userId:', userId);
+}
+
 async function handleSubscriptionUpdated(db, sub) {
   // Keep user_subscriptions in sync with Stripe
   const meta = sub.metadata || {};
   await upsertSubscription(db, sub, meta);
+  if (SUBSCRIPTION_ENDED_STATUSES.includes(sub.status)) {
+    await clearProfilePlanIfEnded(db, sub);
+  }
   return { ok: true };
 }
 
@@ -285,6 +330,7 @@ async function handleSubscriptionDeleted(db, sub) {
     .update({ status: sub.status || 'canceled', updated_at: new Date().toISOString() })
     .eq('stripe_subscription_id', sub.id);
   if (error) console.error('[stripe-webhook] subscription delete sync failed:', error.message);
+  await clearProfilePlanIfEnded(db, sub);
   return { ok: true };
 }
 
