@@ -1,0 +1,120 @@
+# TEMP workflow — for investigation only, delete after use.
+# Reads Vercel Project env metadata via the Vercel API and reports only:
+#   - key name, target(s), gitBranch, value classification (prefix only), count
+# Never echoes full secret values. Price IDs are not secrets and are shown in full.
+# workflow_dispatch only — never runs on push/PR events.
+
+name: TEMP - Vercel Env Audit
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: temp-vercel-env-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.repository == 'pina753753-star/seedance-black-studio'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+      VERCEL_PROJECT: flowvid-studio
+
+    steps:
+      - name: Validate VERCEL_TOKEN is present (no value printed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "${VERCEL_TOKEN:-}" || { echo "Blocked: VERCEL_TOKEN unavailable."; exit 1; }
+          echo "VERCEL_TOKEN present (value not shown)."
+
+      - name: Resolve project id
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          TEAM_QS=""
+          if [ -n "${VERCEL_TEAM_ID:-}" ]; then TEAM_QS="?teamId=${VERCEL_TEAM_ID}"; fi
+          resp="$(curl -sS -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            "https://api.vercel.com/v10/projects/${VERCEL_PROJECT}${TEAM_QS}")"
+          id="$(printf '%s' "$resp" | jq -r '.id // empty')"
+          if [ -z "$id" ]; then
+            echo "Blocked: could not resolve project id from Vercel API response."
+            echo "$resp" | jq -r '.error.message // "unknown error"'
+            exit 1
+          fi
+          echo "PROJECT_ID=$id" >> "$GITHUB_ENV"
+          echo "Resolved project id (value not printed)."
+
+      - name: Fetch env list and classify (no secret values printed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          TEAM_QS=""
+          if [ -n "${VERCEL_TEAM_ID:-}" ]; then TEAM_QS="&teamId=${VERCEL_TEAM_ID}"; fi
+          resp="$(curl -sS -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            "https://api.vercel.com/v9/projects/${PROJECT_ID}/env?decrypt=true${TEAM_QS}")"
+
+          echo "$resp" > /tmp/vercel_env_raw.json
+
+          watch_keys='["STRIPE_SECRET_KEY","STRIPE_PUBLISHABLE_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PRICE_STANDARD_MONTHLY","STRIPE_PRICE_STANDARD_YEARLY","STRIPE_PRICE_PREMIUM_MONTHLY","STRIPE_PRICE_PREMIUM_YEARLY","STRIPE_PRICE_ULTIMATE_MONTHLY","STRIPE_PRICE_ULTIMATE_YEARLY","STRIPE_PRICE_TEAM_MONTHLY","SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","SUPABASE_ANON_KEY","SUPABASE_PUBLISHABLE_KEY","NEXT_PUBLIC_SUPABASE_URL","NEXT_PUBLIC_SUPABASE_ANON_KEY"]'
+
+          echo "key | count | target | gitBranch | prefix/value | productionCandidate | note"
+          echo "--- | --- | --- | --- | --- | --- | ---"
+
+          jq -r --argjson keys "$watch_keys" '
+            .envs // [] | map(select(.key as $k | $keys | index($k) != null)) | .[] |
+            [
+              .key,
+              (.target // [] | join("+")),
+              (.gitBranch // "none"),
+              .value,
+              (.type // "unknown")
+            ] | @tsv
+          ' /tmp/vercel_env_raw.json | while IFS=$'\t' read -r key target gitBranch value type; do
+            classify() {
+              local k="$1" v="$2"
+              case "$k" in
+                STRIPE_SECRET_KEY)
+                  case "$v" in sk_live_*) echo "sk_live_";; sk_test_*) echo "sk_test_";; "") echo "missing";; *) echo "other";; esac ;;
+                STRIPE_PUBLISHABLE_KEY)
+                  case "$v" in pk_live_*) echo "pk_live_";; pk_test_*) echo "pk_test_";; "") echo "missing";; *) echo "other";; esac ;;
+                STRIPE_WEBHOOK_SECRET)
+                  case "$v" in whsec_*) echo "whsec_";; "") echo "missing";; *) echo "other";; esac ;;
+                SUPABASE_PUBLISHABLE_KEY)
+                  case "$v" in sb_publishable_*) echo "sb_publishable_";; sk_live_*) echo "sk_live_";; sk_test_*) echo "sk_test_";; "") echo "missing";; *) echo "other";; esac ;;
+                SUPABASE_SERVICE_ROLE_KEY)
+                  case "$v" in eyJ*) echo "eyJ";; "") echo "missing";; *) echo "other";; esac ;;
+                SUPABASE_ANON_KEY|NEXT_PUBLIC_SUPABASE_ANON_KEY)
+                  case "$v" in eyJ*) echo "eyJ";; sb_publishable_*) echo "sb_publishable_";; "") echo "missing";; *) echo "other";; esac ;;
+                STRIPE_PRICE_*)
+                  echo "$v" ;;
+                SUPABASE_URL|NEXT_PUBLIC_SUPABASE_URL)
+                  echo "$v" ;;
+                *)
+                  echo "redacted" ;;
+              esac
+            }
+            prefix="$(classify "$key" "$value")"
+            prodCandidate="no"
+            case "$target" in *production*) prodCandidate="yes";; esac
+            note="type=$type"
+            echo "$key | 1 | $target | $gitBranch | $prefix | $prodCandidate | $note"
+          done
+
+          echo ""
+          echo "=== Duplicate key summary (count per key across all targets/branches) ==="
+          jq -r --argjson keys "$watch_keys" '
+            .envs // [] | map(select(.key as $k | $keys | index($k) != null)) |
+            group_by(.key) | .[] | "\(.[0].key) | \(length)"
+          ' /tmp/vercel_env_raw.json
+
+          rm -f /tmp/vercel_env_raw.json
