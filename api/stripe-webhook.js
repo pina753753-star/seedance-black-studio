@@ -280,10 +280,37 @@ async function handleInvoicePaid(db, stripe, invoice) {
 // paid plan name on profiles.
 const SUBSCRIPTION_ENDED_STATUSES = ['canceled', 'unpaid', 'incomplete_expired'];
 
+// Statuses that still entitle the user while this particular subscription
+// object is concerned (mirrors the Cron RPC's own 'active'/'past_due' notion
+// of "still valid", plus 'trialing').
+const SUBSCRIPTION_ACTIVE_STATUSES = ['active', 'trialing', 'past_due'];
+
 async function clearProfilePlanIfEnded(db, sub) {
   const userId = sub.metadata?.user_id || '';
   if (!userId) return;
-  const { error } = await db.from('profiles').update({ plan: 'free' }).eq('id', userId);
+
+  // The subscription that just ended may not be the user's only one — do not
+  // blindly downgrade to free if another subscription for this user is still
+  // active (e.g. an out-of-order webhook for an already-replaced plan).
+  const { data: others, error: lookupErr } = await db
+    .from('user_subscriptions')
+    .select('plan,status,current_period_end')
+    .eq('user_id', userId)
+    .neq('stripe_subscription_id', sub.id)
+    .in('status', SUBSCRIPTION_ACTIVE_STATUSES)
+    .order('current_period_end', { ascending: false, nullsFirst: false });
+
+  if (lookupErr) {
+    console.error('[stripe-webhook] active-subscription lookup failed:', lookupErr.message, 'userId:', userId);
+    return; // Don't touch profiles.plan if we couldn't verify — safe side is to leave it as-is.
+  }
+
+  const stillActive = (others || []).find(
+    (row) => !row.current_period_end || new Date(row.current_period_end) > new Date()
+  );
+
+  const nextPlan = stillActive ? stillActive.plan : 'free';
+  const { error } = await db.from('profiles').update({ plan: nextPlan }).eq('id', userId);
   if (error) console.error('[stripe-webhook] profiles.plan reset failed:', error.message, 'userId:', userId);
 }
 

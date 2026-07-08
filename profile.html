@@ -38,7 +38,7 @@ const cfg=window.FLOWVID_AUTH||{};const authReady=Boolean(cfg.supabaseUrl&&cfg.s
 // Mirrors the server-owned active-subscription check in api/stripe-checkout.js
 // (getActiveSubscription): plan alone is a display hint, not an entitlement —
 // it only counts as active while subscription_expires_at is still in the future.
-const PAID_PLANS=['standard','premium','ultimate','team'];
+const PAID_PLANS=['standard','premium','ultimate','scale','team'];
 function effectivePlan(plan,expiresAt){if(!PAID_PLANS.includes(plan))return'free';if(!expiresAt||new Date(expiresAt)<=new Date())return'free';return plan;}
 function setCredits(balance){const free=Number(balance?.free_credits||0),sub=Number(balance?.subscription_credits||0),paid=Number(balance?.purchased_credits||0),total=free+sub+paid;$('totalCredit').textContent=total;$('paidCredit').textContent=paid;$('creditAmount').textContent=total;}
 function showGuest(){$('avatar').textContent='G';$('displayName').textContent='ゲスト';$('displayEmail').textContent='ログインしていません';$('statusBadge').textContent='Guest mode';setCredits({});$('planName').textContent='フリープラン';$('actionArea').innerHTML='<a class=primary href=./login.html>ログイン</a><a href=./login.html>アカウント作成</a>';}
