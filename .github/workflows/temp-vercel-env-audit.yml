@@ -123,3 +123,4 @@ jobs:
           ' /tmp/vercel_env_raw.json
 
           rm -f /tmp/vercel_env_raw.json
+# rerun after VERCEL_TOKEN update
