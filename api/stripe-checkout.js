@@ -132,14 +132,29 @@ function requestOrigin(req) {
   return `https://${host}`;
 }
 
-// Build Stripe Embedded Checkout session params common to all modes.
-function embeddedBase(user, req) {
+// Build Stripe Checkout session params common to all modes.
+// Embedded (default): rendered inside the pricing.html modal via client_secret.
+// Hosted (ui === 'hosted', requested by mobile clients): a top-level redirect
+// to Stripe's own page, because the embedded iframe squeezed into the modal is
+// unusable on small screens. Both variants go through requestOrigin(), so the
+// user always returns to the same allowed origin (open-redirect protection).
+function sessionBase(user, req, ui) {
   const origin = requestOrigin(req);
-  return {
-    ui_mode: 'embedded',
-    return_url: `${origin}/profile.html?checkout=complete&session_id={CHECKOUT_SESSION_ID}`,
+  const common = {
     customer_email: user.email || undefined,
     client_reference_id: user.id
+  };
+  if (ui === 'hosted') {
+    return {
+      ...common,
+      success_url: `${origin}/profile.html?checkout=complete&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/pricing.html`
+    };
+  }
+  return {
+    ...common,
+    ui_mode: 'embedded',
+    return_url: `${origin}/profile.html?checkout=complete&session_id={CHECKOUT_SESSION_ID}`
   };
 }
 
@@ -160,6 +175,7 @@ module.exports = async function handler(req, res) {
   const id       = String(body.id || body.plan || body.pack || '').toLowerCase();
   const interval = String(body.billing_interval || body.billing || 'monthly').toLowerCase();
   const isYearly = interval === 'yearly' || interval === 'year';
+  const ui       = String(body.ui || '').toLowerCase() === 'hosted' ? 'hosted' : 'embedded';
 
   const stripe = new Stripe(secretKey);
 
@@ -187,7 +203,7 @@ module.exports = async function handler(req, res) {
         };
 
         session = await stripe.checkout.sessions.create({
-          ...embeddedBase(user, req),
+          ...sessionBase(user, req, ui),
           mode: 'subscription',
           line_items: [lineItemForAnnual(plan)],
           metadata,
@@ -211,7 +227,7 @@ module.exports = async function handler(req, res) {
         };
 
         session = await stripe.checkout.sessions.create({
-          ...embeddedBase(user, req),
+          ...sessionBase(user, req, ui),
           mode: 'subscription',
           line_items: [lineItemForMonthly(plan)],
           metadata,
@@ -245,7 +261,7 @@ module.exports = async function handler(req, res) {
       };
 
       session = await stripe.checkout.sessions.create({
-        ...embeddedBase(user, req),
+        ...sessionBase(user, req, ui),
         mode: 'payment',
         line_items: [lineItemForPack(pack)],
         metadata,
@@ -254,6 +270,20 @@ module.exports = async function handler(req, res) {
 
     } else {
       return res.status(400).json({ ok: false, error: 'kind must be subscription or credits' });
+    }
+
+    // Hosted checkout: hand back Stripe's own page URL for a top-level redirect.
+    if (ui === 'hosted') {
+      if (!session.url) {
+        console.error('[stripe-checkout] hosted session has no url:', session.id);
+        return res.status(500).json({ ok: false, error: '決済ページを開けませんでした。しばらくしてからお試しください。' });
+      }
+      return res.status(200).json({
+        ok:        true,
+        url:       session.url,
+        sessionId: session.id,
+        uiMode:    'hosted'
+      });
     }
 
     // Return client_secret for Embedded Checkout (never return the secret key)
