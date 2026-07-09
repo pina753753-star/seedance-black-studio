@@ -6,509 +6,67 @@
 <title>FlowVid AI Company | 運営モック</title>
 <meta name="theme-color" content="#050506">
 <style>
-:root{
-  --bg:#050506;
-  --panel:rgba(255,255,255,.065);
-  --panel2:rgba(255,255,255,.035);
-  --line:rgba(255,255,255,.13);
-  --muted:rgba(255,255,255,.62);
-  --soft:rgba(255,255,255,.78);
-  --white:#fff;
-  --pink:#fb7185;
-  --gold:#d7b86a;
-  --violet:#7c3aed;
-  --cyan:#6ee7f9;
-  --green:#86efac;
-  --red:#f43f5e;
-  --amber:#f59e0b;
-}
-*{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:var(--bg);color:var(--white);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-x:hidden}
-body:before{
-  content:"";
-  position:fixed;
-  inset:0;
-  pointer-events:none;
-  background:
-    radial-gradient(circle at 16% 0%,rgba(251,113,133,.20),transparent 32%),
-    radial-gradient(circle at 88% 8%,rgba(124,58,237,.24),transparent 36%),
-    radial-gradient(circle at 50% 100%,rgba(110,231,249,.08),transparent 38%),
-    linear-gradient(180deg,#050506,#090711 58%,#030304);
-}
-a{color:inherit}
-.top{
-  position:sticky;top:0;z-index:20;
-  display:flex;align-items:center;justify-content:space-between;gap:10px;
-  padding:12px 14px;
-  background:rgba(5,5,6,.82);
-  backdrop-filter:blur(16px);
-  border-bottom:1px solid rgba(255,255,255,.08);
-}
-.brand{display:flex;align-items:center;gap:10px;text-decoration:none;min-width:0}
-.logo{
-  width:42px;height:42px;min-width:42px;border-radius:16px;
-  background:linear-gradient(135deg,var(--cyan),var(--violet));
-  display:grid;place-items:center;font-weight:950;color:#050506;
-  box-shadow:0 0 44px rgba(124,58,237,.34);
-}
-.brand small{display:block;color:rgba(255,255,255,.42);letter-spacing:.22em;font-size:8px}
-.brand b{display:block;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.topLink{
-  border:1px solid var(--line);
-  background:rgba(255,255,255,.06);
-  color:#fff;
-  border-radius:999px;
-  padding:10px 12px;
-  font-size:12px;
-  font-weight:900;
-  text-decoration:none;
-  white-space:nowrap;
-}
-.wrap{position:relative;max-width:1120px;margin:0 auto;padding:18px 12px 44px}
-.hero{display:grid;gap:14px;margin:10px 0 16px}
-.kicker{margin:0;color:var(--pink);font-size:12px;letter-spacing:.18em;font-weight:900}
-h1{
-  margin:0;
-  font-size:42px;
-  line-height:1.05;
-  letter-spacing:-.07em;
-  background:linear-gradient(135deg,#fff,#f5b8c2 48%,#9be7ff);
-  -webkit-background-clip:text;
-  color:transparent;
-}
-.lead{margin:0;color:var(--muted);line-height:1.75;font-size:14px}
-.mockNotice{
-  border:1px solid rgba(215,184,106,.30);
-  background:linear-gradient(180deg,rgba(215,184,106,.12),rgba(215,184,106,.045));
-  border-radius:20px;
-  padding:12px 13px;
-  color:#fff7d6;
-  font-size:13px;
-  line-height:1.65;
-}
-.mockNotice b{display:block;margin-bottom:2px;color:#fff}
-.grid{display:grid;gap:12px}
-.card{
-  border:1px solid var(--line);
-  background:linear-gradient(180deg,var(--panel),var(--panel2));
-  border-radius:24px;
-  padding:16px;
-  overflow:hidden;
-  box-shadow:0 24px 80px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.07);
-}
-.card h2{font-size:20px;margin:0 0 10px;letter-spacing:-.03em}
-.card p{margin:0;color:var(--muted);font-size:13px;line-height:1.65}
-.companyMap{
-  position:relative;
-  min-height:390px;
-  border-radius:28px;
-  padding:16px;
-  overflow:hidden;
-  background:
-    linear-gradient(135deg,rgba(255,255,255,.09),rgba(255,255,255,.025)),
-    repeating-linear-gradient(90deg,rgba(255,255,255,.045) 0 1px,transparent 1px 44px),
-    repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 44px);
-  border:1px solid rgba(255,255,255,.14);
-}
-.companyMap:before{
-  content:"";
-  position:absolute;
-  inset:18px;
-  border-radius:24px;
-  border:1px dashed rgba(255,255,255,.13);
-  pointer-events:none;
-}
-.roomGrid{
-  position:relative;
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:12px;
-  height:100%;
-}
-.room{
-  min-height:120px;
-  border:1px solid rgba(255,255,255,.14);
-  border-radius:22px;
-  background:rgba(5,5,6,.54);
-  padding:13px;
-  display:flex;
-  flex-direction:column;
-  justify-content:space-between;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
-}
-.room strong{font-size:15px}
-.room small{display:block;color:rgba(255,255,255,.50);font-size:11px;margin-top:3px;line-height:1.45}
-.room .roomCode{
-  display:inline-flex;
-  width:max-content;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,.12);
-  background:rgba(255,255,255,.06);
-  padding:4px 8px;
-  color:rgba(255,255,255,.74);
-  font-size:10px;
-  font-weight:950;
-  letter-spacing:.12em;
-}
-.room.gen{border-color:rgba(110,231,249,.35);box-shadow:0 0 34px rgba(110,231,249,.08),inset 0 1px 0 rgba(255,255,255,.08)}
-.room.edit{border-color:rgba(251,113,133,.35);box-shadow:0 0 34px rgba(251,113,133,.08),inset 0 1px 0 rgba(255,255,255,.08)}
-.room.store{border-color:rgba(134,239,172,.32)}
-.room.money{border-color:rgba(215,184,106,.34)}
-.room.watch{border-color:rgba(124,58,237,.40)}
-.room.qa{border-color:rgba(245,158,11,.38)}
-.botRow{display:flex;gap:5px;margin-top:12px}
-.bot{
-  width:22px;height:22px;border-radius:9px;
-  display:grid;place-items:center;
-  background:linear-gradient(135deg,rgba(255,255,255,.90),rgba(255,255,255,.30));
-  color:#050506;
-  font-size:10px;
-  font-weight:950;
-}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.stat{
-  border:1px solid rgba(255,255,255,.12);
-  border-radius:18px;
-  background:rgba(255,255,255,.045);
-  padding:13px;
-}
-.stat b{display:block;font-size:29px;letter-spacing:-.05em}
-.stat span{display:block;color:var(--muted);font-size:12px;line-height:1.45}
-.departments{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.dept{position:relative}
-.dept:before{
-  content:"";
-  position:absolute;inset:0 0 auto 0;height:3px;
-  background:linear-gradient(90deg,var(--cyan),var(--violet),var(--pink));
-  opacity:.82;
-}
-.deptHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:12px}
-.deptHead b{font-size:17px}
-.tag{
-  display:inline-flex;
-  border:1px solid rgba(255,255,255,.13);
-  background:rgba(255,255,255,.06);
-  border-radius:999px;
-  padding:5px 8px;
-  color:rgba(255,255,255,.72);
-  font-size:10px;
-  font-weight:900;
-  white-space:nowrap;
-}
-.tag.mock{border-color:rgba(215,184,106,.30);background:rgba(215,184,106,.10);color:#fde68a}
-.rows{display:grid;gap:8px}
-.row{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  align-items:center;
-  border:1px solid rgba(255,255,255,.10);
-  background:rgba(255,255,255,.035);
-  border-radius:14px;
-  padding:10px 11px;
-  color:rgba(255,255,255,.78);
-  font-size:13px;
-}
-.row strong{font-size:15px;color:#fff}
-.ok strong{color:#dcfce7}.warn strong{color:#fde68a}.bad strong{color:#fecdd3}
-.split{
-  display:grid;
-  grid-template-columns:1.15fr .85fr;
-  gap:12px;
-}
-.queue{display:grid;gap:10px}
-.ticket{
-  border:1px solid rgba(255,255,255,.12);
-  background:rgba(255,255,255,.04);
-  border-radius:18px;
-  padding:12px;
-}
-.ticketTop{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-.ticketTop b{font-size:14px}
-.ticket p{font-size:12px;margin:7px 0 0;color:rgba(255,255,255,.62)}
-.level{
-  display:inline-flex;
-  border-radius:999px;
-  padding:4px 8px;
-  font-size:10px;
-  font-weight:950;
-  white-space:nowrap;
-  border:1px solid rgba(255,255,255,.12);
-}
-.level.high{background:rgba(251,113,133,.12);border-color:rgba(251,113,133,.34);color:#fecdd3}
-.level.mid{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.34);color:#fde68a}
-.level.low{background:rgba(134,239,172,.10);border-color:rgba(134,239,172,.30);color:#dcfce7}
-.roster{display:grid;gap:9px}
-.member{
-  display:grid;
-  grid-template-columns:40px 1fr;
-  gap:10px;
-  align-items:center;
-  border:1px solid rgba(255,255,255,.10);
-  background:rgba(255,255,255,.035);
-  border-radius:16px;
-  padding:10px;
-}
-.avatar{
-  width:40px;height:40px;border-radius:15px;
-  display:grid;place-items:center;
-  color:#050506;
-  font-weight:950;
-  background:linear-gradient(135deg,#fff,var(--gold),var(--violet));
-}
-.member b{display:block;font-size:13px}
-.member span{display:block;color:var(--muted);font-size:11px;line-height:1.45}
-.flow{
-  display:grid;
-  grid-template-columns:repeat(5,minmax(0,1fr));
-  gap:8px;
-  margin-top:10px;
-}
-.step{
-  min-height:72px;
-  border:1px solid rgba(255,255,255,.11);
-  background:rgba(255,255,255,.035);
-  border-radius:16px;
-  padding:10px;
-}
-.step b{font-size:12px}
-.step span{display:block;color:var(--muted);font-size:10px;line-height:1.45;margin-top:5px}
-.safeList{display:grid;gap:8px;margin-top:10px}
-.safe{
-  border:1px solid rgba(134,239,172,.24);
-  background:rgba(134,239,172,.07);
-  color:#dcfce7;
-  border-radius:14px;
-  padding:9px 10px;
-  font-size:12px;
-  line-height:1.45;
-}
-.nextBox{
-  border:1px dashed rgba(215,184,106,.35);
-  background:rgba(215,184,106,.07);
-  border-radius:18px;
-  padding:13px;
-  color:#fff7d6;
-  font-size:13px;
-  line-height:1.65;
-}
-.footerNote{color:rgba(255,255,255,.38);font-size:12px;line-height:1.65;text-align:center;margin:18px 0 0}
-@media(min-width:820px){
-  .hero{grid-template-columns:1fr 360px;align-items:end}
-  .wide{grid-column:1/-1}
-}
-@media(max-width:860px){
-  .departments{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .split{grid-template-columns:1fr}
-  .roomGrid{grid-template-columns:repeat(2,minmax(0,1fr)}
-  .flow{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
-@media(max-width:560px){
-  .top{padding:10px}
-  .brand b{font-size:17px}
-  .topLink{padding:9px 10px;font-size:11px}
-  .wrap{padding-left:10px;padding-right:10px}
-  h1{font-size:34px}
-  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .departments{grid-template-columns:1fr}
-  .roomGrid{grid-template-columns:1fr}
-  .companyMap{min-height:auto;padding:12px;border-radius:24px}
-  .room{min-height:106px}
-  .flow{grid-template-columns:1fr}
-  .card{border-radius:22px;padding:14px}
-}
+:root{--bg:#050506;--line:rgba(255,255,255,.14);--muted:rgba(255,255,255,.62);--panel:rgba(255,255,255,.06);--panel2:rgba(255,255,255,.025);--pink:#fb7185;--gold:#d7b86a;--violet:#7c3aed;--cyan:#6ee7f9;--ok:#86efac;--warn:#fde68a;--bad:#fecdd3}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-x:hidden}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 18% 0%,rgba(251,113,133,.18),transparent 34%),radial-gradient(circle at 88% 8%,rgba(124,58,237,.22),transparent 36%),radial-gradient(circle at 48% 100%,rgba(110,231,249,.08),transparent 38%),linear-gradient(180deg,#050506,#090711 60%,#030304)}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;background:rgba(5,5,6,.82);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.08)}.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none;min-width:0}.logo{width:42px;height:42px;min-width:42px;border-radius:16px;background:linear-gradient(135deg,var(--cyan),var(--violet));display:grid;place-items:center;color:#050506;font-weight:950}.brand small{display:block;color:rgba(255,255,255,.42);letter-spacing:.22em;font-size:8px}.brand b{display:block;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.topLink{border:1px solid var(--line);background:rgba(255,255,255,.06);color:#fff;border-radius:999px;padding:10px 12px;font-size:12px;font-weight:900;text-decoration:none;white-space:nowrap}
+.wrap{position:relative;max-width:1120px;margin:0 auto;padding:18px 12px 44px}.hero{display:grid;gap:14px;margin:10px 0 16px}.kicker{margin:0;color:var(--pink);font-size:12px;letter-spacing:.18em;font-weight:900}h1{font-size:42px;line-height:1.05;letter-spacing:-.07em;margin:0;background:linear-gradient(135deg,#fff,#f5b8c2 50%,#9be7ff);-webkit-background-clip:text;color:transparent}.lead{margin:0;color:var(--muted);line-height:1.75;font-size:14px}.notice{border:1px solid rgba(215,184,106,.30);background:linear-gradient(180deg,rgba(215,184,106,.12),rgba(215,184,106,.045));border-radius:20px;padding:12px 13px;color:#fff7d6;font-size:13px;line-height:1.65}.notice b{display:block;margin-bottom:2px;color:#fff}
+.grid{display:grid;gap:12px}.card,.map,.next{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),var(--panel2));border-radius:24px;padding:16px;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.07)}.card h2,.map h2{font-size:20px;margin:0 0 12px;letter-spacing:-.03em}.card p{margin:0;color:var(--muted);font-size:13px;line-height:1.65}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{border:1px solid rgba(255,255,255,.12);border-radius:18px;background:rgba(255,255,255,.045);padding:13px}.stat b{display:block;font-size:29px;letter-spacing:-.05em}.stat span{display:block;color:var(--muted);font-size:12px;line-height:1.45}
+.map{background:linear-gradient(135deg,rgba(255,255,255,.09),rgba(255,255,255,.025)),repeating-linear-gradient(90deg,rgba(255,255,255,.045) 0 1px,transparent 1px 44px),repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 44px)}.rooms{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.room{min-height:122px;border:1px solid rgba(255,255,255,.14);border-radius:22px;background:rgba(5,5,6,.54);padding:13px;display:flex;flex-direction:column;justify-content:space-between}.room strong{font-size:15px}.room small{display:block;color:rgba(255,255,255,.52);font-size:11px;line-height:1.45;margin-top:4px}.code{display:inline-flex;width:max-content;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.06);border-radius:999px;padding:4px 8px;color:rgba(255,255,255,.74);font-size:10px;font-weight:950;letter-spacing:.12em}.gen{border-color:rgba(110,231,249,.35)}.edit{border-color:rgba(251,113,133,.40)}.store{border-color:rgba(134,239,172,.32)}.qa{border-color:rgba(245,158,11,.38)}.money{border-color:rgba(215,184,106,.34)}.watch{border-color:rgba(124,58,237,.40)}.bots{display:flex;gap:5px;margin-top:12px}.bot{width:22px;height:22px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,#fff,rgba(255,255,255,.32));color:#050506;font-size:10px;font-weight:950}
+.departments{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.dept{position:relative}.dept:before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:linear-gradient(90deg,var(--cyan),var(--violet),var(--pink));opacity:.82}.head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:12px}.head b{font-size:17px}.tag{border:1px solid rgba(215,184,106,.30);background:rgba(215,184,106,.10);color:#fde68a;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;white-space:nowrap}.rows{display:grid;gap:8px}.row{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.035);border-radius:14px;padding:10px 11px;color:rgba(255,255,255,.78);font-size:13px}.row strong{font-size:15px;color:#fff}.ok strong{color:#dcfce7}.warn strong{color:#fde68a}.bad strong{color:#fecdd3}
+.split{display:grid;grid-template-columns:1.15fr .85fr;gap:12px}.queue,.roster,.safeList{display:grid;gap:9px}.ticket,.member{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);border-radius:18px;padding:12px}.ticketTop{display:flex;justify-content:space-between;gap:10px}.ticketTop b{font-size:14px}.ticket p{font-size:12px;margin:7px 0 0;color:rgba(255,255,255,.62)}.level{border:1px solid rgba(251,113,133,.34);background:rgba(251,113,133,.12);color:#fecdd3;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:950;white-space:nowrap}.member{display:grid;grid-template-columns:40px 1fr;gap:10px;align-items:center}.avatar{width:40px;height:40px;border-radius:15px;display:grid;place-items:center;color:#050506;font-weight:950;background:linear-gradient(135deg,#fff,var(--gold),var(--violet))}.member b{display:block;font-size:13px}.member span{display:block;color:var(--muted);font-size:11px;line-height:1.45}
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.step{min-height:72px;border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.035);border-radius:16px;padding:10px}.step b{font-size:12px}.step span{display:block;color:var(--muted);font-size:10px;line-height:1.45;margin-top:5px}.safe{border:1px solid rgba(134,239,172,.24);background:rgba(134,239,172,.07);color:#dcfce7;border-radius:14px;padding:9px 10px;font-size:12px;line-height:1.45}.next{border-style:dashed;border-color:rgba(215,184,106,.35);background:rgba(215,184,106,.07);color:#fff7d6;font-size:13px;line-height:1.65}.foot{color:rgba(255,255,255,.38);font-size:12px;line-height:1.65;text-align:center;margin:18px 0 0}
+@media(min-width:820px){.hero{grid-template-columns:1fr 360px;align-items:end}.wide{grid-column:1/-1}}
+@media(max-width:860px){.departments{grid-template-columns:repeat(2,minmax(0,1fr))}.split{grid-template-columns:1fr}.rooms{grid-template-columns:repeat(2,minmax(0,1fr))}.flow{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.top{padding:10px}.brand b{font-size:17px}.topLink{padding:9px 10px;font-size:11px}.wrap{padding-left:10px;padding-right:10px}h1{font-size:34px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.departments,.rooms,.flow{grid-template-columns:1fr}.room{min-height:106px}.card,.map,.next{border-radius:22px;padding:14px}}
 </style>
 </head>
 <body>
 <header class="top">
   <a class="brand" href="./admin.html" aria-label="FlowVid Studio 管理画面へ">
-    <div class="logo">▶</div>
-    <div>
-      <small>AI VIDEO STUDIO</small>
-      <b>FlowVid Studio</b>
-    </div>
+    <div class="logo">▶</div><div><small>AI VIDEO STUDIO</small><b>FlowVid Studio</b></div>
   </a>
   <a class="topLink" href="./admin.html">管理画面へ</a>
 </header>
-
 <main class="wrap">
   <section class="hero">
-    <div>
-      <p class="kicker">FLOWVID AI COMPANY MOCK</p>
-      <h1>AIカンパニー運営室</h1>
-      <p class="lead">動画生成アプリの運営を、AIスタッフが部署ごとに見張るスマホ向けモック画面です。生成エラーと動画編集エラーは別部署で表示します。</p>
-    </div>
-    <div class="mockNotice">
-      <b>これはモックです</b>
-      DB、Supabase、OpenRouter、credits、Stripe、動画生成APIには接続していません。数字は表示確認用の仮データです。
-    </div>
+    <div><p class="kicker">FLOWVID AI COMPANY MOCK</p><h1>AIカンパニー運営室</h1><p class="lead">動画生成アプリの運営を、AIスタッフが部署ごとに見張るスマホ向けモック画面です。生成エラーと動画編集エラーは別部署で表示します。</p></div>
+    <div class="notice"><b>これはモックです</b>DB、Supabase、OpenRouter、credits、Stripe、動画生成APIには接続していません。数字は表示確認用の仮データです。</div>
   </section>
-
   <section class="grid">
-    <article class="card wide">
-      <h2>本日の運営サマリー</h2>
-      <div class="stats">
-        <div class="stat"><b>24</b><span>生成リクエスト</span></div>
-        <div class="stat"><b>18</b><span>正常完了</span></div>
-        <div class="stat"><b>3</b><span>生成エラー</span></div>
-        <div class="stat"><b>2</b><span>編集エラー</span></div>
-      </div>
-    </article>
-
-    <article class="companyMap wide" aria-label="AIカンパニーの部署マップ">
-      <div class="roomGrid">
-        <div class="room gen">
-          <div><span class="roomCode">GEN</span><strong>動画生成部</strong><small>Seedance、OpenRouter、pending、failedを監視</small></div>
-          <div class="botRow"><span class="bot">G1</span><span class="bot">G2</span></div>
-        </div>
-        <div class="room edit">
-          <div><span class="roomCode">EDIT</span><strong>動画編集部</strong><small>カット、結合、字幕、編集失敗を生成失敗と分離</small></div>
-          <div class="botRow"><span class="bot">E1</span><span class="bot">E2</span></div>
-        </div>
-        <div class="room store">
-          <div><span class="roomCode">STORE</span><strong>保存部</strong><small>Supabase Storage、404、URLなし、過去動画を確認</small></div>
-          <div class="botRow"><span class="bot">S1</span></div>
-        </div>
-        <div class="room qa">
-          <div><span class="roomCode">QA</span><strong>品質管理部</strong><small>再生確認、ウォーターマーク、壊れた動画を検出</small></div>
-          <div class="botRow"><span class="bot">Q1</span><span class="bot">Q2</span></div>
-        </div>
-        <div class="room money">
-          <div><span class="roomCode">BILL</span><strong>経理部</strong><small>credits消費、返金、残高不足、追加クレジット</small></div>
-          <div class="botRow"><span class="bot">C1</span></div>
-        </div>
-        <div class="room watch">
-          <div><span class="roomCode">WATCH</span><strong>監視部</strong><small>done:trueなのにURLなし、長時間pending、要確認キュー</small></div>
-          <div class="botRow"><span class="bot">W1</span><span class="bot">W2</span></div>
-        </div>
-      </div>
-    </article>
-
+    <article class="card wide"><h2>本日の運営サマリー</h2><div class="stats"><div class="stat"><b>24</b><span>生成リクエスト</span></div><div class="stat"><b>18</b><span>正常完了</span></div><div class="stat"><b>3</b><span>生成エラー</span></div><div class="stat"><b>2</b><span>編集エラー</span></div></div></article>
+    <article class="map wide"><h2>AIカンパニー部署マップ</h2><div class="rooms">
+      <div class="room gen"><div><span class="code">GEN</span><strong>動画生成部</strong><small>Seedance、OpenRouter、pending、failedを監視</small></div><div class="bots"><span class="bot">G1</span><span class="bot">G2</span></div></div>
+      <div class="room edit"><div><span class="code">EDIT</span><strong>動画編集部</strong><small>カット、結合、字幕、編集失敗を生成失敗と分離</small></div><div class="bots"><span class="bot">E1</span><span class="bot">E2</span></div></div>
+      <div class="room store"><div><span class="code">STORE</span><strong>保存部</strong><small>Supabase Storage、404、URLなし、過去動画を確認</small></div><div class="bots"><span class="bot">S1</span></div></div>
+      <div class="room qa"><div><span class="code">QA</span><strong>品質管理部</strong><small>再生確認、ウォーターマーク、壊れた動画を検出</small></div><div class="bots"><span class="bot">Q1</span><span class="bot">Q2</span></div></div>
+      <div class="room money"><div><span class="code">BILL</span><strong>経理部</strong><small>credits消費、返金、残高不足、追加クレジット</small></div><div class="bots"><span class="bot">C1</span></div></div>
+      <div class="room watch"><div><span class="code">WATCH</span><strong>監視部</strong><small>done:trueなのにURLなし、長時間pending、要確認キュー</small></div><div class="bots"><span class="bot">W1</span><span class="bot">W2</span></div></div>
+    </div></article>
     <section class="departments wide">
-      <article class="card dept">
-        <div class="deptHead"><b>動画生成部</b><span class="tag mock">MOCK</span></div>
-        <div class="rows">
-          <div class="row ok"><span>completed</span><strong>18</strong></div>
-          <div class="row warn"><span>pending / processing</span><strong>3</strong></div>
-          <div class="row bad"><span>生成エラー</span><strong>3</strong></div>
-          <div class="row"><span>OpenRouter status URL誤判定</span><strong>0</strong></div>
-        </div>
-      </article>
-
-      <article class="card dept">
-        <div class="deptHead"><b>動画編集部</b><span class="tag mock">MOCK</span></div>
-        <div class="rows">
-          <div class="row warn"><span>編集待ち</span><strong>4</strong></div>
-          <div class="row"><span>編集中</span><strong>1</strong></div>
-          <div class="row ok"><span>編集完了</span><strong>8</strong></div>
-          <div class="row bad"><span>編集エラー</span><strong>2</strong></div>
-        </div>
-      </article>
-
-      <article class="card dept">
-        <div class="deptHead"><b>保存部</b><span class="tag mock">MOCK</span></div>
-        <div class="rows">
-          <div class="row ok"><span>Supabase保存成功</span><strong>17</strong></div>
-          <div class="row bad"><span>404 URL</span><strong>1</strong></div>
-          <div class="row warn"><span>storage_urlなし</span><strong>1</strong></div>
-          <div class="row"><span>過去動画表示待ち</span><strong>2</strong></div>
-        </div>
-      </article>
-
-      <article class="card dept">
-        <div class="deptHead"><b>品質管理部</b><span class="tag mock">MOCK</span></div>
-        <div class="rows">
-          <div class="row ok"><span>再生確認OK</span><strong>16</strong></div>
-          <div class="row warn"><span>ウォーターマーク待ち</span><strong>2</strong></div>
-          <div class="row bad"><span>ウォーターマーク失敗</span><strong>1</strong></div>
-          <div class="row"><span>壊れた動画非表示</span><strong>ON</strong></div>
-        </div>
-      </article>
-
-      <article class="card dept">
-        <div class="deptHead"><b>経理部</b><span class="tag mock">MOCK</span></div>
-        <div class="rows">
-          <div class="row"><span>credits消費</span><strong>1,320</strong></div>
-          <div class="row ok"><span>返金</span><strong>110</strong></div>
-          <div class="row warn"><span>残高不足</span><strong>2</strong></div>
-          <div class="row"><span>追加クレジット案内</span><strong>表示</strong></div>
-        </div>
-      </article>
-
-      <article class="card dept">
-        <div class="deptHead"><b>監視部</b><span class="tag mock">MOCK</span></div>
-        <div class="rows">
-          <div class="row warn"><span>要確認ジョブ</span><strong>6</strong></div>
-          <div class="row bad"><span>done:true / URLなし</span><strong>1</strong></div>
-          <div class="row warn"><span>長時間pending</span><strong>2</strong></div>
-          <div class="row"><span>新規生成テスト</span><strong>禁止</strong></div>
-        </div>
-      </article>
+      <article class="card dept"><div class="head"><b>動画生成部</b><span class="tag">MOCK</span></div><div class="rows"><div class="row ok"><span>completed</span><strong>18</strong></div><div class="row warn"><span>pending / processing</span><strong>3</strong></div><div class="row bad"><span>生成エラー</span><strong>3</strong></div><div class="row"><span>OpenRouter status URL誤判定</span><strong>0</strong></div></div></article>
+      <article class="card dept"><div class="head"><b>動画編集部</b><span class="tag">MOCK</span></div><div class="rows"><div class="row warn"><span>編集待ち</span><strong>4</strong></div><div class="row"><span>編集中</span><strong>1</strong></div><div class="row ok"><span>編集完了</span><strong>8</strong></div><div class="row bad"><span>編集エラー</span><strong>2</strong></div></div></article>
+      <article class="card dept"><div class="head"><b>保存部</b><span class="tag">MOCK</span></div><div class="rows"><div class="row ok"><span>Supabase保存成功</span><strong>17</strong></div><div class="row bad"><span>404 URL</span><strong>1</strong></div><div class="row warn"><span>storage_urlなし</span><strong>1</strong></div><div class="row"><span>過去動画表示待ち</span><strong>2</strong></div></div></article>
+      <article class="card dept"><div class="head"><b>品質管理部</b><span class="tag">MOCK</span></div><div class="rows"><div class="row ok"><span>再生確認OK</span><strong>16</strong></div><div class="row warn"><span>ウォーターマーク待ち</span><strong>2</strong></div><div class="row bad"><span>ウォーターマーク失敗</span><strong>1</strong></div><div class="row"><span>壊れた動画非表示</span><strong>ON</strong></div></div></article>
+      <article class="card dept"><div class="head"><b>経理部</b><span class="tag">MOCK</span></div><div class="rows"><div class="row"><span>credits消費</span><strong>1,320</strong></div><div class="row ok"><span>返金</span><strong>110</strong></div><div class="row warn"><span>残高不足</span><strong>2</strong></div><div class="row"><span>追加クレジット案内</span><strong>表示</strong></div></div></article>
+      <article class="card dept"><div class="head"><b>監視部</b><span class="tag">MOCK</span></div><div class="rows"><div class="row warn"><span>要確認ジョブ</span><strong>6</strong></div><div class="row bad"><span>done:true / URLなし</span><strong>1</strong></div><div class="row warn"><span>長時間pending</span><strong>2</strong></div><div class="row"><span>新規生成テスト</span><strong>禁止</strong></div></div></article>
     </section>
-
-    <section class="split wide">
-      <article class="card">
-        <h2>要確認キュー</h2>
-        <div class="queue">
-          <div class="ticket">
-            <div class="ticketTop"><b>編集エラーが生成エラーに混ざらないか確認</b><span class="level high">HIGH</span></div>
-            <p>動画編集部の失敗は、動画生成部のfailedとは別カウントにする。</p>
-          </div>
-          <div class="ticket">
-            <div class="ticketTop"><b>Supabase保存URLの404検出</b><span class="level high">HIGH</span></div>
-            <p>保存部で404、URLなし、Storage未保存を分けて表示する。</p>
-          </div>
-          <div class="ticket">
-            <div class="ticketTop"><b>長時間pendingの監視</b><span class="level mid">MID</span></div>
-            <p>監視部でpending、processing、done:true矛盾を別々に見せる。</p>
-          </div>
-          <div class="ticket">
-            <div class="ticketTop"><b>credits異常の見える化</b><span class="level low">LOW</span></div>
-            <p>経理部で消費、返金、残高不足、追加クレジット案内をまとめる。</p>
-          </div>
-        </div>
-      </article>
-
-      <article class="card">
-        <h2>AIスタッフ</h2>
-        <div class="roster">
-          <div class="member"><div class="avatar">G</div><div><b>生成オペレーター</b><span>OpenRouter、Seedance、pollingを担当</span></div></div>
-          <div class="member"><div class="avatar">E</div><div><b>編集オペレーター</b><span>動画編集エラーを独立管理</span></div></div>
-          <div class="member"><div class="avatar">S</div><div><b>保存チェッカー</b><span>Supabase保存、URL、404を確認</span></div></div>
-          <div class="member"><div class="avatar">Q</div><div><b>品質チェッカー</b><span>再生、ウォーターマーク、壊れた動画を確認</span></div></div>
-          <div class="member"><div class="avatar">C</div><div><b>credits会計</b><span>消費、返金、残高不足を確認</span></div></div>
-        </div>
-      </article>
-    </section>
-
-    <article class="card wide">
-      <h2>将来の実データ連携ステップ</h2>
-      <div class="flow">
-        <div class="step"><b>1. モック確認</b><span>見た目、部署分け、スマホ表示を確認</span></div>
-        <div class="step"><b>2. 読み取りAPI</b><span>admin-ops-summaryを別PRで追加</span></div>
-        <div class="step"><b>3. 実データ接続</b><span>generation_tasks、credits、保存URLを集計</span></div>
-        <div class="step"><b>4. エラー分類</b><span>生成、編集、保存、品質、経理で分離</span></div>
-        <div class="step"><b>5. 自動通知</b><span>危険操作は承認制にする</span></div>
-      </div>
-    </article>
-
-    <article class="card wide">
-      <h2>安全ルール</h2>
-      <div class="safeList">
-        <div class="safe">このモックは外部APIを呼びません。</div>
-        <div class="safe">このモックはSupabase DBを読み書きしません。</div>
-        <div class="safe">このモックはOpenRouterに接続しません。</div>
-        <div class="safe">このモックはcreditsを消費しません。</div>
-        <div class="safe">このモックは新規動画生成を実行しません。</div>
-      </div>
-    </article>
-
-    <article class="nextBox wide">
-      次のPRで実データに紐付ける場合は、読み取り専用APIだけを追加し、動画生成・credits消費・本番DB更新・Supabase Storage変更は行わない。
-    </article>
+    <section class="split wide"><article class="card"><h2>要確認キュー</h2><div class="queue">
+      <div class="ticket"><div class="ticketTop"><b>編集エラーが生成エラーに混ざらないか確認</b><span class="level">HIGH</span></div><p>動画編集部の失敗は、動画生成部のfailedとは別カウントにする。</p></div>
+      <div class="ticket"><div class="ticketTop"><b>Supabase保存URLの404検出</b><span class="level">HIGH</span></div><p>保存部で404、URLなし、Storage未保存を分けて表示する。</p></div>
+      <div class="ticket"><div class="ticketTop"><b>長時間pendingの監視</b><span class="level">MID</span></div><p>監視部でpending、processing、done:true矛盾を別々に見せる。</p></div>
+    </div></article><article class="card"><h2>AIスタッフ</h2><div class="roster">
+      <div class="member"><div class="avatar">G</div><div><b>生成オペレーター</b><span>OpenRouter、Seedance、pollingを担当</span></div></div>
+      <div class="member"><div class="avatar">E</div><div><b>編集オペレーター</b><span>動画編集エラーを独立管理</span></div></div>
+      <div class="member"><div class="avatar">S</div><div><b>保存チェッカー</b><span>Supabase保存、URL、404を確認</span></div></div>
+      <div class="member"><div class="avatar">Q</div><div><b>品質チェッカー</b><span>再生、ウォーターマーク、壊れた動画を確認</span></div></div>
+      <div class="member"><div class="avatar">C</div><div><b>credits会計</b><span>消費、返金、残高不足を確認</span></div></div>
+    </div></article></section>
+    <article class="card wide"><h2>将来の実データ連携ステップ</h2><div class="flow"><div class="step"><b>1. モック確認</b><span>見た目、部署分け、スマホ表示を確認</span></div><div class="step"><b>2. 読み取りAPI</b><span>admin-ops-summaryを別PRで追加</span></div><div class="step"><b>3. 実データ接続</b><span>generation_tasks、credits、保存URLを集計</span></div><div class="step"><b>4. エラー分類</b><span>生成、編集、保存、品質、経理で分離</span></div><div class="step"><b>5. 自動通知</b><span>危険操作は承認制にする</span></div></div></article>
+    <article class="card wide"><h2>安全ルール</h2><div class="safeList"><div class="safe">このモックは外部APIを呼びません。</div><div class="safe">このモックはSupabase DBを読み書きしません。</div><div class="safe">このモックはOpenRouterに接続しません。</div><div class="safe">このモックはcreditsを消費しません。</div><div class="safe">このモックは新規動画生成を実行しません。</div></div></article>
+    <article class="next wide">次のPRで実データに紐付ける場合は、読み取り専用APIだけを追加し、動画生成・credits消費・本番DB更新・Supabase Storage変更は行わない。</article>
   </section>
-
-  <p class="footerNote">FlowVid AI Company mock. Static HTML only. Last updated for UI review.</p>
+  <p class="foot">FlowVid AI Company mock. Static HTML only. Last updated for UI review.</p>
 </main>
 </body>
 </html>
