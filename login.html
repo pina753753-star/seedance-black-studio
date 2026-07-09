@@ -30,10 +30,6 @@
           <div class="field"><label>メールアドレス</label><input id="email" type="email" placeholder="you@example.com" autocomplete="email" required></div>
           <div class="field"><label>パスワード</label><input id="password" type="password" placeholder="8文字以上" autocomplete="current-password" required></div>
           <button class="primary" id="submitBtn">ログインする</button>
-          <div class="or">または</div>
-          <button type="button" class="ghost" id="googleBtn">Googleで続ける（準備中）</button>
-          <button type="button" class="ghost" id="appleBtn" disabled>Appleで続ける（後で対応）</button>
-          <button type="button" class="ghost" disabled>電話番号で続ける（無料生成解放時）</button>
           <div class="message" id="message"></div>
         </form>
       </div>
@@ -50,7 +46,6 @@
     const email=document.getElementById('email');
     const password=document.getElementById('password');
     const message=document.getElementById('message');
-    const googleBtn=document.getElementById('googleBtn');
     const cfg=window.FLOWVID_AUTH||{};
     const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
     const authReady=Boolean(client);
@@ -67,10 +62,9 @@
     function setMode(next){mode=next;loginTab.classList.toggle('active',mode==='login');signupTab.classList.toggle('active',mode==='signup');submitBtn.textContent=mode==='login'?'ログインする':'アカウント作成';password.autocomplete=mode==='login'?'current-password':'new-password';}
     loginTab.onclick=()=>setMode('login');
     signupTab.onclick=()=>setMode('signup');
-    if(!authReady){setMessage('ログイン接続は未設定です。SupabaseのURLと公開可能キーを読み込めていません。数分待って再読み込みしてください。','error');submitBtn.disabled=true;googleBtn.disabled=true;}
+    if(!authReady){setMessage('ログイン接続は未設定です。SupabaseのURLと公開可能キーを読み込めていません。数分待って再読み込みしてください。','error');submitBtn.disabled=true;}
     if(client){client.auth.getSession().then(({data})=>{if(data.session) location.href='./profile.html';});}
     form.onsubmit=async(e)=>{e.preventDefault();if(!client)return;submitBtn.disabled=true;setMessage('処理中です…','ok');const mail=email.value.trim();const pass=password.value;let result;if(mode==='login'){result=await client.auth.signInWithPassword({email:mail,password:pass});}else{result=await client.auth.signUp({email:mail,password:pass,options:{emailRedirectTo:location.origin+'/profile.html'}});}submitBtn.disabled=false;if(result.error){setMessage(authMessage(result.error.message),'error');return;}if(mode==='signup'){setMessage('確認メールを送りました。メール内のリンクを開いてログインしてください。','ok');return;}location.href='./profile.html';};
-    googleBtn.onclick=()=>setMessage('GoogleログインはまだSupabase側で有効化していません。いまはメールアドレスでログイン / 新規登録してください。','error');
   </script>
 </body>
 </html>
