@@ -26,25 +26,47 @@ function isSupabaseStorageUrl(url) {
 }
 
 // Confirms a Supabase Storage public URL actually has a readable object behind it.
-// Mirrors the HEAD-first acceptance criteria used at write time by
-// api/seedance-status.js's verifyPublicObject() (content-type video/octet-stream,
-// minimum 1024 bytes), so a URL accepted here would also be accepted there.
-// Read-only: issues a HEAD request only, never writes to Storage.
+// Mirrors api/seedance-status.js's verifyPublicObject(): try HEAD first, and when
+// the HEAD response doesn't carry usable content-type/content-length (some Storage
+// responses omit them), fall back to a Range GET of the first 1024 bytes, reading
+// headers only. Read-only: never writes to Storage.
 const STORAGE_CHECK_TIMEOUT_MS = 4000;
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STORAGE_CHECK_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function verifyStorageObjectExists(url) {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), STORAGE_CHECK_TIMEOUT_MS);
-    let res;
-    try {
-      res = await fetch(url, { method: 'HEAD', signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
+    const headRes = await fetchWithTimeout(url, { method: 'HEAD' });
+    const headContentType = headRes.headers.get('content-type') || '';
+    const headContentLength = Number(headRes.headers.get('content-length') || 0);
+    if (headRes.ok && /video|octet-stream/i.test(headContentType) && headContentLength >= 1024) {
+      return true;
     }
-    if (!res.ok) return false;
-    const contentType = res.headers.get('content-type') || '';
-    const contentLength = Number(res.headers.get('content-length') || 0);
-    return /video|octet-stream/i.test(contentType) && contentLength >= 1024;
+
+    // HEAD insufficient — fall back to Range GET, headers only (no body reading)
+    const rangeRes = await fetchWithTimeout(url, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
+    const contentType = rangeRes.headers.get('content-type') || '';
+
+    // Discard body immediately without reading
+    await rangeRes.body?.cancel().catch(() => {});
+
+    if (!rangeRes.ok && rangeRes.status !== 206) return false;
+
+    const contentRange = rangeRes.headers.get('content-range') || '';
+    const totalMatch = contentRange.match(/\/(\d+)$/);
+    const totalBytes = totalMatch ? Number(totalMatch[1]) : Number(rangeRes.headers.get('content-length') || 0);
+
+    if (!totalBytes || totalBytes < 1024) return false;
+    if (!/video|octet-stream/i.test(contentType)) return false;
+
+    return true;
   } catch (_) {
     // Network error, timeout, or abort: unverifiable, so exclude the row (safe default).
     return false;
