@@ -31,10 +31,10 @@
 </main>
 <div class='drawer' id='drawer'><div class='shade' id='shade'></div><div class='menu'><div class='menuHead'><b>メニュー</b><button class='close' id='close'>×</button></div><a href='./index.html'>ホーム <span>›</span></a><a href='./generate.html'>生成 <span>›</span></a><a href='./login.html'>ログイン / 新規登録 <span>›</span></a><a href='./profile.html'>マイページ <span>›</span></a><a href='./pricing.html'>サブスクリプション <span>›</span></a><a href='./pricing.html#credit'>クレジット購入 <span>›</span></a><a href='./help.html'>ヘルプセンター <span>›</span></a><a class='logout' href='./logout.html'>ログアウト <span>›</span></a></div></div>
 <script src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'></script>
-<script src='./auth-config.js?v=3844d5ea2'></script>
+<script src='./auth-config.js?v=4a1f0c1'></script>
 <script>
 const d=document.getElementById('drawer');document.getElementById('menuBtn').onclick=()=>d.classList.add('open');document.getElementById('shade').onclick=()=>d.classList.remove('open');document.getElementById('close').onclick=()=>d.classList.remove('open');
-const cfg=window.FLOWVID_AUTH||{};const authReady=Boolean(cfg.supabaseUrl&&cfg.supabaseAnonKey);const client=authReady?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;const $=id=>document.getElementById(id);const jpPlan={free:'フリープラン',standard:'スタンダード',premium:'プレミアム',scale:'スケール',ultimate:'アルティメット',team:'チーム'};
+const cfg=window.FLOWVID_AUTH||{};const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;const authReady=Boolean(client);const $=id=>document.getElementById(id);const jpPlan={free:'フリープラン',standard:'スタンダード',premium:'プレミアム',scale:'スケール',ultimate:'アルティメット',team:'チーム'};
 // Mirrors the server-owned active-subscription check in api/stripe-checkout.js
 // (getActiveSubscription): plan alone is a display hint, not an entitlement —
 // it only counts as active while subscription_expires_at is still in the future.

@@ -40,7 +40,7 @@
     </section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./auth-config.js?v=3844d5ea2"></script>
+  <script src="./auth-config.js?v=4a1f0c1"></script>
   <script>
     let mode='login';
     const loginTab=document.getElementById('loginTab');
@@ -52,8 +52,8 @@
     const message=document.getElementById('message');
     const googleBtn=document.getElementById('googleBtn');
     const cfg=window.FLOWVID_AUTH||{};
-    const authReady=Boolean(cfg.supabaseUrl&&cfg.supabaseAnonKey);
-    const client=authReady?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
+    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
+    const authReady=Boolean(client);
     function setMessage(text,type='error'){message.textContent=text;message.className='message show '+type;}
     function authMessage(text){
       const raw=String(text||'');
