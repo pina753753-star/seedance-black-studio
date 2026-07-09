@@ -21,6 +21,36 @@ function isKnownBrokenRow(row) {
   return BROKEN_JOB_IDS.has(String(row?.job_id || row?.operation_name || row?.id || ''));
 }
 
+function isSupabaseStorageUrl(url) {
+  return /^https?:\/\//i.test(String(url || '')) && /\/storage\/v1\/object\/public\//i.test(String(url || ''));
+}
+
+// Confirms a Supabase Storage public URL actually has a readable object behind it.
+// Mirrors the HEAD-first acceptance criteria used at write time by
+// api/seedance-status.js's verifyPublicObject() (content-type video/octet-stream,
+// minimum 1024 bytes), so a URL accepted here would also be accepted there.
+// Read-only: issues a HEAD request only, never writes to Storage.
+const STORAGE_CHECK_TIMEOUT_MS = 4000;
+async function verifyStorageObjectExists(url) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), STORAGE_CHECK_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(url, { method: 'HEAD', signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) return false;
+    const contentType = res.headers.get('content-type') || '';
+    const contentLength = Number(res.headers.get('content-length') || 0);
+    return /video|octet-stream/i.test(contentType) && contentLength >= 1024;
+  } catch (_) {
+    // Network error, timeout, or abort: unverifiable, so exclude the row (safe default).
+    return false;
+  }
+}
+
 function resolveMode(row) {
   const raw = String(row?.mode || row?.generation_mode || row?.settings?.mode || '').trim();
   if (raw === 'image_to_video' || raw === '画像から動画' || raw === '画像から動画へ') return 'image_to_video';
@@ -36,10 +66,11 @@ function resolveMode(row) {
   return '';
 }
 
-function normalizeGeneratedRow(row) {
+async function normalizeGeneratedRow(row) {
   if (isKnownBrokenRow(row)) return null;
   const url = validVideoUrl(row.video_uri || row.video_url || row.url || '');
   if (!url) return null;
+  if (isSupabaseStorageUrl(url) && !(await verifyStorageObjectExists(url))) return null;
   return {
     id: row.id || row.job_id || row.operation_name || url,
     job_id: row.operation_name || row.job_id || '',
@@ -56,10 +87,11 @@ function normalizeGeneratedRow(row) {
   };
 }
 
-function normalizeHistoryRow(row) {
+async function normalizeHistoryRow(row) {
   if (isKnownBrokenRow(row)) return null;
   const url = validVideoUrl(row.video_url || row.video_uri || row.url || '');
   if (!url) return null;
+  if (isSupabaseStorageUrl(url) && !(await verifyStorageObjectExists(url))) return null;
   return {
     id: row.id || row.job_id || url,
     job_id: row.job_id || '',
@@ -87,7 +119,8 @@ async function readGeneratedVideos(db, limit) {
     .limit(limit);
 
   if (error) return { rows: [], error: error.message };
-  return { rows: (data || []).map(normalizeGeneratedRow).filter(Boolean), error: null };
+  const normalized = await Promise.all((data || []).map(normalizeGeneratedRow));
+  return { rows: normalized.filter(Boolean), error: null };
 }
 
 async function readFlowvidHistory(db, limit, userId) {
@@ -127,7 +160,8 @@ async function readFlowvidHistory(db, limit, userId) {
       watermarked_url: task.watermarked_url || ''
     };
   });
-  return { rows: rows.map(r => r ? normalizeHistoryRow(r) : null).filter(Boolean), error: null };
+  const normalized = await Promise.all(rows.map(r => (r ? normalizeHistoryRow(r) : null)));
+  return { rows: normalized.filter(Boolean), error: null };
 }
 
 module.exports = async function handler(req, res) {
