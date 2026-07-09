@@ -69,7 +69,7 @@
     signupTab.onclick=()=>setMode('signup');
     if(!authReady){setMessage('ログイン接続は未設定です。SupabaseのURLと公開可能キーを読み込めていません。数分待って再読み込みしてください。','error');submitBtn.disabled=true;googleBtn.disabled=true;}
     if(client){client.auth.getSession().then(({data})=>{if(data.session) location.href='./profile.html';});}
-    form.onsubmit=async(e)=>{e.preventDefault();if(!client)return;submitBtn.disabled=true;setMessage('処理中です…','ok');const mail=email.value.trim();const pass=password.value;let result;if(mode==='login'){result=await client.auth.signInWithPassword({email:mail,password:pass});}else{result=await client.auth.signUp({email:mail,password:pass,options:{emailRedirectTo:cfg.redirectTo||location.origin+'/profile.html'}});}submitBtn.disabled=false;if(result.error){setMessage(authMessage(result.error.message),'error');return;}if(mode==='signup'){setMessage('確認メールを送りました。メール内のリンクを開いてログインしてください。','ok');return;}location.href='./profile.html';};
+    form.onsubmit=async(e)=>{e.preventDefault();if(!client)return;submitBtn.disabled=true;setMessage('処理中です…','ok');const mail=email.value.trim();const pass=password.value;let result;if(mode==='login'){result=await client.auth.signInWithPassword({email:mail,password:pass});}else{result=await client.auth.signUp({email:mail,password:pass,options:{emailRedirectTo:location.origin+'/profile.html'}});}submitBtn.disabled=false;if(result.error){setMessage(authMessage(result.error.message),'error');return;}if(mode==='signup'){setMessage('確認メールを送りました。メール内のリンクを開いてログインしてください。','ok');return;}location.href='./profile.html';};
     googleBtn.onclick=()=>setMessage('GoogleログインはまだSupabase側で有効化していません。いまはメールアドレスでログイン / 新規登録してください。','error');
   </script>
 </body>

@@ -35,18 +35,34 @@
 <script>
 const d=document.getElementById('drawer');document.getElementById('menuBtn').onclick=()=>d.classList.add('open');document.getElementById('shade').onclick=()=>d.classList.remove('open');document.getElementById('close').onclick=()=>d.classList.remove('open');
 const cfg=window.FLOWVID_AUTH||{};const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;const authReady=Boolean(client);const $=id=>document.getElementById(id);const jpPlan={free:'フリープラン',standard:'スタンダード',premium:'プレミアム',scale:'スケール',ultimate:'アルティメット',team:'チーム'};
+// Mirrors the server-owned active-subscription check in api/stripe-checkout.js
+// (getActiveSubscription): plan alone is a display hint, not an entitlement —
+// it only counts as active while subscription_expires_at is still in the future.
+const PAID_PLANS=['standard','premium','ultimate','scale','team'];
+function effectivePlan(plan,expiresAt){if(!PAID_PLANS.includes(plan))return'free';if(!expiresAt||new Date(expiresAt)<=new Date())return'free';return plan;}
 function setCredits(balance){const free=Number(balance?.free_credits||0),sub=Number(balance?.subscription_credits||0),paid=Number(balance?.purchased_credits||0),total=free+sub+paid;$('totalCredit').textContent=total;$('paidCredit').textContent=paid;$('creditAmount').textContent=total;}
 function showGuest(){$('avatar').textContent='G';$('displayName').textContent='ゲスト';$('displayEmail').textContent='ログインしていません';$('statusBadge').textContent='Guest mode';setCredits({});$('planName').textContent='フリープラン';$('actionArea').innerHTML='<a class=primary href=./login.html>ログイン</a><a href=./login.html>アカウント作成</a>';}
 async function loadDb(user){const email=user.email||'';$('avatar').textContent=(email[0]||'U').toUpperCase();$('displayName').textContent='ログイン中';$('displayEmail').textContent=email;$('statusBadge').textContent='Signed in';$('actionArea').innerHTML='<a class=primary href=./generate.html>生成画面へ</a><button id=logoutBtn>ログアウト</button><button id=portalBtn style="grid-column:1/-1">サブスクリプション設定</button>';$('logoutBtn').onclick=()=>{location.href='./logout.html';};$('portalBtn').onclick=async()=>{const btn=$('portalBtn');const orig=btn.textContent;btn.disabled=true;btn.textContent='処理中…';try{const{data:{session}}=await client.auth.getSession();const token=session?.access_token||'';if(!token){location.href='./login.html';return}const res=await fetch('/api/stripe-portal',{method:'POST',headers:{'Authorization':'Bearer '+token}});const data=await res.json();if(data.url){location.href=data.url}else if(data.error==='no_customer'){alert('サブスクリプションが見つかりません。');btn.disabled=false;btn.textContent=orig}else{alert(data.error||'エラーが発生しました');btn.disabled=false;btn.textContent=orig}}catch(e){alert('通信エラーが発生しました');btn.disabled=false;btn.textContent=orig}};
   const [profileRes,balanceRes]=await Promise.all([
     client.from('profiles').select('display_name,role,plan').eq('id',user.id).maybeSingle(),
-    client.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',user.id).maybeSingle()
+    client.from('credit_balances').select('free_credits,subscription_credits,purchased_credits,subscription_expires_at').eq('user_id',user.id).maybeSingle()
   ]);
   const profile=profileRes.data||{};const balance=balanceRes.data||{};
-  if(profileRes.data){$('displayName').textContent=profile.display_name||'ログイン中';$('planName').textContent=jpPlan[profile.plan]||profile.plan||'フリープラン';if(profile.role==='admin')$('statusBadge').textContent='Admin signed in';}
+  const activePlan=effectivePlan(profile.plan,balance.subscription_expires_at);
+  if(profileRes.data){$('displayName').textContent=profile.display_name||'ログイン中';$('planName').textContent=jpPlan[activePlan]||'フリープラン';if(profile.role==='admin')$('statusBadge').textContent='Admin signed in';}
   if(balanceRes.data)setCredits(balance);else setCredits({});
-  showHistorySection();}
-if(!authReady){showGuest('SupabaseのURLとanon keyが未設定です。');}else{client.auth.getSession().then(({data,error})=>{if(error||!data.session){showGuest();return;}loadDb(data.session.user);});client.auth.onAuthStateChange((_event,session)=>{session?loadDb(session.user):showGuest();});}
+  showHistorySection();
+  const b=balanceRes.data||{};
+  return {plan:activePlan,total:Number(b.free_credits||0)+Number(b.subscription_credits||0)+Number(b.purchased_credits||0)};}
+// ---- 決済完了後のplan/credits自動再取得 ----
+// Checkout完了で戻ってきた時だけ、Webhook反映のズレを吸収するため
+// loadDbを裏側で短時間ポーリングする。通常アクセスでは一切動作しない。
+// ユーザー向けメッセージは出さず、反映されたら画面表示だけ自然に更新する。
+let _checkoutPoll=null;
+function checkoutRequested(){const c=(new URLSearchParams(location.search).get('checkout')||'').toLowerCase();return c==='complete'||c==='success';}
+function startCheckoutPolling(user,base){if(_checkoutPoll||!user||!client)return;const b=base||{plan:'free',total:0};let tries=0;const max=10;_checkoutPoll=setInterval(async()=>{tries++;let cur=null;try{cur=await loadDb(user);}catch(_){cur=null;}const changed=cur&&(cur.total>b.total||(cur.plan!=='free'&&cur.plan!==b.plan));if(changed||tries>=max){clearInterval(_checkoutPoll);_checkoutPoll=null;}},3000);}
+window.addEventListener('beforeunload',()=>{if(_checkoutPoll){clearInterval(_checkoutPoll);_checkoutPoll=null;}});
+if(!authReady){showGuest('SupabaseのURLとanon keyが未設定です。');}else{client.auth.getSession().then(({data,error})=>{if(error||!data.session){showGuest();return;}loadDb(data.session.user).then(base=>{if(checkoutRequested())startCheckoutPolling(data.session.user,base);});});client.auth.onAuthStateChange((_event,session)=>{session?loadDb(session.user):showGuest();});}
 // ---- 生成履歴セクション ----
 (function(){
   const FAVS_KEY='flowvidFavoriteJobs';

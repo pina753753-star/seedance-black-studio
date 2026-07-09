@@ -21,6 +21,58 @@ function isKnownBrokenRow(row) {
   return BROKEN_JOB_IDS.has(String(row?.job_id || row?.operation_name || row?.id || ''));
 }
 
+function isSupabaseStorageUrl(url) {
+  return /^https?:\/\//i.test(String(url || '')) && /\/storage\/v1\/object\/public\//i.test(String(url || ''));
+}
+
+// Confirms a Supabase Storage public URL actually has a readable object behind it.
+// Mirrors api/seedance-status.js's verifyPublicObject(): try HEAD first, and when
+// the HEAD response doesn't carry usable content-type/content-length (some Storage
+// responses omit them), fall back to a Range GET of the first 1024 bytes, reading
+// headers only. Read-only: never writes to Storage.
+const STORAGE_CHECK_TIMEOUT_MS = 4000;
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STORAGE_CHECK_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function verifyStorageObjectExists(url) {
+  try {
+    const headRes = await fetchWithTimeout(url, { method: 'HEAD' });
+    const headContentType = headRes.headers.get('content-type') || '';
+    const headContentLength = Number(headRes.headers.get('content-length') || 0);
+    if (headRes.ok && /video|octet-stream/i.test(headContentType) && headContentLength >= 1024) {
+      return true;
+    }
+
+    // HEAD insufficient — fall back to Range GET, headers only (no body reading)
+    const rangeRes = await fetchWithTimeout(url, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
+    const contentType = rangeRes.headers.get('content-type') || '';
+
+    // Discard body immediately without reading
+    await rangeRes.body?.cancel().catch(() => {});
+
+    if (!rangeRes.ok && rangeRes.status !== 206) return false;
+
+    const contentRange = rangeRes.headers.get('content-range') || '';
+    const totalMatch = contentRange.match(/\/(\d+)$/);
+    const totalBytes = totalMatch ? Number(totalMatch[1]) : Number(rangeRes.headers.get('content-length') || 0);
+
+    if (!totalBytes || totalBytes < 1024) return false;
+    if (!/video|octet-stream/i.test(contentType)) return false;
+
+    return true;
+  } catch (_) {
+    // Network error, timeout, or abort: unverifiable, so exclude the row (safe default).
+    return false;
+  }
+}
+
 function resolveMode(row) {
   const raw = String(row?.mode || row?.generation_mode || row?.settings?.mode || '').trim();
   if (raw === 'image_to_video' || raw === '画像から動画' || raw === '画像から動画へ') return 'image_to_video';
@@ -36,10 +88,11 @@ function resolveMode(row) {
   return '';
 }
 
-function normalizeGeneratedRow(row) {
+async function normalizeGeneratedRow(row) {
   if (isKnownBrokenRow(row)) return null;
   const url = validVideoUrl(row.video_uri || row.video_url || row.url || '');
   if (!url) return null;
+  if (isSupabaseStorageUrl(url) && !(await verifyStorageObjectExists(url))) return null;
   return {
     id: row.id || row.job_id || row.operation_name || url,
     job_id: row.operation_name || row.job_id || '',
@@ -56,10 +109,11 @@ function normalizeGeneratedRow(row) {
   };
 }
 
-function normalizeHistoryRow(row) {
+async function normalizeHistoryRow(row) {
   if (isKnownBrokenRow(row)) return null;
   const url = validVideoUrl(row.video_url || row.video_uri || row.url || '');
   if (!url) return null;
+  if (isSupabaseStorageUrl(url) && !(await verifyStorageObjectExists(url))) return null;
   return {
     id: row.id || row.job_id || url,
     job_id: row.job_id || '',
@@ -87,7 +141,8 @@ async function readGeneratedVideos(db, limit) {
     .limit(limit);
 
   if (error) return { rows: [], error: error.message };
-  return { rows: (data || []).map(normalizeGeneratedRow).filter(Boolean), error: null };
+  const normalized = await Promise.all((data || []).map(normalizeGeneratedRow));
+  return { rows: normalized.filter(Boolean), error: null };
 }
 
 async function readFlowvidHistory(db, limit, userId) {
@@ -127,7 +182,8 @@ async function readFlowvidHistory(db, limit, userId) {
       watermarked_url: task.watermarked_url || ''
     };
   });
-  return { rows: rows.map(r => r ? normalizeHistoryRow(r) : null).filter(Boolean), error: null };
+  const normalized = await Promise.all(rows.map(r => (r ? normalizeHistoryRow(r) : null)));
+  return { rows: normalized.filter(Boolean), error: null };
 }
 
 module.exports = async function handler(req, res) {
