@@ -568,7 +568,33 @@ module.exports = async function handler(req, res) {
     }
 
     if (!trackingPersisted) {
-      console.error('[seedance-start] tracking persistence FAILED after 3 attempts — provider started, NOT refunding or releasing', 'taskId:', taskId, 'jobId:', jobId, 'pollingUrl:', orPollingUrl);
+      // Final fallback: relax the status filter (still scoped to id+user_id) in case
+      // the row's status drifted between reservation and this point.
+      try {
+        const { data: fallbackRows, error: fallbackErr } = await db.from('generation_tasks')
+          .update({
+            status: 'processing',
+            api_task_id: jobId || null,
+            polling_url: orPollingUrl || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', taskId)
+          .eq('user_id', user.id)
+          .select('id');
+        if (!fallbackErr && fallbackRows && fallbackRows.length > 0) {
+          trackingPersisted = true;
+          console.log('[seedance-start] tracking persisted via fallback (status filter relaxed), taskId:', taskId);
+        }
+      } catch (fallbackException) {
+        console.error('[seedance-start] fallback tracking persist exception:', fallbackException?.message, 'taskId:', taskId);
+      }
+    }
+
+    if (!trackingPersisted) {
+      console.error(
+        '[seedance-start] ORPHAN_TASK tracking persistence FAILED after all attempts — provider started, not refunding here (reconcile job will handle)',
+        'userId:', user.id, 'taskId:', taskId, 'jobId:', jobId, 'pollingUrl:', orPollingUrl
+      );
       return res.status(503).json({
         ok: false,
         error: 'generation_tracking_persistence_failed',
