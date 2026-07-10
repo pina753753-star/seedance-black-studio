@@ -1,6 +1,7 @@
 # Seedance Black Studio
 
-高級感のある黒背景UIで、Seedance 2.0 系の動画生成を扱うための Next.js MVP です。
+高級感のある黒背景UIで、Seedance 2.0 系の動画生成を扱うサービスです。
+静的HTML（ルート直下の `*.html`）と `api/` 配下のVercel Serverless Functionsで構成されています。
 
 ## できること
 
@@ -13,92 +14,80 @@
 - 解像度：480p / 720p / 1080p
 - 長さ：5〜15秒
 - アスペクト比：自動 / 16:9 / 9:16 / 4:3 / 3:4 / 21:9 / 1:1
-- 生成前のクレジット目安表示
-- タスク一覧
-- API接続部分を `lib/seedance.ts` に分離
-
-## 重要
-
-このプロジェクトは、UIとタスク管理がそのまま起動します。
-
-本番でSeedance 2.0を呼び出すには、公式のAPIキー、利用可能なモデルID、APIの正確なリクエスト形式が必要です。
-公式ドキュメント側の細部が変わる可能性があるため、API接続部分は `lib/seedance.ts` に集約しています。
+- 生成前のクレジット目安表示・課金（Stripe連携）
+- タスク一覧・生成履歴
 
 ## セットアップ
 
 ```bash
 npm install
-cp .env.example .env.local
-npm run dev
+npm run build
 ```
 
-http://localhost:3000 を開きます。
+`npm run build` は静的HTML/JSを `public/` にコピーするだけで、Next.jsのビルドは行いません。
+ローカルでAPI（`api/` 配下）まで含めて動かす場合はVercel CLI（`vercel dev`）を使ってください。
+
+## 生成の仕組み（本番）
+
+動画生成モードによって、呼び出し先の外部プロバイダが分かれています。
+
+- `text_to_video` / `image_to_video`：`api/_lib/fal-start.js` → fal.ai（`bytedance/seedance-2.0/text-to-video` または `image-to-video`）。結果は `api/fal-webhook.js` がWebhookで受信し、`api/_lib/fal-finalize.js` が確定処理を行う
+- `reference_to_video` / `storyboard`：`api/_lib/seedance-start.js` → OpenRouter（`https://openrouter.ai/api/v1/videos`、モデル `bytedance/seedance-2.0`）
+- 生成開始のエントリーポイントは `api/seedance-start-priced.js`（クレジット計算をしてから `api/_lib/seedance-start.js` を呼ぶ）
+- 状態取得・履歴は `api/seedance-status.js`、`api/generated-videos.js`、`api/pending-tasks.js`
+- 課金・クレジットはStripe（`api/stripe-checkout.js` / `stripe-webhook.js` / `stripe-portal.js`）と `api/ensure-user-credits.js` / `api/cron-annual-credit-grant.js`（毎日Cronで年次クレジット付与）
 
 ## 環境変数
 
+コードから確認できた本番で参照される環境変数は次のとおりです（`.env.example` は現状この一部のみカバーしています。実態との差分は別途確認が必要です）。
+
 ```bash
-# mock or real
-SEEDANCE_PROVIDER=mock
+# OpenRouter経由の生成（reference_to_video / storyboard）
+OPENROUTER_API_KEY=
 
-# real運用時
-SEEDANCE_API_KEY=
-SEEDANCE_API_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-SEEDANCE_CREATE_PATH=/contents/generations/tasks
-SEEDANCE_QUERY_PATH=/contents/generations/tasks/{task_id}
-SEEDANCE_MODEL=seedance-2.0
+# fal.ai経由の生成（text_to_video / image_to_video）
+FAL_KEY=
+FAL_WEBHOOK_URL=
 
-# Supabase Storageを使う場合
-NEXT_PUBLIC_SUPABASE_URL=
+# Supabase
+SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
-SUPABASE_STORAGE_BUCKET=seedance-assets
+SUPABASE_ANON_KEY=
+SUPABASE_REFERENCE_BUCKET=
+FLOWVID_VIDEO_BUCKET=
+
+# Stripe
+STRIPE_SECRET_KEY=
+STRIPE_PUBLISHABLE_KEY=
+STRIPE_WEBHOOK_SECRET=
+
+# その他
+CRON_SECRET=
+SITE_URL=
+WATERMARK_SERVER_URL=
+WATERMARK_SECRET=
 ```
 
-## mockとreal
-
-### mock
-APIキーなしでUIとタスク保存の動作確認ができます。
-
-```bash
-SEEDANCE_PROVIDER=mock
-```
-
-### real
-APIキーを使って外部APIに送信します。
-
-```bash
-SEEDANCE_PROVIDER=real
-SEEDANCE_API_KEY=your_key
-```
-
-ファイルをSeedance側に渡すには、外部からアクセスできるURLが必要です。
-本番ではSupabase Storageなどの公開URLを使ってください。
-
-## API接続部分
-
-`lib/seedance.ts` を見てください。
-
-- `createSeedanceTask()`
-- `getSeedanceTask()`
-- `buildSeedancePayload()`
-
-API仕様が違う場合は、このファイルだけ修正すればUI側はそのまま使えます。
+ファイルを外部プロバイダに渡すには、外部からアクセスできるURLが必要です。Supabase Storageの公開URL（`SUPABASE_REFERENCE_BUCKET` / `FLOWVID_VIDEO_BUCKET`）を使用しています。
 
 ## ディレクトリ
 
 ```text
-app/
-  api/
-    generate/route.ts
-    tasks/route.ts
-    tasks/[id]/route.ts
-  globals.css
-  layout.tsx
-  page.tsx
-components/
-  Studio.tsx
-lib/
-  cost.ts
-  seedance.ts
-  store.ts
-  types.ts
+*.html            画面（index.html, generate-prod.html, admin*.html など）
+flowvid-*.js, mode-patch.js  画面用パッチJS
+api/
+  seedance-start-priced.js   生成開始（クレジット計算）
+  seedance-status.js         状態取得・履歴
+  generated-videos.js, pending-tasks.js
+  fal-webhook.js             fal.aiからのWebhook受信
+  fal-status.js, fal-reconcile.js
+  stripe-checkout.js, stripe-webhook.js, stripe-portal.js  課金
+  ensure-user-credits.js, cron-annual-credit-grant.js      クレジット
+  upload-reference-image.js, video-edit.js
+  _lib/
+    seedance-start.js  OpenRouter連携
+    fal-start.js, fal-finalize.js  fal.ai連携
+supabase/
+  schema.sql, migrations/, setup-*.sql
+watermark-server/  独立したDockerサービス（本リポジトリの他コードとの結線は確認できません）
 ```

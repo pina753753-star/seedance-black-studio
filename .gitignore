@@ -6,3 +6,4 @@ out
 .env
 .DS_Store
 .vercel/
+/public/
