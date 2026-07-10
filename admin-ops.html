@@ -24,7 +24,7 @@
     const {data,error}=await client.auth.getSession();
     const token=data?.session?.access_token||'';
     if(error||!token){fallback();return}
-    const response=await fetch('/api/admin-ops-page',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+    const response=await fetch('/api/admin-ops-page-v2',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
     if(!response.ok){fallback();return}
     const html=await response.text();
     document.open();
