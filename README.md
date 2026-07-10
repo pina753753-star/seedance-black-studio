@@ -85,20 +85,22 @@ API仕様が違う場合は、このファイルだけ修正すればUI側はそ
 
 ## ディレクトリ
 
+本番は静的HTML（ルート直下の `*.html`）と `api/` 配下のVercel Serverless Functionsで構成されています。
+`npm run build` は静的ファイルを `public/` にコピーするのみで、Next.jsのビルドは行いません。
+
 ```text
-app/
-  api/
-    generate/route.ts
-    tasks/route.ts
-    tasks/[id]/route.ts
-  globals.css
-  layout.tsx
-  page.tsx
-components/
-  Studio.tsx
-lib/
-  cost.ts
-  seedance.ts
-  store.ts
-  types.ts
+*.html            画面（index.html, generate-prod.html, admin*.html など）
+flowvid-*.js, mode-patch.js  画面用パッチJS
+api/
+  seedance-start-priced.js   生成開始
+  seedance-status.js         状態取得・履歴
+  fal-webhook.js             fal.aiからのWebhook受信
+  fal-status.js, fal-reconcile.js
+  stripe-checkout.js, stripe-webhook.js, stripe-portal.js  課金
+  ensure-user-credits.js, cron-annual-credit-grant.js      クレジット
+  _lib/
+    seedance-start.js, fal-start.js, fal-finalize.js
+supabase/
+  schema.sql, migrations/, setup-*.sql
+watermark-server/  独立したDockerサービス
 ```
