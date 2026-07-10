@@ -29,25 +29,23 @@ npm run build
 
 ## 生成の仕組み（本番）
 
-動画生成モードによって、呼び出し先の外部プロバイダが分かれています。
+すべての動画生成モードはOpenRouter（`https://openrouter.ai/api/v1/videos`、モデル `bytedance/seedance-2.0`）経由です。
 
-- `text_to_video` / `image_to_video`：`api/_lib/fal-start.js` → fal.ai（`bytedance/seedance-2.0/text-to-video` または `image-to-video`）。結果は `api/fal-webhook.js` がWebhookで受信し、`api/_lib/fal-finalize.js` が確定処理を行う
-- `reference_to_video` / `storyboard`：`api/_lib/seedance-start.js` → OpenRouter（`https://openrouter.ai/api/v1/videos`、モデル `bytedance/seedance-2.0`）
+- 生成開始：`api/_lib/seedance-start.js`
 - 生成開始のエントリーポイントは `api/seedance-start-priced.js`（クレジット計算をしてから `api/_lib/seedance-start.js` を呼ぶ）
 - 状態取得・履歴は `api/seedance-status.js`、`api/generated-videos.js`、`api/pending-tasks.js`
+- 滞留タスク（2時間以上応答なし）の自動返金：`api/openrouter-reconcile.js`（Vercel Cronで定期実行）
 - 課金・クレジットはStripe（`api/stripe-checkout.js` / `stripe-webhook.js` / `stripe-portal.js`）と `api/ensure-user-credits.js` / `api/cron-annual-credit-grant.js`（毎日Cronで年次クレジット付与）
+
+fal.ai経由の生成（`api/_lib/fal-start.js` 等）はAPIコスト削減のため廃止済みです。
 
 ## 環境変数
 
 コードから確認できた本番で参照される環境変数は次のとおりです（`.env.example` は現状この一部のみカバーしています。実態との差分は別途確認が必要です）。
 
 ```bash
-# OpenRouter経由の生成（reference_to_video / storyboard）
+# OpenRouter経由の生成（全モード）
 OPENROUTER_API_KEY=
-
-# fal.ai経由の生成（text_to_video / image_to_video）
-FAL_KEY=
-FAL_WEBHOOK_URL=
 
 # Supabase
 SUPABASE_URL=
@@ -79,14 +77,12 @@ api/
   seedance-start-priced.js   生成開始（クレジット計算）
   seedance-status.js         状態取得・履歴
   generated-videos.js, pending-tasks.js
-  fal-webhook.js             fal.aiからのWebhook受信
-  fal-status.js, fal-reconcile.js
+  openrouter-reconcile.js    滞留タスクの自動返金（Cron）
   stripe-checkout.js, stripe-webhook.js, stripe-portal.js  課金
   ensure-user-credits.js, cron-annual-credit-grant.js      クレジット
   upload-reference-image.js, video-edit.js
   _lib/
     seedance-start.js  OpenRouter連携
-    fal-start.js, fal-finalize.js  fal.ai連携
 supabase/
   schema.sql, migrations/, setup-*.sql
 watermark-server/  独立したDockerサービス（本リポジトリの他コードとの結線は確認できません）
