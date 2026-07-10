@@ -118,6 +118,8 @@ window.flowvidSupabaseClient = function(){
     [500,2500,7000].forEach(ms=>setTimeout(()=>btn.click(),ms));
   }
   function rememberOperation(operationName,email){
+    if(!operationName) return;
+    let rows=[];
     try{rows=JSON.parse(localStorage.getItem('flowvidUserOperations')||'[]')}catch(_){rows=[]}
     rows=rows.filter(row=>row&&row.operationName!==operationName);
     rows.unshift({operationName,email,startedAt:Date.now()});
