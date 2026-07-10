@@ -15,6 +15,23 @@ window.flowvidSupabaseClient = function(){
   return window.__flowvidUserClient;
 };
 
+(function flowvidAdminAquariumLink(){
+  if(!/\/admin\.html$/.test(location.pathname)) return;
+  const addLink=()=>{
+    const nav=document.querySelector('#drawer .nav');
+    if(!nav||document.getElementById('adminAquariumLink')) return;
+    const logout=document.getElementById('drawerLogoutBtn');
+    const button=document.createElement('button');
+    button.id='adminAquariumLink';
+    button.type='button';
+    button.textContent='AI運営水族館';
+    button.onclick=()=>{ location.href='./admin-ops.html'; };
+    nav.insertBefore(button,logout||null);
+  };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',addLink,{once:true});
+  else addLink();
+})();
+
 (function flowvidGeneratePageEnhancements(){
   const GENERATION_CREDIT_COST=80;
   const ACTIVE_TASK_WINDOW_MS=1000*60*60*2;
@@ -119,105 +136,49 @@ window.flowvidSupabaseClient = function(){
   }
   function rememberOperation(operationName,email){
     if(!operationName) return;
-    let rows=[];
-    try{rows=JSON.parse(localStorage.getItem('flowvidUserOperations')||'[]')}catch(_){rows=[]}
-    rows=rows.filter(row=>row&&row.operationName!==operationName);
-    rows.unshift({operationName,email,startedAt:Date.now()});
-    localStorage.setItem('flowvidUserOperations',JSON.stringify(rows.slice(0,10)));
-  }
-  async function checkOperation(row){
-    const params=new URLSearchParams({operationName:row.operationName||''});
-    if(row.email) params.set('userEmail',row.email);
-    const res=await fetch('/api/check-veo-operation?'+params.toString());
-    const data=await res.json();
-    if(!res.ok||!data.ok) throw new Error(data.error||'生成状況を確認できませんでした');
-    return data;
-  }
-  async function pollRememberedOperations(){
-    if(!isGeneratePage()) return;
-    let rows=[];
-    try{rows=JSON.parse(localStorage.getItem('flowvidUserOperations')||'[]')}catch(_){rows=[]}
-    if(!rows.length) return;
-    const keep=[];
-    for(const row of rows){
-      if(!row?.operationName) continue;
-      if(Date.now()-Number(row.startedAt||0)>1000*60*60*6) continue;
-      try{
-        const result=await checkOperation(row);
-        if(result.completed){refreshTasksSoon()}else{keep.push(row)}
-      }catch(_){keep.push(row)}
-    }
-    localStorage.setItem('flowvidUserOperations',JSON.stringify(keep.slice(0,10)));
-  }
-  async function ensureCredits(user){
     try{
-      await fetch('/api/ensure-user-credits',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:user.id,email:user.email||''})});
-    }catch(_){}
+      const key='flowvidOperationMap';
+      const map=JSON.parse(localStorage.getItem(key)||'{}');
+      map[operationName]={email:email||'',mode:activeMode(),createdAt:new Date().toISOString()};
+      localStorage.setItem(key,JSON.stringify(map));
+    }catch(_){ }
   }
-  async function totalCredits(client,userId){
-    const {data}=await client.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',userId).maybeSingle();
-    return Number(data?.free_credits||0)+Number(data?.subscription_credits||0)+Number(data?.purchased_credits||0);
+  function patchFetch(){
+    if(window.__flowvidFetchPatched) return;
+    window.__flowvidFetchPatched=true;
+    const original=window.fetch.bind(window);
+    window.fetch=async function(input,init){
+      const url=typeof input==='string'?input:(input?.url||'');
+      if(!url.includes('/api/seedance-start')) return original(input,init);
+      const client=currentClient();
+      const {data}=client?await client.auth.getSession():{data:{session:null}};
+      if(!data?.session?.user?.email){
+        status('ログイン状態を確認できません。もう一度ログインしてください。',true);
+        throw new Error('Authentication required');
+      }
+      const headers=new Headers(init?.headers||{});
+      headers.set('Authorization','Bearer '+data.session.access_token);
+      const response=await original(input,{...(init||{}),headers});
+      const clone=response.clone();
+      clone.json().then(body=>{
+        const operationName=body?.operationName||body?.jobId||body?.id||'';
+        rememberOperation(operationName,data.session.user.email);
+        refreshTasksSoon();
+      }).catch(()=>{});
+      return response;
+    };
   }
-  async function createAndRun(){
-    const client=currentClient();
-    if(!client){status('Supabase接続情報が未設定です。',true);return}
-    const {data:sessionData,error:sessionError}=await client.auth.getSession();
-    const user=sessionData?.session?.user||null;
-    if(sessionError||!user){location.href='./login.html';return}
-    await ensureCredits(user);
-    const balance=await totalCredits(client,user.id);
-    if(balance<GENERATION_CREDIT_COST){status(`クレジット不足です。${GENERATION_CREDIT_COST}クレジット必要です。`,true);return}
-    const prompt=(document.getElementById('prompt')?.value||'').trim();
-    if(!prompt){status('プロンプトを入力してください。',true);return}
-    const createBtn=document.getElementById('createBtn');
-    const originalHTML=createBtn?.innerHTML||'作成する';
-    if(createBtn){createBtn.disabled=true;createBtn.textContent='生成開始中…'}
-    status('タスクを作成しています…');
-    try{
-      const taskPayload={
-        user_id:user.id,
-        mode:activeMode(),
-        prompt,
-        resolution:'veo',
-        duration_seconds:Number(document.getElementById('duration')?.value||5),
-        aspect_ratio:document.getElementById('aspectRatio')?.value||'9:16',
-        credit_cost:GENERATION_CREDIT_COST,
-        status:'draft',
-        api_provider:'veo'
-      };
-      const {data:task,error:insertError}=await client.from('generation_tasks').insert(taskPayload).select('id').single();
-      if(insertError||!task?.id) throw new Error(insertError?.message||'タスク作成に失敗しました');
-      status('Veo生成を開始しています…');
-      refreshTasksSoon();
-      const res=await fetch('/api/run-generation-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskId:task.id})});
-      const result=await res.json();
-      if(!res.ok||!result.ok) throw new Error(result.error||'Veo生成開始に失敗しました');
-      if(result.operationName) rememberOperation(result.operationName,user.email||'');
-      document.getElementById('prompt').value='';
-      status('生成中です。完成したら動画が表示されます。');
-      refreshTasksSoon();
-      [12000,30000,60000].forEach(ms=>setTimeout(pollRememberedOperations,ms));
-    }catch(error){
-      status('生成開始エラー：'+(error.message||String(error)),true);
-    }finally{
-      if(createBtn){createBtn.disabled=false;createBtn.innerHTML=originalHTML}
-      applyUi();
-    }
+  function observe(){
+    const root=document.getElementById('taskList')||document.body;
+    let timer=null;
+    new MutationObserver(()=>{
+      clearTimeout(timer);
+      timer=setTimeout(applyUi,80);
+    }).observe(root,{childList:true,subtree:true});
   }
-  function hookCreate(){
-    const btn=document.getElementById('createBtn');
-    if(!btn||btn.dataset.flowvidRunHooked==='1') return;
-    btn.dataset.flowvidRunHooked='1';
-    btn.onclick=createAndRun;
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',()=>{patchFetch();applyUi();observe()},{once:true});
+  }else{
+    patchFetch();applyUi();observe();
   }
-  function start(){
-    if(!isGeneratePage()) return;
-    applyUi();
-    hookCreate();
-    setInterval(()=>{applyUi();hookCreate()},700);
-    setTimeout(pollRememberedOperations,2500);
-    setInterval(pollRememberedOperations,30000);
-  }
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start);
-  else start();
 })();
