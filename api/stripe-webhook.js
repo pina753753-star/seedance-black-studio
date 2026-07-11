@@ -63,6 +63,27 @@ async function grantCredits(db, { userId, credits, pool, creditType, reason, pla
     return { ok: true, skipped: 'duplicate' };
   }
 
+  // Insert the ledger row FIRST. credit_transactions_stripe_reason_unique (partial
+  // unique index on reason WHERE reason LIKE 'stripe:%') rejects a concurrent
+  // duplicate delivery of the same Stripe event here, before any balance is
+  // touched — closing the race that the alreadyProcessed() check above cannot
+  // close on its own (SELECT-then-act is not atomic across concurrent requests).
+  const { error: txErr } = await db.from('credit_transactions').insert({
+    user_id: userId,
+    amount: credits,
+    credit_type: creditType,
+    reason,
+    related_task_id: null  // uuid column cannot hold Stripe text IDs
+  });
+  if (txErr) {
+    if (txErr.code === '23505') {
+      console.log('[stripe-webhook] duplicate grant blocked by unique constraint, reason:', reason);
+      return { ok: true, skipped: 'duplicate' };
+    }
+    console.error('[stripe-webhook] credit_transactions insert failed:', txErr.message, 'reason:', reason);
+    return { ok: false, error: txErr.message };
+  }
+
   const { data: bal } = await db
     .from('credit_balances')
     .select('free_credits,subscription_credits,purchased_credits')
@@ -83,18 +104,6 @@ async function grantCredits(db, { userId, credits, pool, creditType, reason, pla
     if (expiresAt) update[expiresCol] = expiresAt;
     const { error: updErr } = await db.from('credit_balances').update(update).eq('user_id', userId);
     if (updErr) return { ok: false, error: updErr.message };
-  }
-
-  const { error: txErr } = await db.from('credit_transactions').insert({
-    user_id: userId,
-    amount: credits,
-    credit_type: creditType,
-    reason,
-    related_task_id: null  // uuid column cannot hold Stripe text IDs
-  });
-  if (txErr) {
-    // Log but don't swallow: credits already granted; return partial success with warning.
-    console.error('[stripe-webhook] credit_transactions insert failed:', txErr.message, 'reason:', reason);
   }
 
   if (plan) {
