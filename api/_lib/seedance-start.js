@@ -201,26 +201,100 @@ async function checkAndDeduct(db, userId, creditCost, taskId) {
 }
 
 // Returns credits to the exact pools they were deducted from.
+// Returns { ok: true } only if the balance update (and ledger insert, when
+// applicable) actually completed. Callers use this to report an accurate
+// refund status to the client instead of assuming success.
 async function refundCredits(db, userId, { fromSub, fromFree, fromPurchased }, taskId) {
   try {
-    const { data: bal } = await db.from('credit_balances')
+    const { data: bal, error: balSelectErr } = await db.from('credit_balances')
       .select('free_credits,subscription_credits,purchased_credits')
       .eq('user_id', userId).maybeSingle();
-    if (!bal) return;
+    if (balSelectErr) return { ok: false, error: balSelectErr.message };
+    if (!bal) return { ok: false, error: 'balance_not_found' };
 
     const updateFields = { updated_at: new Date().toISOString() };
     if (fromSub > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + fromSub;
     if (fromFree > 0) updateFields.free_credits = Number(bal.free_credits || 0) + fromFree;
     if (fromPurchased > 0) updateFields.purchased_credits = Number(bal.purchased_credits || 0) + fromPurchased;
-    await db.from('credit_balances').update(updateFields).eq('user_id', userId);
+    const { error: balUpdateErr } = await db.from('credit_balances').update(updateFields).eq('user_id', userId);
+    if (balUpdateErr) return { ok: false, error: balUpdateErr.message };
 
     const txRows = [];
     if (fromSub > 0) txRows.push({ user_id: userId, amount: fromSub, credit_type: 'subscription', reason: 'generation_refund', related_task_id: taskId || null });
     if (fromFree > 0) txRows.push({ user_id: userId, amount: fromFree, credit_type: 'free', reason: 'generation_refund', related_task_id: taskId || null });
     if (fromPurchased > 0) txRows.push({ user_id: userId, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: taskId || null });
-    if (txRows.length) await db.from('credit_transactions').insert(txRows);
-  } catch (_) {}
+    if (txRows.length) {
+      const { error: txErr } = await db.from('credit_transactions').insert(txRows);
+      // Balance was already updated above; the ledger row is a record of that
+      // fact, not a precondition. Report ok:true regardless so the client
+      // isn't told "not refunded" when the balance was in fact restored.
+      if (txErr) console.error('[seedance-start] refund ledger insert failed (balance was still updated):', txErr.message, 'taskId:', taskId);
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error('[seedance-start] refundCredits exception:', e?.message, 'taskId:', taskId);
+    return { ok: false, error: e?.message || String(e) };
+  }
 }
+
+// Best-effort extraction + classification of the upstream provider's error
+// code from an OpenRouter error response body. OpenRouter/Seedance error
+// bodies are inconsistent: sometimes the real provider error is nested as a
+// stringified JSON inside `.error.message` (observed shape:
+// {"error":{"message":"HTTP 400: {\"error\":{\"code\":\"...\",...}}","code":400}}),
+// sometimes it's a flat string code at the top level. Returns { code, category }
+// where category is one of 'content_policy' | 'rate_limit' | 'auth' |
+// 'invalid_input' | 'unknown'. Never throws.
+function classifyProviderError(rawBody, httpStatus) {
+  let providerCode = '';
+  let providerMessage = '';
+  try {
+    const outer = JSON.parse(rawBody);
+    const outerMsg = String(outer?.error?.message || '');
+    const nestedJsonMatch = /\{[\s\S]*\}\s*$/.exec(outerMsg);
+    if (nestedJsonMatch) {
+      try {
+        const inner = JSON.parse(nestedJsonMatch[0]);
+        providerCode = String(inner?.error?.code || '');
+        providerMessage = String(inner?.error?.message || '');
+      } catch (_) { /* not nested JSON, fall through */ }
+    }
+    if (!providerCode && typeof outer?.error?.code === 'string') {
+      providerCode = outer.error.code;
+    }
+    if (!providerMessage) providerMessage = outerMsg;
+  } catch (_) { /* rawBody wasn't JSON at all */ }
+
+  // Known/observed codes (confirmed from production logs):
+  //   InputImageSensitiveContentDetected.PrivacyInformation — image flagged as a real person
+  // Plausible sibling codes based on the same naming convention, NOT yet
+  // observed in production — included so the same category catches them if
+  // they occur, but unconfirmed:
+  //   InputImageSensitiveContentDetected.Porn / .Violence
+  //   InputTextSensitiveContentDetected.*
+  //   OutputVideoSensitiveContentDetected.*
+  if (/SensitiveContentDetected|ContentPolicy|Moderation/i.test(providerCode) ||
+      /content\s*polic|real person|privacy|nsfw|explicit|adult\s*content/i.test(providerMessage)) {
+    return { code: providerCode || null, category: 'content_policy' };
+  }
+  if (httpStatus === 429 || /RateLimit|TooManyRequests/i.test(providerCode)) {
+    return { code: providerCode || null, category: 'rate_limit' };
+  }
+  if (httpStatus === 403 || /Unauthorized|InvalidApiKey|PermissionDenied/i.test(providerCode)) {
+    return { code: providerCode || null, category: 'auth' };
+  }
+  if (/InvalidParameter|InvalidImage|InvalidPrompt/i.test(providerCode)) {
+    return { code: providerCode || null, category: 'invalid_input' };
+  }
+  return { code: providerCode || null, category: 'unknown' };
+}
+
+const PROVIDER_ERROR_MESSAGES = {
+  content_policy: 'アップロードした画像またはプロンプトの内容が、生成AIのコンテンツポリシーに抵触したため生成できませんでした。内容を変更して再度お試しください。',
+  rate_limit: 'リクエストが集中しています。しばらくしてからもう一度お試しください。',
+  auth: 'システム側の設定に問題が発生しました。しばらくしてからお試しいただくか、サポートへご連絡ください。',
+  invalid_input: '入力内容に問題があり生成できませんでした。内容をご確認のうえ再度お試しください。'
+};
 
 // Atomically reserve a generation task via RPC.
 // The DB function acquires a per-user advisory lock then checks:
@@ -489,12 +563,13 @@ module.exports = async function handler(req, res) {
       try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
     } catch (fetchError) {
       console.error('[seedance-start] OpenRouter network error:', fetchError?.message, 'taskId:', taskId);
-      await refundCredits(db, user.id, deduction, taskId);
+      const refundResult = await refundCredits(db, user.id, deduction, taskId);
       await releaseTask(db, user.id, taskId, 'failed', fetchError?.message || 'Network error');
       return res.status(502).json({
         ok: false,
         error: fetchError?.message || 'OpenRouter request failed',
-        creditRefunded: creditCost,
+        creditRefunded: refundResult.ok ? creditCost : 0,
+        refunded: refundResult.ok,
         checkedAt: new Date().toISOString()
       });
     }
@@ -502,19 +577,25 @@ module.exports = async function handler(req, res) {
     if (!response.ok) {
       const rawBody = String(text || '');
       console.error('[seedance-start] OpenRouter error body:', response.status, rawBody.slice(0, 500));
-      await refundCredits(db, user.id, deduction, taskId);
+      const refundResult = await refundCredits(db, user.id, deduction, taskId);
       await releaseTask(db, user.id, taskId, 'failed', `OpenRouter ${response.status}: ${rawBody.slice(0, 200)}`);
-      const orMsg = response.status === 403
-        ? 'APIキーが無効か、モデルへのアクセス権がありません'
-        : response.status === 429
-        ? 'リクエストが多すぎます。しばらくしてからお試しください'
-        : `OpenRouterエラー`;
+      const classified = classifyProviderError(rawBody, response.status);
+      const orMsg = PROVIDER_ERROR_MESSAGES[classified.category]
+        || (response.status === 403
+          ? 'APIキーが無効か、モデルへのアクセス権がありません（HTTP 403）'
+          : response.status === 429
+          ? 'リクエストが多すぎます。しばらくしてからお試しください（HTTP 429）'
+          : `生成に失敗しました（HTTP ${response.status}）`);
+      console.log('[seedance-start] provider error classified:', classified.category, 'code:', classified.code, 'taskId:', taskId);
       return res.status(502).json({
         ok: false,
-        error: `${orMsg}（HTTP ${response.status}）`,
+        error: orMsg,
+        errorCategory: classified.category,
+        providerErrorCode: classified.code,
         error_detail: rawBody.slice(0, 1000),
         openrouterStatus: response.status,
-        creditRefunded: creditCost,
+        creditRefunded: refundResult.ok ? creditCost : 0,
+        refunded: refundResult.ok,
         checkedAt: new Date().toISOString()
       });
     }
@@ -527,12 +608,13 @@ module.exports = async function handler(req, res) {
 
     if (!jobId && !orPollingUrl) {
       console.error('[seedance-start] OpenRouter 200 but no jobId or pollingUrl — cannot track job, refunding', 'taskId:', taskId);
-      await refundCredits(db, user.id, deduction, taskId);
+      const refundResult = await refundCredits(db, user.id, deduction, taskId);
       await releaseTask(db, user.id, taskId, 'failed');
       return res.status(502).json({
         ok: false,
         error: 'OpenRouterから有効なジョブIDが返されませんでした。もう一度お試しください。',
-        creditRefunded: creditCost,
+        creditRefunded: refundResult.ok ? creditCost : 0,
+        refunded: refundResult.ok,
         checkedAt: new Date().toISOString()
       });
     }
@@ -632,10 +714,14 @@ module.exports = async function handler(req, res) {
     });
   } catch (error) {
     console.error('[seedance-start] unexpected error:', error?.message, 'taskId:', taskId, 'orStarted:', orStarted);
+    let refunded = false;
     if (taskId && !orStarted) {
-      if (deduction?.ok) await refundCredits(db, user.id, deduction, taskId);
+      if (deduction?.ok) {
+        const refundResult = await refundCredits(db, user.id, deduction, taskId);
+        refunded = refundResult.ok;
+      }
       await releaseTask(db, user.id, taskId, 'failed');
     }
-    return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', checkedAt: new Date().toISOString() });
+    return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', refunded, checkedAt: new Date().toISOString() });
   }
 };
