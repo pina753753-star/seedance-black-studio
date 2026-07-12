@@ -9,6 +9,20 @@ const RESULT_WAIT_MIN_MS = 5 * 60 * 1000;
 const RESULT_WAIT_MIN_ATTEMPTS = 5;
 const RESULT_ATTEMPT_MIN_INTERVAL_MS = 10 * 1000;
 
+// Keeps only the status fields generate-prod.html's client-side `failed()`
+// fallback reads (d.response?.status / d.response?.data?.status) and drops
+// everything else — including any video URL OpenRouter's raw payload may
+// carry (output_url, download links, etc.) — so a free-plan response never
+// exposes the unwatermarked video outside of `videoUrl`.
+function sanitizeOpenRouterDataForFreeUser(data) {
+  if (!data || typeof data !== 'object') return null;
+  const safe = { status: data.status ?? null };
+  if (data.data && typeof data.data === 'object') {
+    safe.data = { status: data.data.status ?? null };
+  }
+  return safe;
+}
+
 function validWatermarkUrl(url) {
   const value = String(url || '').trim();
   if (!/^https:\/\//i.test(value)) return '';
@@ -962,12 +976,15 @@ module.exports = async function handler(req, res) {
     let finalCreditsResult = null;
     let responseVideoUrl = videoUrl;
     let watermarkFailure = null;
+    // Hoisted so the response-sanitization step below (which strips raw,
+    // unwatermarked video URLs from non-videoUrl fields) knows the plan even
+    // though it's only determined inside the done-branch.
+    let isFreeUser = false;
 
     if (done) {
       // Determine plan BEFORE claiming completion, so free users can be gated on
       // watermark success. Paid users are looked up the same way but take the
       // pre-existing immediate-completion path unchanged.
-      let isFreeUser = false;
       let gateUserId = null;
       const dbGate = dbClient();
       if (dbGate) {
@@ -1118,6 +1135,20 @@ module.exports = async function handler(req, res) {
       await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', orErrorMsg).catch(() => {});
     }
 
+    // For free-plan users on completion, strip the raw (unwatermarked) video URL
+    // from every field except `videoUrl` (which by this point already holds the
+    // watermarked URL — completion is gated on watermark success for free users,
+    // see above). `storage`/`response` are diagnostic fields not read by the
+    // client (generate-prod.html only reads videoUrl/jobStatus/status/response.status/
+    // response.data.status), so only the status fields the client's `failed()`
+    // helper depends on are preserved; everything else, including any URL, is
+    // dropped. Paid-plan responses are returned exactly as before.
+    const responseStorage = storage ? { ...storage, rawVideoUrl, usedFallbackContentUrl: Boolean(fallbackContentUrl) } : null;
+    const responseData = data;
+    const shouldMaskRawUrls = done && isFreeUser;
+    const safeStorage = shouldMaskRawUrls ? null : responseStorage;
+    const safeResponseData = shouldMaskRawUrls ? sanitizeOpenRouterDataForFreeUser(data) : responseData;
+
     return res.status(response.ok ? 200 : response.status).json({
       ok: response.ok,
       status: response.status,
@@ -1132,8 +1163,8 @@ module.exports = async function handler(req, res) {
       costUsd: costUsd ?? null,
       finalCredits: finalCreditsResult?.finalCredits ?? null,
       estimatedCredits: finalCreditsResult?.estimatedCredits ?? null,
-      storage: storage ? { ...storage, rawVideoUrl, usedFallbackContentUrl: Boolean(fallbackContentUrl) } : null,
-      response: data,
+      storage: safeStorage,
+      response: safeResponseData,
       checkedAt: new Date().toISOString()
     });
   } catch (error) {
