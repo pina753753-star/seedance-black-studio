@@ -1070,7 +1070,11 @@ module.exports = async function handler(req, res) {
                 .maybeSingle();
               refunded = taskAfter?.status === 'failed';
             }
-            watermarkFailure = { message: '動画の仕上げ処理に失敗しました。クレジットは返金されました', refunded };
+            // message describes only the failure reason — refund confirmation is
+            // conveyed separately via `refunded`, matching the existing client-side
+            // _ptFail() pattern where the refund paragraph is rendered from that
+            // boolean rather than embedded in the error message text.
+            watermarkFailure = { message: '動画の仕上げ処理に失敗しました。', refunded };
           } else {
             // Still within grace period (or DB unreachable) — keep client polling,
             // do not mark completed and do not expose the raw (unwatermarked) video.
