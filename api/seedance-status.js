@@ -492,6 +492,62 @@ async function recordResultWait(db, resolvedJobId, reason) {
   return { state: 'ok', taskId: task.id, wait: newWait };
 }
 
+// Same read-modify-write grace-period pattern as recordResultWait, but tracks
+// retries of the free-plan watermark step (settings.watermark_wait) instead of
+// the "no video URL yet" wait. Kept separate so the two grace periods never
+// share state or interfere with each other's attempt counters.
+async function recordWatermarkWait(db, resolvedJobId, reason) {
+  if (!db || !resolvedJobId) return { state: 'not_found' };
+
+  const { data: task, error: selectError } = await db
+    .from('generation_tasks')
+    .select('id,settings')
+    .eq('api_task_id', resolvedJobId)
+    .in('status', ['queued', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (selectError) return { state: 'db_error' };
+  if (!task) return { state: 'not_found' };
+
+  const now = new Date().toISOString();
+  const existingSettings = task.settings && typeof task.settings === 'object' && !Array.isArray(task.settings)
+    ? task.settings : {};
+  const existingWait = existingSettings.watermark_wait && typeof existingSettings.watermark_wait === 'object' && !Array.isArray(existingSettings.watermark_wait)
+    ? existingSettings.watermark_wait : {};
+
+  const startedAt = existingWait.started_at || now;
+  const lastAttemptAt = existingWait.last_attempt_at || null;
+  const msSinceLast = lastAttemptAt ? (Date.now() - new Date(lastAttemptAt).getTime()) : Infinity;
+  const currentAttempts = Number(existingWait.attempts || 0);
+
+  if (msSinceLast < RESULT_ATTEMPT_MIN_INTERVAL_MS) {
+    return { state: 'ok', taskId: task.id, wait: existingWait };
+  }
+
+  const newAttempts = currentAttempts + 1;
+  const newWait = {
+    started_at: startedAt,
+    attempts: newAttempts,
+    last_attempt_at: now,
+    last_error: String(reason || 'unknown').slice(0, 100)
+  };
+
+  const newSettings = { ...existingSettings, watermark_wait: newWait };
+  const { data: updated, error: updateError } = await db
+    .from('generation_tasks')
+    .update({ settings: newSettings, updated_at: now })
+    .eq('id', task.id)
+    .in('status', ['queued', 'processing'])
+    .select('id');
+
+  if (updateError) return { state: 'db_error' };
+  if (!updated || updated.length === 0) return { state: 'stale', taskId: task.id, wait: existingWait };
+
+  return { state: 'ok', taskId: task.id, wait: newWait };
+}
+
 // ---- end result-wait grace period helpers ----
 
 function extFromContentType(contentType) {
@@ -898,11 +954,140 @@ module.exports = async function handler(req, res) {
 
     const done = Boolean(videoUrl);
 
-    // Settle final credits on successful completion (once, via atomic task claim)
+    // Settle final credits on successful completion (once, via atomic task claim).
+    // For free-plan users, completion is now gated behind a successful watermark
+    // (see below) — this variable is only assigned directly here for paid users
+    // and for the free-user watermark-success sub-path.
     const costUsd = extractCostUsd(data);
     let finalCreditsResult = null;
+    let responseVideoUrl = videoUrl;
+    let watermarkFailure = null;
+
     if (done) {
-      finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+      // Determine plan BEFORE claiming completion, so free users can be gated on
+      // watermark success. Paid users are looked up the same way but take the
+      // pre-existing immediate-completion path unchanged.
+      let isFreeUser = false;
+      let gateUserId = null;
+      const dbGate = dbClient();
+      if (dbGate) {
+        const { data: gateTask } = await dbGate
+          .from('generation_tasks')
+          .select('user_id')
+          .eq('api_task_id', resolvedJobId)
+          .in('status', ['queued', 'processing'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        gateUserId = gateTask?.user_id || null;
+        if (gateUserId) {
+          const PAID_PLANS = ['standard', 'premium', 'ultimate', 'team', 'scale'];
+          const { data: profile } = await dbGate.from('profiles').select('plan').eq('id', gateUserId).maybeSingle();
+          isFreeUser = !profile || !PAID_PLANS.includes(profile.plan);
+        }
+      }
+
+      if (!isFreeUser) {
+        // Paid path: unchanged — complete immediately, no watermark attempt.
+        finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+      } else {
+        // Free path: attempt watermark BEFORE marking the task completed.
+        let wmSuccessUrl = null;
+        let wmError = null;
+        try {
+          const wmUrl = `${process.env.WATERMARK_SERVER_URL}/watermark`;
+          const wmRes = await fetch(wmUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.WATERMARK_SECRET || ''}`
+            },
+            body: JSON.stringify({ videoUrl, jobId: resolvedJobId })
+          });
+          if (wmRes.ok) {
+            const wmData = await wmRes.json();
+            const validWmUrl = validWatermarkUrl(wmData?.watermarkedUrl || '');
+            if (validWmUrl) {
+              wmSuccessUrl = validWmUrl;
+            } else {
+              wmError = 'invalid_watermark_url';
+              console.log('[watermark] invalid watermarkedUrl rejected:', String(wmData?.watermarkedUrl || '').slice(0, 200));
+            }
+          } else {
+            const wmErrText = await wmRes.text().catch(() => '');
+            wmError = `wm_http_${wmRes.status}`;
+            console.log('[watermark] error response:', wmRes.status, wmErrText.slice(0, 300));
+          }
+        } catch (wmErr) {
+          wmError = wmErr?.message || String(wmErr);
+          console.log('[watermark] caught error:', wmError);
+        }
+
+        if (wmSuccessUrl) {
+          finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+          if (finalCreditsResult) {
+            const dbWm = dbClient();
+            if (dbWm) {
+              await dbWm.from('generation_tasks').update(
+                { watermarked_url: wmSuccessUrl, updated_at: new Date().toISOString() }
+              ).eq('api_task_id', resolvedJobId);
+            }
+            responseVideoUrl = wmSuccessUrl;
+          }
+        } else {
+          // Watermark failed — reuse the recoverable-failure grace-period pattern
+          // (separate settings.watermark_wait counter) before giving up and refunding.
+          const dbWmWait = dbClient();
+          let waitResult = { state: 'db_error' };
+          if (dbWmWait) waitResult = await recordWatermarkWait(dbWmWait, resolvedJobId, wmError).catch(() => ({ state: 'db_error' }));
+
+          if (waitResult.state === 'ok' && isResultWaitExpired(waitResult.wait)) {
+            await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', `watermark-failed:${String(wmError).slice(0, 150)}`).catch(() => {});
+            let refunded = false;
+            const dbVerify = dbClient();
+            if (dbVerify) {
+              const { data: taskAfter } = await dbVerify
+                .from('generation_tasks')
+                .select('id,status')
+                .eq('id', waitResult.taskId)
+                .maybeSingle();
+              refunded = taskAfter?.status === 'failed';
+            }
+            watermarkFailure = { message: '動画の仕上げ処理に失敗しました。クレジットは返金されました', refunded };
+          } else {
+            // Still within grace period (or DB unreachable) — keep client polling,
+            // do not mark completed and do not expose the raw (unwatermarked) video.
+            return res.status(200).json({
+              ok: true,
+              done: false,
+              jobStatus: 'processing',
+              resultPending: true,
+              jobId: resolvedJobId,
+              originalJobId: jobId,
+              pollingUrl,
+              statusUrl,
+              checkedAt: new Date().toISOString()
+            });
+          }
+        }
+      }
+    }
+
+    if (watermarkFailure) {
+      return res.status(200).json({
+        ok: false,
+        done: false,
+        jobStatus: 'failed',
+        resultPending: false,
+        error: 'watermark_failed',
+        message: watermarkFailure.message,
+        refunded: watermarkFailure.refunded,
+        jobId: resolvedJobId,
+        originalJobId: jobId,
+        pollingUrl,
+        statusUrl,
+        checkedAt: new Date().toISOString()
+      });
     }
 
     // Detect late completion: video found but task was already refunded (status='failed')
@@ -923,67 +1108,6 @@ module.exports = async function handler(req, res) {
           }
         }
       } catch (_) {}
-    }
-
-    // Apply watermark for free users on successful completion
-    let responseVideoUrl = videoUrl;
-    if (done && videoUrl) {
-      try {
-        const db2 = dbClient();
-        if (db2) {
-          const wmUserId = finalCreditsResult?.userId || (await db2
-            .from('generation_tasks')
-            .select('user_id')
-            .eq('api_task_id', resolvedJobId)
-            .maybeSingle()
-          ).data?.user_id;
-          console.log('[watermark] done:', done, 'resolvedJobId:', resolvedJobId, 'wmUserId:', wmUserId, 'WATERMARK_SERVER_URL:', process.env.WATERMARK_SERVER_URL);
-          if (!wmUserId) {
-            console.log('[watermark] SKIP: wmUserId is null/undefined. resolvedJobId used for lookup:', resolvedJobId);
-          }
-          if (wmUserId) {
-            const PAID_PLANS = ['standard', 'premium', 'ultimate', 'team', 'scale'];
-            const { data: profile } = await db2
-              .from('profiles')
-              .select('plan')
-              .eq('id', wmUserId)
-              .maybeSingle();
-            const isFreeUser = !profile || !PAID_PLANS.includes(profile.plan);
-            console.log('[watermark] profile:', JSON.stringify(profile), 'isFreeUser:', isFreeUser);
-            if (isFreeUser) {
-              const wmUrl = `${process.env.WATERMARK_SERVER_URL}/watermark`;
-              console.log('[watermark] sending request to:', wmUrl);
-              const wmRes = await fetch(wmUrl, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${process.env.WATERMARK_SECRET || ''}`
-                },
-                body: JSON.stringify({ videoUrl, jobId: resolvedJobId })
-              });
-              console.log('[watermark] wmRes.status:', wmRes.status, 'wmRes.ok:', wmRes.ok);
-              if (wmRes.ok) {
-                const wmData = await wmRes.json();
-                console.log('[watermark] wmData:', JSON.stringify(wmData));
-                const validWmUrl = validWatermarkUrl(wmData?.watermarkedUrl || '');
-                if (validWmUrl) {
-                  await db2.from('generation_tasks').update(
-                    { watermarked_url: validWmUrl, updated_at: new Date().toISOString() }
-                  ).eq('api_task_id', resolvedJobId);
-                  responseVideoUrl = validWmUrl;
-                } else if (wmData?.watermarkedUrl) {
-                  console.log('[watermark] invalid watermarkedUrl rejected:', String(wmData.watermarkedUrl).slice(0, 200));
-                }
-              } else {
-                const wmErrText = await wmRes.text().catch(() => '');
-                console.log('[watermark] error response:', wmErrText.slice(0, 300));
-              }
-            }
-          }
-        }
-      } catch (wmErr) {
-        console.log('[watermark] caught error:', wmErr?.message || String(wmErr));
-      }
     }
 
     // Refund credits on explicit terminal failure (failed/error/cancelled from OpenRouter).
