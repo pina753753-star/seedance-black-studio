@@ -18,18 +18,83 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const WATERMARK_SECRET = process.env.WATERMARK_SECRET || '';
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
-  res.json({ ok: true, service: 'FlowVid Watermark Server', version: '1.0.0' });
-});
+// ---- concurrency guard for /watermark ----
+// Without a limit, overlapping requests (e.g. a client retrying every ~10s
+// while a previous attempt is still stuck/slow) each spawn their own ffmpeg
+// process, multiplying peak memory/CPU and starving whatever is already
+// running — this matched what production logs showed for the SIGKILL
+// incidents (repeated /watermark calls piling up for the same job).
+// MAX_CONCURRENT_JOBS bounds how many /watermark jobs run at once; anything
+// beyond that waits in a FIFO queue instead of running in parallel.
+// NOTE: /edit does not use this guard yet — it has no production traffic
+// (nothing calls it), so it's out of scope for this fix. Wire /edit into the
+// same guard before it goes live, since both endpoints share this container.
+const MAX_CONCURRENT_JOBS = 2;
+let activeJobs = 0;
+const jobQueue = [];
 
-app.post('/watermark', async (req, res) => {
-  const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  if (WATERMARK_SECRET && auth !== WATERMARK_SECRET) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+function acquireSlot() {
+  if (activeJobs < MAX_CONCURRENT_JOBS) {
+    activeJobs++;
+    return Promise.resolve();
   }
-  const { videoUrl } = req.body;
-  if (!videoUrl) return res.status(400).json({ ok: false, error: 'videoUrl is required' });
+  return new Promise((resolve) => jobQueue.push(resolve));
+}
 
+function releaseSlot() {
+  const next = jobQueue.shift();
+  if (next) {
+    next();
+  } else {
+    activeJobs--;
+  }
+}
+
+// Hard cap on how long a single ffmpeg run may take. Without this, a stuck
+// ffmpeg process (bad input, resource contention) holds its concurrency slot
+// and downloaded buffer forever, and the client's poll-driven retries just
+// keep queuing more requests behind it.
+const FFMPEG_TIMEOUT_MS = 90000;
+
+function runFfmpeg(build, timeoutMs = FFMPEG_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const command = build();
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { command.kill('SIGKILL'); } catch (_) {}
+      reject(new Error(`ffmpeg timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    command
+      .on('end', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      })
+      .on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      })
+      .run();
+  });
+}
+
+// ---- /watermark de-duplication ----
+// The client polls /api/seedance-status every ~10-12s and retries the
+// watermark step on each poll until it succeeds or the grace period expires.
+// Without this map, each poll for the same not-yet-watermarked video started
+// its own independent download+ffmpeg+upload cycle, so a single slow/stuck
+// job could have several duplicate jobs for the exact same video queued
+// behind it at once. Concurrent requests for the same videoUrl now share one
+// in-flight job instead of each starting a new one.
+const inFlightWatermarks = new Map(); // videoUrl -> Promise<{ok, watermarkedUrl?, error?}>
+
+async function runWatermarkJob(videoUrl) {
+  await acquireSlot();
   const uid = uuidv4();
   const inputFile = path.join('/tmp', `in_${uid}.mp4`);
   const outputFile = path.join('/tmp', `out_${uid}.mp4`);
@@ -40,7 +105,7 @@ app.post('/watermark', async (req, res) => {
     const buffer = await response.buffer();
     fs.writeFileSync(inputFile, buffer);
 
-    await new Promise((resolve, reject) => {
+    await runFfmpeg(() =>
       ffmpeg(inputFile)
         .outputOptions([
           '-vf', "drawtext=text=FlowVid:fontsize=28:fontcolor=white@0.85:x=w-tw-20:y=h-th-20:shadowcolor=black@0.8:shadowx=2:shadowy=2",
@@ -48,10 +113,7 @@ app.post('/watermark', async (req, res) => {
           '-movflags', '+faststart'
         ])
         .output(outputFile)
-        .on('end', resolve)
-        .on('error', (err) => reject(new Error(`ffmpeg: ${err.message}`)))
-        .run();
-    });
+    );
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
     const fileBuffer = fs.readFileSync(outputFile);
@@ -66,14 +128,37 @@ app.post('/watermark', async (req, res) => {
       .from('reference-images')
       .getPublicUrl(storagePath);
 
-    return res.json({ ok: true, watermarkedUrl: urlData.publicUrl });
+    return { ok: true, watermarkedUrl: urlData.publicUrl };
   } catch (err) {
     console.error('[watermark] error:', err.message);
-    return res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   } finally {
     try { if (fs.existsSync(inputFile)) fs.unlinkSync(inputFile); } catch (_) {}
     try { if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile); } catch (_) {}
+    releaseSlot();
   }
+}
+
+app.get('/', (req, res) => {
+  res.json({ ok: true, service: 'FlowVid Watermark Server', version: '1.0.0' });
+});
+
+app.post('/watermark', async (req, res) => {
+  const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  if (WATERMARK_SECRET && auth !== WATERMARK_SECRET) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const { videoUrl } = req.body;
+  if (!videoUrl) return res.status(400).json({ ok: false, error: 'videoUrl is required' });
+
+  let jobPromise = inFlightWatermarks.get(videoUrl);
+  if (!jobPromise) {
+    jobPromise = runWatermarkJob(videoUrl).finally(() => inFlightWatermarks.delete(videoUrl));
+    inFlightWatermarks.set(videoUrl, jobPromise);
+  }
+
+  const result = await jobPromise;
+  return res.status(result.ok ? 200 : 500).json(result);
 });
 
 // ================================================================
