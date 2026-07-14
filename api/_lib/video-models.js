@@ -71,61 +71,112 @@ const VIDEO_MODELS = Object.freeze({
 
   'kwaivgi/kling-v3.0-pro': Object.freeze({
     id: 'kwaivgi/kling-v3.0-pro',
+    canonicalSlug: 'kwaivgi/kling-v3.0-pro-20260429',
     displayName: 'Kling v3.0 Pro',
     provider: 'openrouter',
     status: MODEL_STATUS.CANDIDATE,
     enabledForGeneration: false,
-    metadataConfidence: 'official_cookbook_model_list_only',
-    durations: null,
-    resolutions: null,
-    aspectRatios: null,
-    modes: null,
-    generateAudio: null,
+    metadataConfidence: 'live_openrouter_video_models_api',
+    durations: Object.freeze({ type: 'integer_range', min: 3, max: 15, integerOnly: true }),
+    resolutions: Object.freeze(['720p']),
+    aspectRatios: Object.freeze(['16:9', '9:16', '1:1']),
+    sizes: Object.freeze(['1280x720', '720x1280', '720x720']),
+    modes: Object.freeze(['text_to_video', 'image_to_video']),
+    frameImages: Object.freeze(['first_frame', 'last_frame']),
+    inputReferences: null,
+    generateAudio: Object.freeze({ supported: true, currentDefault: null }),
+    seed: Object.freeze({ supported: false }),
+    allowedPassthroughParameters: Object.freeze(['negative_prompt', 'cfg_scale']),
+    pricingSkus: Object.freeze({
+      durationSeconds: '0.112',
+      durationSecondsWithAudio: '0.168',
+      textToVideoDurationSeconds480p: '0.112',
+      textToVideoDurationSeconds720p: '0.112',
+      imageToVideoDurationSeconds720p: '0.112',
+      textToVideoDurationSeconds1080p: '0.112',
+      imageToVideoDurationSeconds1080p: '0.112'
+    }),
     pricingProfile: null,
     notes: Object.freeze([
-      'Model ID is present in the official OpenRouter cookbook model-list output.',
-      'Live GET /api/v1/videos/models metadata still requires an authorized read-only request.',
-      'All null capability fields are unverified and must not be used for validation or UI.'
+      'Metadata was retrieved from the authenticated OpenRouter video models API on 2026-07-14.',
+      'Only 720p is enabled in the capability definition because supported_resolutions contains only 720p.',
+      '480p and 1080p pricing SKU keys do not override the supported_resolutions capability field.',
+      'Reference-to-video is unverified because no formal input-reference capability field was returned.',
+      'Pricing values are metadata only and are not connected to credit calculation.'
     ])
   }),
 
   'openai/sora-2-pro': Object.freeze({
     id: 'openai/sora-2-pro',
+    canonicalSlug: 'openai/sora-2-pro-20260320',
     displayName: 'Sora 2 Pro',
     provider: 'openrouter',
     status: MODEL_STATUS.CANDIDATE,
     enabledForGeneration: false,
-    metadataConfidence: 'official_cookbook_model_list_only',
-    durations: null,
-    resolutions: null,
-    aspectRatios: null,
-    modes: null,
-    generateAudio: null,
+    metadataConfidence: 'live_openrouter_video_models_api',
+    durations: Object.freeze({ type: 'discrete', values: Object.freeze([4, 8, 12, 16, 20]) }),
+    resolutions: Object.freeze(['720p', '1080p']),
+    aspectRatios: Object.freeze(['16:9', '9:16']),
+    sizes: Object.freeze(['1280x720', '1080x1920', '1920x1080', '720x1280']),
+    modes: Object.freeze(['text_to_video']),
+    frameImages: null,
+    inputReferences: null,
+    generateAudio: Object.freeze({ supported: true, currentDefault: null }),
+    seed: Object.freeze({ supported: false }),
+    allowedPassthroughParameters: Object.freeze(['quality', 'style']),
+    pricingSkus: Object.freeze({
+      durationSeconds720p: '0.30',
+      durationSeconds1024p: '0.50',
+      durationSeconds1080p: '0.50'
+    }),
     pricingProfile: null,
     notes: Object.freeze([
-      'Model ID is present in the official OpenRouter cookbook model-list output.',
-      'Live GET /api/v1/videos/models metadata still requires an authorized read-only request.',
-      'All null capability fields are unverified and must not be used for validation or UI.'
+      'Metadata was retrieved from the authenticated OpenRouter video models API on 2026-07-14.',
+      'Duration support is discrete: 4, 8, 12, 16, or 20 seconds.',
+      'The existing global 1-15 integer validation must not be used for this model.',
+      '1024p appears in pricing metadata but not in supported_resolutions, so it is not enabled.',
+      'Image-to-video and reference-to-video remain unverified.',
+      'Pricing values are metadata only and are not connected to credit calculation.',
+      'Before enabling this model, credit pricing must be redesigned because long high-resolution jobs such as 20s at 1080p can greatly exceed the current 400-credit cap.'
     ])
   }),
 
   'x-ai/grok-imagine-video': Object.freeze({
     id: 'x-ai/grok-imagine-video',
+    canonicalSlug: 'x-ai/grok-imagine-video-20260512',
     displayName: 'Grok Imagine Video',
     provider: 'openrouter',
-    status: MODEL_STATUS.NOT_FOUND_IN_OFFICIAL_SNAPSHOT,
+    status: MODEL_STATUS.CANDIDATE,
     enabledForGeneration: false,
-    metadataConfidence: 'not_verified',
-    durations: null,
-    resolutions: null,
-    aspectRatios: null,
-    modes: null,
+    metadataConfidence: 'live_openrouter_video_models_api',
+    durations: Object.freeze({ type: 'integer_range', min: 1, max: 15, integerOnly: true }),
+    fps: 24,
+    resolutions: Object.freeze(['480p', '720p']),
+    aspectRatios: Object.freeze(['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']),
+    sizes: Object.freeze([
+      '854x480', '1280x720', '480x854', '720x1280', '480x480', '720x720',
+      '640x480', '960x720', '480x640', '720x960', '720x480', '1080x720',
+      '480x720', '720x1080'
+    ]),
+    modes: Object.freeze(['text_to_video', 'image_to_video']),
+    frameImages: Object.freeze(['first_frame']),
+    inputReferences: null,
     generateAudio: null,
+    seed: null,
+    allowedPassthroughParameters: Object.freeze([]),
+    pricingSkus: Object.freeze({
+      centsPerImageInput: '0.2',
+      centsPerVideoOutputSecond480p: '5',
+      centsPerVideoOutputSecond720p: '7'
+    }),
     pricingProfile: null,
     notes: Object.freeze([
-      'This is a placeholder candidate ID only; it is not a confirmed OpenRouter slug.',
-      'Grok Imagine Video was absent from the official cookbook model-list output reviewed on 2026-07-14.',
-      'Do not expose, validate, quote, or submit this entry until a live API response confirms its slug.'
+      'Metadata was retrieved from the authenticated OpenRouter video models API on 2026-07-14.',
+      'The model officially exists in the OpenRouter video models API.',
+      'The description mentions reference-conditioned generation, but no formal input-reference capability field was returned.',
+      'Reference-to-video therefore remains disabled and inputReferences remains null.',
+      'Audio support was not supplied as a confirmed boolean and remains null.',
+      'Pricing values are metadata only and are not connected to credit calculation.'
     ])
   })
 });
