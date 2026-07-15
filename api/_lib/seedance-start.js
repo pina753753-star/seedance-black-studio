@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { moderateContent } = require('./openai-moderation.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
@@ -82,6 +83,32 @@ function imageObject(url, frameType) {
 
 function imageObjects(urls) {
   return (Array.isArray(urls) ? urls : []).map((url) => imageObject(url)).filter(Boolean);
+}
+
+function extractImageUrl(value) {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return '';
+  if (typeof value.url === 'string') return value.url.trim();
+  if (typeof value.image_url === 'string') return value.image_url.trim();
+  if (value.image_url && typeof value.image_url.url === 'string') return value.image_url.url.trim();
+  return '';
+}
+
+function collectModerationImageUrls(body) {
+  const values = [];
+  const append = (value) => {
+    if (Array.isArray(value)) values.push(...value);
+    else if (value) values.push(value);
+  };
+
+  append(body.frame_images);
+  append(body.input_references);
+  append(body.reference_urls);
+  append(body.referenceUrls);
+  append(body.reference_url);
+  append(body.first_frame_url);
+
+  return [...new Set(values.map(extractImageUrl).filter(Boolean))];
 }
 
 function extractJobId(data) {
@@ -458,6 +485,29 @@ module.exports = async function handler(req, res) {
         message: 'Seedance 2.0 Fastのリファレンスモードは1080pに対応していません。720p以下をお選びください。'
       });
     }
+
+    // Authentication has already succeeded above. Fail closed before any task,
+    // credit, or OpenRouter work if moderation blocks or cannot complete.
+    const moderation = await moderateContent(prompt, collectModerationImageUrls(body));
+    if (!moderation.ok) {
+      console.error('[seedance-start] moderation unavailable:', moderation.errorCode, 'httpStatus:', moderation.httpStatus || null);
+      return res.status(503).json({
+        ok: false,
+        error: 'content_safety_check_unavailable',
+        errorCategory: 'moderation_unavailable',
+        message: '現在コンテンツの安全確認を行えないため、生成を開始できません。しばらくしてからもう一度お試しください。'
+      });
+    }
+    if (moderation.flagged) {
+      console.warn('[seedance-start] moderation blocked request; categories:', moderation.categories || []);
+      return res.status(422).json({
+        ok: false,
+        error: 'content_policy_violation',
+        errorCategory: 'content_policy',
+        message: PROVIDER_ERROR_MESSAGES.content_policy
+      });
+    }
+
     const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
 
     // Pre-check balance (read-only, no writes yet)
