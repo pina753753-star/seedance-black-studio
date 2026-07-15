@@ -114,6 +114,8 @@ function collectModerationImageUrls(body) {
 function extractJobId(data) {
   const direct = data?.id || data?.jobId || data?.data?.id || data?.response?.id || data?.request_id;
   if (direct) return direct;
+  // Fall back to extracting the video ID from polling_url path
+  // (OpenRouter video jobs may return only polling_url without a top-level id)
   const pollingUrl = data?.polling_url || data?.pollingUrl;
   if (pollingUrl && typeof pollingUrl === 'string') {
     try {
@@ -149,6 +151,9 @@ async function getUserFromToken(token) {
   }
 }
 
+// Reads the current balance and deducts creditCost atomically using optimistic
+// concurrency control: the UPDATE only succeeds if the balance hasn't changed
+// since we read it, which prevents double-deduction from concurrent requests.
 async function checkAndDeduct(db, userId, creditCost, taskId) {
   const { data: bal, error: readErr } = await db
     .from('credit_balances')
@@ -184,11 +189,14 @@ async function checkAndDeduct(db, userId, creditCost, taskId) {
       error: `クレジット不足です（残高: ${total}、必要: ${creditCost}）` };
   }
 
+  // Deduct priority: subscription → free → purchased
   let remaining = creditCost;
   const fromSub = Math.min(remaining, sub); remaining -= fromSub;
   const fromFree = Math.min(remaining, free); remaining -= fromFree;
   const fromPurchased = Math.min(remaining, purchased);
 
+  // Optimistic lock: WHERE clause matches the exact values we read.
+  // If another request already modified the balance, this returns 0 rows.
   const { data: updated, error: updateErr } = await db
     .from('credit_balances')
     .update({
@@ -209,6 +217,7 @@ async function checkAndDeduct(db, userId, creditCost, taskId) {
       error: 'クレジット残高が更新中です。もう一度お試しください。' };
   }
 
+  // Record per-pool transactions
   const txRows = [];
   if (fromSub > 0) txRows.push({ user_id: userId, amount: -fromSub, credit_type: 'subscription', reason: 'video_generation', related_task_id: taskId || null });
   if (fromFree > 0) txRows.push({ user_id: userId, amount: -fromFree, credit_type: 'free', reason: 'video_generation', related_task_id: taskId || null });
@@ -218,6 +227,10 @@ async function checkAndDeduct(db, userId, creditCost, taskId) {
   return { ok: true, deducted: creditCost, newBalance: total - creditCost, fromSub, fromFree, fromPurchased };
 }
 
+// Returns credits to the exact pools they were deducted from.
+// Returns { ok: true } only if the balance update (and ledger insert, when
+// applicable) actually completed. Callers use this to report an accurate
+// refund status to the client instead of assuming success.
 async function refundCredits(db, userId, { fromSub, fromFree, fromPurchased }, taskId) {
   try {
     const { data: bal, error: balSelectErr } = await db.from('credit_balances')
@@ -239,6 +252,9 @@ async function refundCredits(db, userId, { fromSub, fromFree, fromPurchased }, t
     if (fromPurchased > 0) txRows.push({ user_id: userId, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: taskId || null });
     if (txRows.length) {
       const { error: txErr } = await db.from('credit_transactions').insert(txRows);
+      // Balance was already updated above; the ledger row is a record of that
+      // fact, not a precondition. Report ok:true regardless so the client
+      // isn't told "not refunded" when the balance was in fact restored.
       if (txErr) console.error('[seedance-start] refund ledger insert failed (balance was still updated):', txErr.message, 'taskId:', taskId);
     }
     return { ok: true };
@@ -248,6 +264,14 @@ async function refundCredits(db, userId, { fromSub, fromFree, fromPurchased }, t
   }
 }
 
+// Best-effort extraction + classification of the upstream provider's error
+// code from an OpenRouter error response body. OpenRouter/Seedance error
+// bodies are inconsistent: sometimes the real provider error is nested as a
+// stringified JSON inside `.error.message` (observed shape:
+// {"error":{"message":"HTTP 400: {\"error\":{\"code\":\"...\",...}}","code":400}}),
+// sometimes it's a flat string code at the top level. Returns { code, category }
+// where category is one of 'content_policy' | 'rate_limit' | 'auth' |
+// 'invalid_input' | 'unknown'. Never throws.
 function classifyProviderError(rawBody, httpStatus) {
   let providerCode = '';
   let providerMessage = '';
@@ -260,12 +284,22 @@ function classifyProviderError(rawBody, httpStatus) {
         const inner = JSON.parse(nestedJsonMatch[0]);
         providerCode = String(inner?.error?.code || '');
         providerMessage = String(inner?.error?.message || '');
-      } catch (_) {}
+      } catch (_) { /* not nested JSON, fall through */ }
     }
-    if (!providerCode && typeof outer?.error?.code === 'string') providerCode = outer.error.code;
+    if (!providerCode && typeof outer?.error?.code === 'string') {
+      providerCode = outer.error.code;
+    }
     if (!providerMessage) providerMessage = outerMsg;
-  } catch (_) {}
+  } catch (_) { /* rawBody wasn't JSON at all */ }
 
+  // Known/observed codes (confirmed from production logs):
+  //   InputImageSensitiveContentDetected.PrivacyInformation — image flagged as a real person
+  // Plausible sibling codes based on the same naming convention, NOT yet
+  // observed in production — included so the same category catches them if
+  // they occur, but unconfirmed:
+  //   InputImageSensitiveContentDetected.Porn / .Violence
+  //   InputTextSensitiveContentDetected.*
+  //   OutputVideoSensitiveContentDetected.*
   if (/SensitiveContentDetected|ContentPolicy|Moderation/i.test(providerCode) ||
       /content\s*polic|real person|privacy|nsfw|explicit|adult\s*content/i.test(providerMessage)) {
     return { code: providerCode || null, category: 'content_policy' };
@@ -289,27 +323,44 @@ const PROVIDER_ERROR_MESSAGES = {
   invalid_input: '入力内容に問題があり生成できませんでした。内容をご確認のうえ再度お試しください。'
 };
 
+// Atomically reserve a generation task via RPC.
+// The DB function acquires a per-user advisory lock then checks:
+//   1. active (queued/processing) task → rejection_reason: 'active_generation'
+//   2. cooldown (finished_at + 60s > NOW()) → rejection_reason: 'cooldown_active'
+//   3. neither → INSERT with status='queued', returns task_id
+// RPC errors abort task reservation; no direct INSERT fallback is used because
+// that would bypass the active-generation and cooldown checks.
 async function createTask(db, { userId, mode, model, prompt, resolution, duration, aspectRatio, creditCost }) {
   try {
     const { data, error } = await db.rpc('reserve_generation_task', {
-      p_user_id: userId,
-      p_mode: mode,
-      p_model: String(model || DEFAULT_MODEL),
-      p_prompt: prompt,
-      p_resolution: resolution,
+      p_user_id:       userId,
+      p_mode:          mode,
+      p_model:         String(model || DEFAULT_MODEL),
+      p_prompt:        prompt,
+      p_resolution:    resolution,
       p_duration_secs: Number(duration),
-      p_aspect_ratio: aspectRatio,
-      p_credit_cost: creditCost
+      p_aspect_ratio:  aspectRatio,
+      p_credit_cost:   creditCost
     });
     if (error) {
       console.error('[seedance-start] reserve_generation_task RPC error:', error.message, error.code);
+      // A 23505 propagated by the RPC's INSERT still maps to active_generation.
       if (error.code === '23505') return { id: null, code: '23505', rejection: 'active_generation' };
       return { id: null, code: error.code || null, rejection: null };
     }
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row) return { id: null, code: null, rejection: null };
-    if (row.rejection_reason) return { id: null, code: null, rejection: row.rejection_reason, retryAfterSeconds: row.retry_after_seconds || 0 };
-    if (!row.task_id) return { id: null, code: null, rejection: null };
+    if (!row) {
+      console.error('[seedance-start] reserve_generation_task: no row returned');
+      return { id: null, code: null, rejection: null };
+    }
+    if (row.rejection_reason) {
+      console.log('[seedance-start] reserve_generation_task rejected:', row.rejection_reason, 'retryAfter:', row.retry_after_seconds);
+      return { id: null, code: null, rejection: row.rejection_reason, retryAfterSeconds: row.retry_after_seconds || 0 };
+    }
+    if (!row.task_id) {
+      console.error('[seedance-start] reserve_generation_task: no task_id in response');
+      return { id: null, code: null, rejection: null };
+    }
     return { id: row.task_id, code: null, rejection: null };
   } catch (err) {
     console.error('[seedance-start] createTask exception:', err?.message);
@@ -321,22 +372,39 @@ async function updateTask(db, taskId, fields) {
   if (!taskId) return { ok: false, error: 'no taskId' };
   try {
     const { error } = await db.from('generation_tasks').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', taskId);
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      console.error('[seedance-start] updateTask error:', error.message, 'taskId:', taskId, 'fields:', JSON.stringify(Object.keys(fields)));
+      return { ok: false, error: error.message };
+    }
     return { ok: true };
   } catch (err) {
+    console.error('[seedance-start] updateTask exception:', err?.message, 'taskId:', taskId);
     return { ok: false, error: err?.message };
   }
 }
 
+// Releases a generation reservation by marking it cancelled/failed.
+// Falls back to DELETE if the status update fails, to ensure the partial
+// unique index slot is freed and the user can start a new generation.
 async function releaseTask(db, userId, taskId, status, errorMessage) {
   if (!taskId) return;
   const fields = { status: status || 'cancelled' };
   if (errorMessage) fields.error_message = errorMessage;
   const upd = await updateTask(db, taskId, fields);
   if (!upd.ok) {
+    console.error('[seedance-start] releaseTask: updateTask failed, attempting DELETE fallback', 'taskId:', taskId);
     try {
-      await db.from('generation_tasks').delete().eq('id', taskId).eq('user_id', userId).eq('status', 'queued').is('api_task_id', null);
-    } catch (_) {}
+      const { error } = await db.from('generation_tasks')
+        .delete()
+        .eq('id', taskId)
+        .eq('user_id', userId)
+        .eq('status', 'queued')
+        .is('api_task_id', null);
+      if (error) console.error('[seedance-start] releaseTask DELETE fallback error:', error.message, 'taskId:', taskId);
+      else console.log('[seedance-start] releaseTask: DELETE fallback succeeded for taskId:', taskId);
+    } catch (err) {
+      console.error('[seedance-start] releaseTask DELETE fallback exception:', err?.message, 'taskId:', taskId);
+    }
   }
 }
 
@@ -356,6 +424,7 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY || '';
   if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
 
+  // Authenticate the user
   const token = bearerToken(req);
   const user = await getUserFromToken(token);
   if (!user) return res.status(401).json({ ok: false, error: 'ログインが必要です', redirect: '/login.html' });
@@ -372,20 +441,28 @@ module.exports = async function handler(req, res) {
     const prompt = String(body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ ok: false, error: 'prompt is required' });
 
+    // Reject explicitly invalid inputs before any DB writes or credit deductions.
+    // Absent/empty fields fall through to normalize defaults (backward compat).
     const VALID_MODES = ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'];
     const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
     const rawMode = body.mode;
     const rawModel = body.model;
     const rawResolution = body.resolution;
     const rawDuration = body.duration !== undefined ? body.duration : body.duration_seconds;
-    if (rawMode !== undefined && rawMode !== null && rawMode !== '' && !VALID_MODES.includes(String(rawMode).trim())) {
-      return res.status(400).json({ ok: false, error: 'invalid_mode', message: 'Unsupported generation mode.' });
+    if (rawMode !== undefined && rawMode !== null && rawMode !== '') {
+      if (!VALID_MODES.includes(String(rawMode).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_mode', message: 'Unsupported generation mode.' });
+      }
     }
-    if (rawModel !== undefined && rawModel !== null && rawModel !== '' && !ALLOWED_MODELS.includes(String(rawModel).trim())) {
-      return res.status(400).json({ ok: false, error: 'invalid_model', message: 'Unsupported generation model.' });
+    if (rawModel !== undefined && rawModel !== null && rawModel !== '') {
+      if (!ALLOWED_MODELS.includes(String(rawModel).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_model', message: 'Unsupported generation model.' });
+      }
     }
-    if (rawResolution !== undefined && rawResolution !== null && rawResolution !== '' && !VALID_RESOLUTIONS.includes(String(rawResolution).trim())) {
-      return res.status(400).json({ ok: false, error: 'invalid_resolution', message: 'Unsupported resolution.' });
+    if (rawResolution !== undefined && rawResolution !== null && rawResolution !== '') {
+      if (!VALID_RESOLUTIONS.includes(String(rawResolution).trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_resolution', message: 'Unsupported resolution.' });
+      }
     }
     if (rawDuration !== undefined && rawDuration !== '') {
       const durNum = Number(rawDuration);
@@ -400,6 +477,7 @@ module.exports = async function handler(req, res) {
     const mode = normalizeMode(body.mode);
     const model = normalizeModel(body.model);
 
+    // Fast/Lite + reference_to_video + 1080p is rejected by OpenRouter (confirmed).
     if ((model === FAST_MODEL || model === LEGACY_LITE_MODEL) && mode === 'reference_to_video' && resolution === '1080p') {
       return res.status(400).json({
         ok: false,
@@ -408,6 +486,8 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // Authentication has already succeeded above. Fail closed before any task,
+    // credit, or OpenRouter work if moderation blocks or cannot complete.
     const moderation = await moderateContent(prompt, collectModerationImageUrls(body));
     if (!moderation.ok) {
       console.error('[seedance-start] moderation unavailable:', moderation.errorCode, 'httpStatus:', moderation.httpStatus || null);
@@ -430,6 +510,7 @@ module.exports = async function handler(req, res) {
 
     const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
 
+    // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db
       .from('credit_balances')
       .select('free_credits,subscription_credits,purchased_credits')
@@ -437,95 +518,224 @@ module.exports = async function handler(req, res) {
       .maybeSingle();
     const total = Number(bal?.free_credits || 0) + Number(bal?.subscription_credits || 0) + Number(bal?.purchased_credits || 0);
     if (total < creditCost) {
-      return res.status(402).json({ ok: false, error: `クレジット不足です（残高: ${total}、必要: ${creditCost}）`, balance: total, required: creditCost });
+      return res.status(402).json({
+        ok: false,
+        error: `クレジット不足です（残高: ${total}、必要: ${creditCost}）`,
+        balance: total,
+        required: creditCost
+      });
     }
 
+    // Reserve task atomically via RPC (advisory lock + active check + cooldown check + INSERT).
+    // The partial unique index (queued/processing per user) remains as a final defence.
+    // Credits and OpenRouter are never touched if reservation is rejected.
     const taskResult = await createTask(db, { userId: user.id, mode, model, prompt, resolution, duration, aspectRatio, creditCost });
     if (!taskResult.id) {
+      // active_generation: queued/processing task exists, or 23505 from concurrent INSERT
       if (taskResult.rejection === 'active_generation' || taskResult.code === '23505') {
-        return res.status(409).json({ ok: false, error: 'generation_already_in_progress', message: '現在生成中の動画があります。完了後にもう一度お試しください。' });
+        return res.status(409).json({
+          ok: false,
+          error: 'generation_already_in_progress',
+          message: '現在生成中の動画があります。完了後にもう一度お試しください。'
+        });
       }
+      // cooldown_active: last task finished less than 60 seconds ago
       if (taskResult.rejection === 'cooldown_active') {
         const secs = taskResult.retryAfterSeconds || 60;
         res.setHeader('Retry-After', String(secs));
-        return res.status(429).json({ ok: false, error: 'generation_cooldown_active', message: `前回の生成終了から60秒間は再生成できません。あと${secs}秒お待ちください。`, retryAfterSeconds: secs });
+        return res.status(429).json({
+          ok: false,
+          error: 'generation_cooldown_active',
+          message: `前回の生成終了から60秒間は再生成できません。あと${secs}秒お待ちください。`,
+          retryAfterSeconds: secs
+        });
       }
+      console.error('[seedance-start] Aborting: task reservation failed, will not deduct credits or call OpenRouter');
       return res.status(500).json({ ok: false, error: 'タスクの作成に失敗しました。もう一度お試しください。' });
     }
     taskId = taskResult.id;
+    console.log('[seedance-start] task created:', taskId, 'user:', user.id, 'mode:', mode);
 
+    // Deduct credits with optimistic concurrency control (prevents double-deduction)
     deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
     if (!deduction.ok) {
+      console.error('[seedance-start] credit deduction failed:', deduction.error, 'taskId:', taskId);
       await releaseTask(db, user.id, taskId, 'cancelled');
-      return res.status(deduction.insufficient ? 402 : 409).json({ ok: false, error: deduction.error, balance: deduction.balance, required: deduction.required });
+      return res.status(deduction.insufficient ? 402 : 409).json({
+        ok: false,
+        error: deduction.error,
+        balance: deduction.balance,
+        required: deduction.required
+      });
     }
 
-    const payload = { model, prompt, duration, resolution, aspect_ratio: aspectRatio, generate_audio: true };
+    // Build OpenRouter payload
+    const payload = {
+      model,
+      prompt,
+      duration,
+      resolution,
+      aspect_ratio: aspectRatio,
+      generate_audio: true
+    };
+
     const frameImages = Array.isArray(body.frame_images) ? body.frame_images : [];
     const inputReferences = Array.isArray(body.input_references) ? body.input_references : [];
     const firstFrameUrl = String(body.first_frame_url || '').trim();
     const referenceUrl = String(body.reference_url || '').trim();
     const referenceUrls = imageObjects(body.reference_urls || body.referenceUrls || []);
+
     if (frameImages.length) payload.frame_images = frameImages;
     else if (firstFrameUrl) payload.frame_images = [imageObject(firstFrameUrl, 'first_frame')].filter(Boolean);
+
     if (!payload.frame_images?.length) {
       if (inputReferences.length) payload.input_references = inputReferences;
       else if (referenceUrls.length) payload.input_references = referenceUrls;
       else if (referenceUrl) payload.input_references = [imageObject(referenceUrl)].filter(Boolean);
     }
 
+    // Call OpenRouter
+    console.log('[seedance-start] calling OpenRouter, taskId:', taskId, 'model:', payload.model, 'mode:', mode, 'has_refs:', Boolean(payload.input_references?.length), 'has_frames:', Boolean(payload.frame_images?.length));
     orStarted = true;
     let response, text, data;
     try {
       response = await fetch(OPENROUTER_VIDEO_ENDPOINT, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://flowvid-studio.vercel.app', 'X-Title': 'FlowVid Studio' },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://flowvid-studio.vercel.app',
+          'X-Title': 'FlowVid Studio'
+        },
         body: JSON.stringify(payload)
       });
       text = await response.text();
       try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
     } catch (fetchError) {
+      console.error('[seedance-start] OpenRouter network error:', fetchError?.message, 'taskId:', taskId);
       const refundResult = await refundCredits(db, user.id, deduction, taskId);
       await releaseTask(db, user.id, taskId, 'failed', fetchError?.message || 'Network error');
-      return res.status(502).json({ ok: false, error: fetchError?.message || 'OpenRouter request failed', creditRefunded: refundResult.ok ? creditCost : 0, refunded: refundResult.ok, checkedAt: new Date().toISOString() });
+      return res.status(502).json({
+        ok: false,
+        error: fetchError?.message || 'OpenRouter request failed',
+        creditRefunded: refundResult.ok ? creditCost : 0,
+        refunded: refundResult.ok,
+        checkedAt: new Date().toISOString()
+      });
     }
 
     if (!response.ok) {
       const rawBody = String(text || '');
+      console.error('[seedance-start] OpenRouter error body:', response.status, rawBody.slice(0, 500));
       const refundResult = await refundCredits(db, user.id, deduction, taskId);
       await releaseTask(db, user.id, taskId, 'failed', `OpenRouter ${response.status}: ${rawBody.slice(0, 200)}`);
       const classified = classifyProviderError(rawBody, response.status);
-      const orMsg = PROVIDER_ERROR_MESSAGES[classified.category] || `生成に失敗しました（HTTP ${response.status}）`;
-      return res.status(502).json({ ok: false, error: orMsg, errorCategory: classified.category, providerErrorCode: classified.code, error_detail: rawBody.slice(0, 1000), openrouterStatus: response.status, creditRefunded: refundResult.ok ? creditCost : 0, refunded: refundResult.ok, checkedAt: new Date().toISOString() });
+      const orMsg = PROVIDER_ERROR_MESSAGES[classified.category]
+        || (response.status === 403
+          ? 'APIキーが無効か、モデルへのアクセス権がありません（HTTP 403）'
+          : response.status === 429
+          ? 'リクエストが多すぎます。しばらくしてからお試しください（HTTP 429）'
+          : `生成に失敗しました（HTTP ${response.status}）`);
+      console.log('[seedance-start] provider error classified:', classified.category, 'code:', classified.code, 'taskId:', taskId);
+      return res.status(502).json({
+        ok: false,
+        error: orMsg,
+        errorCategory: classified.category,
+        providerErrorCode: classified.code,
+        error_detail: rawBody.slice(0, 1000),
+        openrouterStatus: response.status,
+        creditRefunded: refundResult.ok ? creditCost : 0,
+        refunded: refundResult.ok,
+        checkedAt: new Date().toISOString()
+      });
     }
 
     const jobId = extractJobId(data);
     const orPollingUrl = data?.polling_url || data?.pollingUrl || null;
+    console.log('[seedance-start] OR response keys:', Object.keys(data && typeof data === 'object' ? data : {}));
+    console.log('[seedance-start] OR response preview:', JSON.stringify(data).slice(0, 600));
+    console.log('[seedance-start] OpenRouter accepted, jobId:', jobId, 'pollingUrl:', orPollingUrl, 'taskId:', taskId);
+
     if (!jobId && !orPollingUrl) {
+      console.error('[seedance-start] OpenRouter 200 but no jobId or pollingUrl — cannot track job, refunding', 'taskId:', taskId);
       const refundResult = await refundCredits(db, user.id, deduction, taskId);
       await releaseTask(db, user.id, taskId, 'failed');
-      return res.status(502).json({ ok: false, error: 'OpenRouterから有効なジョブIDが返されませんでした。もう一度お試しください。', creditRefunded: refundResult.ok ? creditCost : 0, refunded: refundResult.ok, checkedAt: new Date().toISOString() });
+      return res.status(502).json({
+        ok: false,
+        error: 'OpenRouterから有効なジョブIDが返されませんでした。もう一度お試しください。',
+        creditRefunded: refundResult.ok ? creditCost : 0,
+        refunded: refundResult.ok,
+        checkedAt: new Date().toISOString()
+      });
     }
 
+    // Persist tracking info (status, api_task_id, polling_url) in one UPDATE.
+    // Retry up to 3 attempts total. Condition: row must still be active (queued or processing).
     let trackingPersisted = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const { data: updRows, error: updErr } = await db.from('generation_tasks')
-          .update({ status: 'processing', api_task_id: jobId || null, polling_url: orPollingUrl || null, updated_at: new Date().toISOString() })
-          .eq('id', taskId).eq('user_id', user.id).in('status', ['queued', 'processing']).select('id');
-        if (!updErr && updRows && updRows.length > 0) { trackingPersisted = true; break; }
-      } catch (_) {}
+          .update({
+            status: 'processing',
+            api_task_id: jobId || null,
+            polling_url: orPollingUrl || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', taskId)
+          .eq('user_id', user.id)
+          .in('status', ['queued', 'processing'])
+          .select('id');
+        if (updErr) {
+          console.error('[seedance-start] tracking persist attempt', attempt, 'DB error:', updErr.message, 'taskId:', taskId);
+        } else if (!updRows || updRows.length === 0) {
+          console.error('[seedance-start] tracking persist attempt', attempt, 'no rows updated', 'taskId:', taskId);
+        } else {
+          console.log('[seedance-start] tracking persisted on attempt', attempt, 'taskId:', taskId);
+          trackingPersisted = true;
+          break;
+        }
+      } catch (persistErr) {
+        console.error('[seedance-start] tracking persist attempt', attempt, 'exception:', persistErr?.message, 'taskId:', taskId);
+      }
     }
+
     if (!trackingPersisted) {
+      // Final fallback: relax the status filter (still scoped to id+user_id) in case
+      // the row's status drifted between reservation and this point.
       try {
         const { data: fallbackRows, error: fallbackErr } = await db.from('generation_tasks')
-          .update({ status: 'processing', api_task_id: jobId || null, polling_url: orPollingUrl || null, updated_at: new Date().toISOString() })
-          .eq('id', taskId).eq('user_id', user.id).select('id');
-        if (!fallbackErr && fallbackRows && fallbackRows.length > 0) trackingPersisted = true;
-      } catch (_) {}
+          .update({
+            status: 'processing',
+            api_task_id: jobId || null,
+            polling_url: orPollingUrl || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', taskId)
+          .eq('user_id', user.id)
+          .select('id');
+        if (!fallbackErr && fallbackRows && fallbackRows.length > 0) {
+          trackingPersisted = true;
+          console.log('[seedance-start] tracking persisted via fallback (status filter relaxed), taskId:', taskId);
+        }
+      } catch (fallbackException) {
+        console.error('[seedance-start] fallback tracking persist exception:', fallbackException?.message, 'taskId:', taskId);
+      }
     }
+
     if (!trackingPersisted) {
-      return res.status(503).json({ ok: false, error: 'generation_tracking_persistence_failed', message: '動画生成は開始されましたが、生成情報の保存に失敗しました。再度生成せず、サポートへお問い合わせください。', providerStarted: true, taskId, jobId, pollingUrl: orPollingUrl });
+      console.error(
+        '[seedance-start] ORPHAN_TASK tracking persistence FAILED after all attempts — provider started, not refunding here (reconcile job will handle)',
+        'userId:', user.id, 'taskId:', taskId, 'jobId:', jobId, 'pollingUrl:', orPollingUrl
+      );
+      return res.status(503).json({
+        ok: false,
+        error: 'generation_tracking_persistence_failed',
+        message: '動画生成は開始されましたが、生成情報の保存に失敗しました。再度生成せず、サポートへお問い合わせください。',
+        providerStarted: true,
+        taskId,
+        jobId,
+        pollingUrl: orPollingUrl
+      });
     }
 
     return res.status(202).json({
@@ -553,6 +763,7 @@ module.exports = async function handler(req, res) {
       checkedAt: new Date().toISOString()
     });
   } catch (error) {
+    console.error('[seedance-start] unexpected error:', error?.message, 'taskId:', taskId, 'orStarted:', orStarted);
     let refunded = false;
     if (taskId && !orStarted) {
       if (deduction?.ok) {
