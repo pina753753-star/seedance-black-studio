@@ -2,6 +2,19 @@
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
 
+## 2026-07-15 追加分: 完了・本番適用済み(すべてSupabase本番DB実測 / GitHub PRマージ状態で検証済み)
+
+- **generation_tasksのUPDATE RLSポリシー削除(PR #70)**: 本番適用済み。DB実測で `Users can update own draft generation tasks` は存在せず、`Admins can update generation tasks` のみ残存を確認。
+  - **注意: INSERT側(PR #71)は未適用。** PR #71(`generation_tasksのユーザー向けINSERTポリシー削除`)は**現在もopenでマージされておらず**、DB実測でも `Users can insert own generation tasks` ポリシーが**現存**している。「PR #70, #71とも本番適用済み」という認識は誤りで、適用済みなのは#70のみ。
+- **grant_annual_subscription_creditsの権限修正(PR #72)**: 本番適用済み・完全解決。DB実測で、旧3引数版は削除され4引数版のみ存在し、`has_function_privilege('anon', ...)` / `('authenticated', ...)` はともに `false`(service_roleのみ実行可)。以前STATUS.mdで「致命的ブロッカー」としていた `grant_annual_subscription_credits` 未認証実行問題はこれで解消。
+- **reference-imagesストレージバケットの制限**: 適用済み。DB実測(`storage.buckets`)で `file_size_limit=52428800`(50MB)、`allowed_mime_types=[image/jpeg, image/png, image/webp, video/mp4, video/webm, video/quicktime]` を確認。手動でのダッシュボード設定と申告どおり。
+- **参照画像アップロードの認証必須化(PR #78)**: 本番mainにマージ済み(`664bdf2`)。**この修正が入るまで、`generate-prod.html`のアップロード処理は`Authorization`ヘッダーを送っておらず、`api/upload-reference-image.js`側は元々Bearerトークン必須(401)だったため、参照画像アップロード機能自体が常に失敗する状態だった。** 現在はPreview環境でログイン済みユーザーによる実アップロード成功を実機確認済み。
+
+### 未適用と判明した項目(申告と本番DB実測に差異あり)
+
+- **user_subscriptions・annual_credit_grant_logの権限REVOKE(PR #75)**: **未適用**。PR #75は現在もopenでマージされていない。DB実測でも、両テーブルとも `anon`/`authenticated` にSELECT/INSERT/UPDATE/DELETE等のテーブルレベル権限が残っている。ただしRLSが有効かつポリシーが0件のため、実際の行アクセスは現状でも拒否される(default-deny)。実害は限定的だが、依頼されたREVOKE自体はまだ本番に反映されていない。マージ・適用が必要。
+- `flowvid_video_history` はPR #75のスコープ外(用途調査中のため意図的に除外、と本文に明記)であり、依然RLSポリシー0件・権限未整理のまま。
+
 ## 前提: このサイトは何か
 
 静的HTML(ルート直下の `*.html`) + Vercel Serverless Functions (`api/`) 構成。Next.jsは過去に導入されたが削除済み(コミット `614eacc`)。動画生成はOpenRouter経由でSeedanceモデルを呼び出す。fal.ai経由の旧生成経路は廃止済み(コミット `930ddba`)。決済はStripe。透かし(watermark)処理はRailway上の別サービス `watermark-server/`(Node/Express/ffmpeg)が担う想定。
@@ -47,7 +60,7 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - **Supabase DB・RLS**: **一部対応**。実データで確認した結果、RLSは全テーブルで有効。ただし以下のセキュリティ指摘がSupabase Advisorから出ている(実測、2026-07-15時点):
   - `annual_credit_grant_log`, `flowvid_video_history`, `user_subscriptions` の3テーブルはRLSが有効だがポリシーが1つも無い(=事実上全アクセス拒否になっている可能性、または想定外の挙動になっている可能性。要確認)。
   - `generated_videos` テーブルに `USING (true) / WITH CHECK (true)` の全許可ポリシーがあり、これはservice_role用の想定だが、意図通りかの再確認が必要。
-  - `grant_annual_subscription_credits`, `handle_new_user`, `is_admin`, `set_generation_task_finished_at` の4つの `SECURITY DEFINER` 関数が、未ログインユーザー(anon)からも直接RPC経由で呼び出し可能な状態。特に `grant_annual_subscription_credits`(クレジット付与)が未認証で叩けるのは重大リスクの可能性が高い。呼び出しても実害が出ない設計になっているかはコード側の確認が必要(確認できません)。
+  - ~~`grant_annual_subscription_credits`, `handle_new_user`, `is_admin`, `set_generation_task_finished_at` の4つの `SECURITY DEFINER` 関数が、未ログインユーザー(anon)からも直接RPC経由で呼び出し可能な状態。~~ **`grant_annual_subscription_credits` は2026-07-15、PR #72の本番適用により解決済み**(DB実測でanon/authenticated実行不可を確認)。残る `handle_new_user`, `is_admin`, `set_generation_task_finished_at` は引数なしのトリガー/チェック用関数で、直接RPC実行しても実害のある副作用が起きない設計であることをコードレビューで確認済み(詳細は本ファイル冒頭の調査ログ外、セッション内のやり取りを参照)。優先度は低い。
   - 漏洩パスワード保護(HaveIBeenPwned連携)が無効。
   - **これらはすべて「一次調査で見つかった実際のSupabase Advisor指摘」であり、放置すると認可バイパスや不正クレジット付与に繋がりうる。運営開始前に必ず精査すべき。**
   - また、リポジトリの `supabase/migrations/` には11ファイルあるのに対し、Supabase側が「適用済み」として認識しているマイグレーションは5件のみ(`20260711`〜`20260714` のもの)。それより前の `20260624`(初期スキーマ)等はSupabase側の管理下に記録されておらず、`supabase/setup-*.sql` 経由で手動適用された可能性が高い。**つまりこのDBのスキーマ管理は「CLI/マイグレーション管理」と「手動SQL適用」の2系統が混在しており、今後のスキーマ変更時に何が本当に当たっているか把握しづらい状態。**
@@ -62,9 +75,9 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 ## 今すぐ運営を始めるにあたって、致命的に足りないもの・ブロックしているもの(優先順位順)
 
 1. **NSFW・違法コンテンツの自動検知の有無が未確認**。ポリシーで禁止と書いてあるだけで技術的な歯止めがあるか不明。動画生成AIサービスは悪用リスクが高く、これが無いまま一般公開するのは最も危険。最優先で確認・対応が必要。
-2. **未認証で叩けるSECURITY DEFINER関数(特に `grant_annual_subscription_credits`)**。不正なクレジット付与・課金バイパスに直結しうる。運営開始前に必ず塞ぐ。
+2. ~~未認証で叩けるSECURITY DEFINER関数(特に `grant_annual_subscription_credits`)~~ **2026-07-15、PR #72の本番適用により解決済み**。
 3. **特定商取引法の表記が不十分(住所・電話番号・代表者個人名の欠落)**。日本国内で有料サービスとして正式運営するなら法的な穴になりうる。
-4. **RLSポリシーが1つも無いテーブルが3つ存在**(`annual_credit_grant_log`, `flowvid_video_history`, `user_subscriptions`)。意図した挙動か要確認。想定外にデータが見えたり書き込めたりしないか検証必須。
+4. **RLSポリシーが1つも無いテーブルが3つ存在**(`annual_credit_grant_log`, `flowvid_video_history`, `user_subscriptions`)。**2026-07-15時点でも状態は変わっていない。** `user_subscriptions`/`annual_credit_grant_log` の権限REVOKE(PR #75)は作成済みだが**openのままマージされておらず本番未適用**。RLSのdefault-denyにより現状の実害は限定的だが、PRのマージ・適用が必要。`flowvid_video_history` はPR #75のスコープ外で未着手のまま。
 5. **Railway watermark-serverの実際の稼働状況が未確認**。無料プランのユーザーに透かし付き動画を渡す設計が本当に機能しているか不明。ここが動いていないと無料/有料の差別化が機能しない。
 6. **本番Stripeキーがlive modeになっているか未確認**。テストモードのままだと実際の課金が発生しない(＝収益が入らない)、あるいは逆に思わぬ請求が発生するリスク。
 7. **年齢確認が規約の文言だけで技術的な強制がない可能性**。未成年利用の法的リスク。
