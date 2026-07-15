@@ -21,8 +21,10 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 
 ### 決済・課金
 - **Stripe決済(単発・サブスク)**: 完了。`stripe-checkout.js` / `stripe-webhook.js` / `stripe-portal.js` / `stripe-config.js` が揃い、Webhookのクレジット付与にはDBレベルの一意制約(`add_stripe_reason_unique_constraint` マイグレーション)による冪等性保護あり。埋め込みCheckout、モバイル決済のリグレッション修正も履歴上確認できる、かなり成熟した実装。
+- **Stripe Checkoutとユーザー紐付け**: **完了**。Checkout作成時に認証済みユーザーのIDを `metadata.user_id` と `client_reference_id` に設定し、サブスクでは `subscription_data.metadata` にも同じmetadataを設定している。Webhook側は `session.metadata.user_id` を読み、無い場合は `session.client_reference_id` をフォールバックとして使う。一般的なチェックリストの `metadata.userId` というcamelCase名ではなく、実装はsnake_caseの `user_id` で統一されている。
 - **年額サブスクの自動クレジット付与(cron)**: 完了。`api/cron-annual-credit-grant.js` が毎日00:15 UTCに実行。日付計算バグは一度発生し `20260705_fix_annual_credit_grant_dates.sql` で修正済み。
 - **年額サブスク付与対象statusの不整合**: **要確認・未修正**。cronコードは `active` と `trialing` を付与候補として扱う一方、DB関数 `grant_annual_subscription_credits` は `active` と `past_due` だけを許可し、`trialing` を `invalid` として拒否する。逆に関数単体は `past_due` を許可するが、cronは対象外にしている。意図した仕様を確認し、cronとDB関数の許可statusを一致させる必要がある。今回は記録のみで修正していない。
+- **OpenRouter Spending Limit**: **確認できません・要ダッシュボード確認**。リポジトリやVercel設定からOpenRouterアカウント側の利用上限設定は確認できない。OpenRouterダッシュボードのCredits / Limits系画面で、月次またはAPIキー単位のSpending Limitが設定済みかユーザー確認が必要。
 - **本番Stripeキー(live mode)への切り替え**: **確認できません**。テスト用キーのままか本番稼働用キーに切り替わっているかはVercel環境変数の値を直接見る権限がなく確認できていません(ユーザー側でVercelダッシュボードの確認が必要)。
 - **返金・チャージバック対応フロー**: 自動返金(生成失敗時)は実装済みだが、**手動チャージバック対応の運用手順・問い合わせ窓口対応フローは未着手**(help.html等の問い合わせ導線はあるが、運用マニュアルは見当たらない)。
 
@@ -44,6 +46,9 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 
 ### インフラ・運用
 - **Vercelデプロイ設定**: 完了。`vercel.json` にビルド・ルーティング・cronが正しく設定されている。
+- **Supabase Storageバケット公開設定**: **一部確認・要対応判断**。本番の `storage.buckets` で確認できたバケットは `reference-images` の1件のみで、`public=true`。`file_size_limit` と `allowed_mime_types` は未設定。`api/upload-reference-image.js` はservice-roleで画像をアップロードし、公開URLを返す実装。動画専用Storageバケットは本番カタログ上確認できない。
+- **Supabase Storage CORS設定**: **確認できません・要ダッシュボード確認**。バケット公開状態はDBから確認できたが、現在利用可能なSupabase管理ツールとリポジトリ内設定から、プロジェクトの実際のCORS許可Origin一覧は取得できない。Supabase DashboardのStorage/API設定画面で `https://flowvid-studio.vercel.app` と必要なPreview Originが許可されているか確認が必要。
+- **Supabase Storageライフサイクル管理**: **未着手**。古いStorageオブジェクトを期限で自動削除するcron、Edge Function、API、SQLジョブはリポジトリ内に見つからない。現状Storageにあるのは公開 `reference-images` バケットで、アップロード処理には削除処理が無いため参照画像が蓄積する。動画専用バケット自体は確認できないため「古い動画の自動削除」は実装されていない。
 - **Supabase DB・RLS**: **一部対応**。実データで確認した結果、RLSは全テーブルで有効。ただし以下のセキュリティ指摘がSupabase Advisorから出ている(実測、2026-07-15時点):
   - `annual_credit_grant_log`, `flowvid_video_history`, `user_subscriptions` の3テーブルはRLSが有効だがポリシーが1つも無い(=事実上全アクセス拒否になっている可能性、または想定外の挙動になっている可能性。要確認)。
   - `generated_videos` テーブルに `USING (true) / WITH CHECK (true)` の全許可ポリシーがあり、これはservice_role用の想定だが、意図通りかの再確認が必要。
@@ -54,6 +59,7 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - **Railway(watermark-server)**: **確認できません**。リポジトリ内にRailway設定ファイル(railway.json等)は存在せず、実際に稼働しているインスタンスがあるかどうかは今回の調査環境からは確認不能。ユーザー側でRailwayダッシュボードを直接確認する必要がある。
 - **`.env.example` の陳腐化**: **要対応**。README自身が「実態との差分は別途確認が必要」と明記する通り、`.env.example` には現行実装で使われていない旧変数(`SEEDANCE_PROVIDER=mock`, 直接Volcengine接続用の変数等)が並び、実際に使われている `OPENROUTER_API_KEY`, `WATERMARK_SERVER_URL`, `WATERMARK_SECRET`, `CRON_SECRET` 等が載っていない。新しい開発者・AIが環境変数を把握する助けになっておらず、実質使い物にならない状態。
 - **エラー監視・ログ収集(Sentry等)**: **未着手**。専用の監視ツール導入は見当たらない。Vercel/Supabase標準ログのみに依存している状態と推測される(確認できません、要ユーザー確認)。
+- **Discord/Slack等へのエラー通知**: **未着手**。リポジトリ全体でDiscord Webhook、Slack Webhook、Sentry等の外部通知送信実装や関連環境変数は見つからない。現状のAPIは主に `console.error` へ出力するだけで、障害発生時の能動通知はない。
 - **CI(継続的インテグレーション)**: **実質未着手**。`.github/workflows/preview-ops-audit.yml` が唯一のワークフローだが、これは特定の過去PR(#37)・特定ブランチにピン留めされた一回限りの監査スクリプトで、今後のPRには発火しない。**通常のlint/test/build確認を行うCIは存在しない。**
 - **レート制限**: `api/_lib/seedance-start.js` にそれらしき言及が1箇所あるのみで、専用のレート制限ミドルウェアは見当たらない。悪意あるユーザーによる過剰リクエスト・コスト増大への防御が薄い可能性がある。**確認できません(実装の中身までは未確認)。次に確認すべき箇所。**
 
