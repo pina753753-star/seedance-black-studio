@@ -43,6 +43,23 @@ function normalizeModel(value) {
   return ALLOWED_MODELS.has(migrated) ? migrated : null;
 }
 
+function hasReferenceImageValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return value !== undefined && value !== null;
+}
+
+function hasReferenceImageInput(body) {
+  return [
+    body.frame_images,
+    body.input_references,
+    body.reference_urls,
+    body.referenceUrls,
+    body.reference_url,
+    body.first_frame_url
+  ].some(hasReferenceImageValue);
+}
+
 function roundUpToTen(value) {
   const bounded = Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, value));
   return Math.min(MAX_CREDITS, Math.ceil(bounded / 10) * 10);
@@ -82,6 +99,19 @@ module.exports = async function handler(req, res) {
   const mode = normalizeMode(body.mode);
   const duration = normalizeDuration(body.duration || body.duration_seconds);
   const resolution = normalizeResolution(body.resolution);
+
+  // Temporary safety stop: block any request containing reference-image input
+  // before the core handler can run moderation, create a task, deduct credits,
+  // or call OpenRouter. Text-only requests continue through the existing path.
+  if (hasReferenceImageInput(body)) {
+    return res.status(503).json({
+      ok: false,
+      error: 'reference_image_temporarily_disabled',
+      errorCategory: 'reference_image_temporarily_disabled',
+      message: '現在、参照画像を使った動画生成は一時的に停止しております。テキストのみでの動画生成は通常通りご利用いただけます。再開時期は追ってお知らせします。'
+    });
+  }
+
   const creditCost = calculateCreditCost({
     model,
     mode,
