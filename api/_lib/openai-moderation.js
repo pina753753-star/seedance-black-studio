@@ -18,6 +18,17 @@ function flaggedCategories(result) {
     .map(([category]) => category);
 }
 
+function safeErrorDetail(response, data) {
+  const error = data?.error && typeof data.error === 'object' ? data.error : {};
+  return {
+    httpStatus: response.status,
+    type: typeof error.type === 'string' ? error.type : null,
+    code: typeof error.code === 'string' ? error.code : null,
+    message: typeof error.message === 'string' ? error.message.slice(0, 100) : null,
+    requestId: response.headers.get('x-request-id') || response.headers.get('request-id') || null
+  };
+}
+
 async function moderateContent(prompt, imageUrls, options = {}) {
   const apiKey = process.env.OPENAI_API_KEY || '';
   if (!apiKey) {
@@ -65,7 +76,15 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     }
 
     if (!response.ok) {
-      return { ok: false, flagged: false, errorCode: 'openai_http_error', httpStatus: response.status };
+      const errorDetail = safeErrorDetail(response, data);
+      console.error('[openai-moderation] HTTP error:', errorDetail);
+      return {
+        ok: false,
+        flagged: false,
+        errorCode: 'openai_http_error',
+        httpStatus: response.status,
+        errorDetail
+      };
     }
 
     if (!data || !Array.isArray(data.results) || data.results.length === 0) {

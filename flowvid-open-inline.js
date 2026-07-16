@@ -72,6 +72,37 @@
     });
   }
 
+  function moderationUiMessage(data){
+    const code=String(data?.error||'');
+    const category=String(data?.errorCategory||'');
+    if(code==='content_policy_violation'){
+      return 'アップロードした画像またはプロンプトの内容が、生成AIのコンテンツポリシーに抵触したため生成できませんでした。内容を変更して再度お試しください。クレジットは消費されていません。';
+    }
+    if(code==='content_safety_check_unavailable'||code==='moderation_unavailable'||category==='moderation_unavailable'){
+      return '現在コンテンツの安全確認を行えないため、生成を開始できません。しばらくしてからもう一度お試しください。クレジットは消費されていません。';
+    }
+    return '';
+  }
+
+  function installModerationErrorDisplay(){
+    if(window.__flowvidModerationErrorDisplayInstalled||typeof window._ptFail!=='function')return;
+    window.__flowvidModerationErrorDisplayInstalled=true;
+    const originalFail=window._ptFail;
+    window._ptFail=function(taskId,errMsg,refunded){
+      const message=window.__flowvidPendingModerationMessage||'';
+      window.__flowvidPendingModerationMessage='';
+      if(!message)return originalFail(taskId,errMsg,refunded);
+      originalFail(taskId,message,false);
+      const card=document.querySelector('[data-ptask-id="'+CSS.escape(String(taskId||''))+'"]');
+      const frame=card?.querySelector('[data-ptask-frame]');
+      if(!frame)return;
+      frame.querySelectorAll('p').forEach(p=>{
+        if((p.textContent||'').includes('返金状況を確認できませんでした'))p.remove();
+      });
+      frame.querySelector('[data-pt-copy-id]')?.remove();
+    };
+  }
+
   function installGenerationImageReset(){
     if(window.__flowvidGenerationImageResetInstalled)return;
     window.__flowvidGenerationImageResetInstalled=true;
@@ -104,8 +135,12 @@
       const response=await originalFetch(input,init);
       if(!isSeedanceStart)return response;
       try{
-        if(!response.ok)return response;
         const data=await response.clone().json().catch(()=>null);
+        if(!response.ok){
+          const message=moderationUiMessage(data);
+          if(message)window.__flowvidPendingModerationMessage=message;
+          return response;
+        }
         const hasJob=Boolean(data?.jobId||data?.job_id||data?.pollingUrl||data?.polling_url||data?.response);
         if(data?.ok===false||!hasJob)return response;
         if(submittedMode!=='image_to_video'&&submittedMode!=='reference_to_video')return response;
@@ -178,6 +213,7 @@
     installCreditSync();
     installModeImageReset();
     installGenerationImageReset();
+    installModerationErrorDisplay();
     if(typeof window.updateCreditUi==='function')window.updateCreditUi();
     syncCreditButton();
   }
