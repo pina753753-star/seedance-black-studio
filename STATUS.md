@@ -24,18 +24,20 @@
   - 本番実機テスト実施。OpenAIアカウントのクレジット残高$0が原因で一時的に全生成が停止する事象が発生したが、ユーザーが$5のクレジットを追加し解決、正常生成(ウォーターマークも含む)を実機確認済み。
   - PR #83にて、検査失敗時に誤って表示されていた「返金確認が必要」の文言を、クレジット未消費である旨を明記した正しいエラーメッセージへ修正。OpenAIエラーの詳細(ステータスコード等、機密情報は含まない)をログへ記録する改善も本番反映済み。
   - **防げるもの**: 性的表現、暴力、ヘイト、自傷、一部の違法行為の指示。
-  - **防げないもの(残課題、下記ブロッカーリストに記載)**: 実在人物・有名人の無断利用、児童性的虐待素材(CSAM)の専用検知、著作権侵害。これらはOpenAI Moderation APIのカバー範囲外であり、別途対策が必要。
-- **特定商取引法の表記不備の修正**: 本番適用済み(前回追加分と同一、PR #84)。消費者庁ガイドライン(通信販売広告Q&A)に基づく「開示請求方式」に変更し、所在地・電話番号・運営統括責任者は請求時に開示、開示請求は `help.html` のお問い合わせフォーム経由(実際の転送先メールアドレスはサイト上に非表示)。
+  - **防げないもの(現在の最優先課題)**: 実在人物・有名人の無断利用、児童性的虐待素材(CSAM)の専用検知、著作権侵害。これらはOpenAI Moderation APIのカバー範囲外であり、別途対策が必要。
+- **特定商取引法の表記不備の修正**: **PR #84で本番反映済み。** 消費者庁ガイドライン(通信販売広告Q&A)に基づく「開示請求方式」に変更し、所在地・電話番号・運営統括責任者は請求時に開示、開示請求は `help.html` のお問い合わせフォーム経由(実際の転送先メールアドレスはサイト上に非表示)。
 - **本番Stripeキー(live mode)の確認**: **確認完了。** ユーザー本人がVercelダッシュボードで直接確認し、Production環境の `STRIPE_SECRET_KEY` は `sk_live_`、`STRIPE_PUBLISHABLE_KEY` は `pk_live_` で始まっており、live mode(本番課金モード)で稼働中であることを確認済み。
 - **Stripe Webhook署名シークレット(`STRIPE_WEBHOOK_SECRET`)のProduction未設定を発見・修正**: 上記のlive mode確認作業中に、`STRIPE_WEBHOOK_SECRET` がVercelのPreview環境にのみ設定され、**Production環境には未設定**であることが判明。
   - `api/stripe-webhook.js` の仕様上、未設定の場合はHTTP 500で即座に処理を停止する安全側の設計のため、無効なWebhookが素通りする心配はなかったが、**本番の決済・サブスク更新イベントが一切処理されない状態**だった。
   - Stripeダッシュボードで本番Webhookエンドポイント(`engaging-voyage`、送信先 `https://flowvid-studio.vercel.app/api/stripe-webhook`)が正しく存在することを確認。配信履歴は0件であり、発見時点で実際の顧客への実害は発生していなかったと判断(一般公開前のため)。
   - ユーザー本人がVercelダッシュボード(デスクトップ表示モードで複数環境選択の不具合を回避)で、Production環境のみに正しい署名シークレットを設定し解決済み。Preview環境の既存のテスト用値には変更なし。
-- **参照画像生成モードの一時停止**: 2026-07-16、実在人物への無断なりすまし対策・CSAM専用検知が未実装であることを踏まえ、安全のため参照画像を使った生成モードを一時停止（PR #85）。テキストのみの生成は通常通り稼働。上記2つの検知機能が実装され本番稼働し次第、再開する。
+- **Railway watermark-serverの稼働確認**: **2026-07-16、確認完了。** 本番実機テストで無料動画にウォーターマークが付与され、Vercelの `api/seedance-status.js` からRailway上の本番サービスへ接続し、ffmpeg処理・Supabase Storage保存まで成功していることを確認。Railwayには本番稼働中の `gallant-balance` プロジェクトのみが存在する。
+  - 使われていない別プロジェクト `joyful-enthusiasm` はビルド失敗状態だった。当初サービスのみ削除したところGitHub連携により自動再作成されたため、2026-07-16、ユーザー本人がプロジェクトごと完全に削除し解決済み。今後この件の失敗通知は発生しない。
+- **参照画像生成モードの一時停止**: **PR #85で本番反映済み。** 2026-07-16、実在人物への無断なりすまし対策・CSAM専用検知が未実装であることを踏まえ、安全のため参照画像を使った生成モードを一時停止。テキストのみの生成は通常通り稼働。上記2つの検知機能が実装され本番稼働し次第、再開する。
 
 ## 前提: このサイトは何か
 
-静的HTML(ルート直下の `*.html`) + Vercel Serverless Functions (`api/`) 構成。Next.jsは過去に導入されたが削除済み(コミット `614eacc`)。動画生成はOpenRouter経由でSeedanceモデルを呼び出す。fal.ai経由の旧生成経路は廃止済み(コミット `930ddba`)。決済はStripe。透かし(watermark)処理はRailway上の別サービス `watermark-server/`(Node/Express/ffmpeg)が担う想定。
+静的HTML(ルート直下の `*.html`) + Vercel Serverless Functions (`api/`) 構成。Next.jsは過去に導入されたが削除済み(コミット `614eacc`)。動画生成はOpenRouter経由でSeedanceモデルを呼び出す。fal.ai経由の旧生成経路は廃止済み(コミット `930ddba`)。決済はStripe。透かし(watermark)処理はRailway上の別サービス `watermark-server/`(Node/Express/ffmpeg)が担う。
 
 Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_HEALTHY)を実際に確認した。**実データ規模: ユーザー1人、`generation_tasks` 47件、`credit_transactions` 38件。実質まだ稼働(本番運用)していない、開発・検証段階のデータ量。**
 
@@ -48,14 +50,14 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - **料金計算ロジック**: 完了。`api/_lib/video-pricing.js` に実装され、`tests/video-pricing-regression.test.js` で回帰テストあり(ただし `npm test` 等には未接続、実行方法確認できません)。
 - **重複生成・二重課金防止**: 完了。DB側で `generation_cooldown`, `single_active_generation_guard` のマイグレーションにより保護。OpenRouter用のatomic refund機構も導入済み(`allow_openrouter_atomic_refund`, `fix_refund_task_status_field_typo`)。
 - **タイムアウト生成の自動返金(cron)**: 完了。`api/openrouter-reconcile.js` が15分ごとに動作(`vercel.json` のcron設定で確認)、2時間超放置タスクを返金。
-- **透かし(watermark)処理とRailway連携**: **一部対応、要確認**。コード上は `api/video-edit.js` がRailwayの `watermark-server` の `/edit` を呼ぶ実装があるが、README自身が「本リポジトリの他コードとの結線は確認できません」と明記しており、**実際にRailway上でこのサービスが起動していて疎通しているかは未確認**。無料プランは透かしあり、有料プランは透かしなしという設計だが、これが本番で機能しているかは確認できません。
+- **透かし(watermark)処理とRailway連携**: **本番稼働・実機確認済み。** `api/seedance-status.js` が `WATERMARK_SERVER_URL` と `WATERMARK_SECRET` を使ってRailway上の `watermark-server` の `/watermark` を呼び出す。2026-07-16の本番実機テストで、無料動画へのウォーターマーク付与、ffmpeg処理、Supabase Storage保存、加工済み動画URLの返却まで成功を確認。`api/video-edit.js` の `/edit` 接続は別機能であり、現在は未接続・近日対応扱い。
 
 ### 決済・課金
 - **Stripe決済(単発・サブスク)**: 完了。`stripe-checkout.js` / `stripe-webhook.js` / `stripe-portal.js` / `stripe-config.js` が揃い、Webhookのクレジット付与にはDBレベルの一意制約(`add_stripe_reason_unique_constraint` マイグレーション)による冪等性保護あり。埋め込みCheckout、モバイル決済のリグレッション修正も履歴上確認できる、かなり成熟した実装。
 - **年額サブスクの自動クレジット付与(cron)**: 完了。`api/cron-annual-credit-grant.js` が毎日00:15 UTCに実行。日付計算バグは一度発生し `20260705_fix_annual_credit_grant_dates.sql` で修正済み。
 - **年額サブスク付与対象statusの不整合**: **要確認・未修正**。cronコードは `active` と `trialing` を付与候補として扱う一方、DB関数 `grant_annual_subscription_credits` は `active` と `past_due` だけを許可し、`trialing` を `invalid` として拒否する。逆に関数単体は `past_due` を許可するが、cronは対象外にしている。意図した仕様を確認し、cronとDB関数の許可statusを一致させる必要がある。今回は記録のみで修正していない。
 - **本番Stripeキー(live mode)への切り替え**: **2026-07-16、確認完了。** ユーザー本人がVercelダッシュボードで直接確認し、Production環境の `STRIPE_SECRET_KEY`/`STRIPE_PUBLISHABLE_KEY` がともにlive mode用のプレフィックスで稼働中であることを確認済み。
-- **Stripe Webhook署名シークレット(`STRIPE_WEBHOOK_SECRET`)**: **2026-07-16、発見・修正完了。** 確認作業中にProduction環境のみ未設定であることが判明(Preview環境には既存)。未設定時は `api/stripe-webhook.js` がHTTP 500で即座に処理を停止する安全側の設計のため実害はなかったが、本番の決済・サブスク更新イベントが処理されない状態だった。ユーザー本人がProduction環境にのみ正しい値を設定し解決済み。
+- **Stripe Webhook署名シークレット(`STRIPE_WEBHOOK_SECRET`)**: **2026-07-16、発見・修正完了。** 確認作業中にProduction環境のみ未設定であることが判明(Preview環境には既存)。未設定時は `api/stripe-webhook.js` がHTTP 500で即座に処理を停止する安全側の設計だった。Stripe側の配信履歴は0件で、発見時点で実害は確認されなかった。ユーザー本人がProduction環境にのみ正しい値を設定し解決済み。
 - **返金・チャージバック対応フロー**: 自動返金(生成失敗時)は実装済みだが、**手動チャージバック対応の運用手順・問い合わせ窓口対応フローは未着手**(help.html等の問い合わせ導線はあるが、運用マニュアルは見当たらない)。
 
 ### ユーザー認証
@@ -66,10 +68,11 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 
 ### コンテンツポリシー・年齢確認・モデレーション
 - **アダルトコンテンツ禁止ポリシー**: `content-policy.html` に明記あり(フィクション含むCSAM完全禁止、成人向けコンテンツも一律禁止)。**注記: 「Black Studio」という名称はダーク系UIテーマの意味であり、アダルト向けサービスではない。** ポリシー文面は完成している。
-- **NSFW・違法コンテンツの技術的検知・フィルタリング**: **2026-07-16、本番適用・実機確認済み。** OpenAI Moderation API(`omni-moderation-latest`)による生成前チェックを `api/_lib/seedance-start.js` のSupabase JWT認証成功後・残高確認/タスク作成/クレジット消費/OpenRouter呼び出し前に実装(PR #82)、検査失敗時のエラーメッセージ・ログ改善(PR #83)も本番反映済み。性的表現・暴力・ヘイト・自傷・一部の違法行為の指示は検知可能。**残課題**: 実在人物・有名人の無断利用、CSAM専用検知、著作権侵害はカバー範囲外(下記ブロッカーリスト参照)。通報機能・管理者による動画非表示機能(第2段階の対策)は未着手。
+- **NSFW・違法コンテンツの技術的検知・フィルタリング**: **2026-07-16、本番適用・実機確認済み。** OpenAI Moderation API(`omni-moderation-latest`)による生成前チェックを `api/_lib/seedance-start.js` のSupabase JWT認証成功後・残高確認/タスク作成/クレジット消費/OpenRouter呼び出し前に実装(PR #82)、検査失敗時のエラーメッセージ・ログ改善(PR #83)も本番反映済み。性的表現・暴力・ヘイト・自傷・一部の違法行為の指示は検知可能。
+- **実在人物・CSAM専用検知**: **現在の最優先の未解決課題。** 実在人物・有名人の無断利用、本人同意、画像内の児童判定、CSAM専用検知はOpenAI Moderation APIのカバー範囲外。専用対策が本番稼働するまで、PR #85により参照画像生成モードを本番で一時停止済み。テキストのみの生成は継続稼働中。
 
 ### 法務・コンプライアンス
-- **特定商取引法に基づく表記(legal.html)**: **開示請求方式（消費者庁ガイドラインに基づく）で対応済み。所在地・電話番号・運営統括責任者は請求時に開示、開示請求は `help.html` のお問い合わせフォーム経由。本番反映済み。**
+- **特定商取引法に基づく表記(legal.html)**: **PR #84で開示請求方式（消費者庁ガイドラインに基づく）を本番反映済み。** 所在地・電話番号・運営統括責任者は請求時に開示、開示請求は `help.html` のお問い合わせフォーム経由。
 - **利用規約(terms.html)**: 完了(内容は存在)。年齢制限条項あり。
 - **プライバシーポリシー(privacy.html)**: ページは存在するが、個人情報保護法(APP)やGDPR相当の要件を満たしているかは行単位で確認しておらず、**確認できません**。
 - **コンテンツポリシー(content-policy.html)**: 完了(文面としては存在)。
@@ -83,7 +86,7 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
   - 漏洩パスワード保護(HaveIBeenPwned連携)が無効。
   - **これらはすべて「一次調査で見つかった実際のSupabase Advisor指摘」であり、放置すると認可バイパスや不正クレジット付与に繋がりうる。運営開始前に必ず精査すべき。**
   - また、リポジトリの `supabase/migrations/` には11ファイルあるのに対し、Supabase側が「適用済み」として認識しているマイグレーションは5件のみ(`20260711`〜`20260714` のもの)。それより前の `20260624`(初期スキーマ)等はSupabase側の管理下に記録されておらず、`supabase/setup-*.sql` 経由で手動適用された可能性が高い。**つまりこのDBのスキーマ管理は「CLI/マイグレーション管理」と「手動SQL適用」の2系統が混在しており、今後のスキーマ変更時に何が本当に当たっているか把握しづらい状態。**
-- **Railway(watermark-server)**: **確認できません**。リポジトリ内にRailway設定ファイル(railway.json等)は存在せず、実際に稼働しているインスタンスがあるかどうかは今回の調査環境からは確認不能。ユーザー側でRailwayダッシュボードを直接確認する必要がある。なお、Railwayアカウント内に存在した使われていない別プロジェクト（joyful-enthusiasm、ビルド失敗状態だった）について、当初サービスのみ削除したところGitHub連携により自動再作成されたため、2026-07-16、ユーザー本人がプロジェクトごと完全に削除し解決済み。現在Railwayには本番稼働中のgallant-balanceプロジェクトのみが存在し、今後この件の失敗通知は発生しない。
+- **Railway(watermark-server)**: **2026-07-16、稼働確認完了。** 本番実機テストでウォーターマーク付き動画の生成に成功し、現在Railwayには本番稼働中の `gallant-balance` プロジェクトのみが存在する。不要な `joyful-enthusiasm` プロジェクトはプロジェクトごと完全削除済みで、今後この件の失敗通知は発生しない。
 - **`.env.example` の陳腐化**: **要対応**。README自身が「実態との差分は別途確認が必要」と明記する通り、`.env.example` には現行実装で使われていない旧変数(`SEEDANCE_PROVIDER=mock`, 直接Volcengine接続用の変数等)が並び、実際に使われている `OPENROUTER_API_KEY`, `WATERMARK_SERVER_URL`, `WATERMARK_SECRET`, `CRON_SECRET` 等が載っていない。新しい開発者・AIが環境変数を把握する助けになっておらず、実質使い物にならない状態。
 - **エラー監視・ログ収集(Sentry等)**: **未着手**。専用の監視ツール導入は見当たらない。Vercel/Supabase標準ログのみに依存している状態と推測される(確認できません、要ユーザー確認)。
 - **CI(継続的インテグレーション)**: **実質未着手**。`.github/workflows/preview-ops-audit.yml` が唯一のワークフローだが、これは特定の過去PR(#37)・特定ブランチにピン留めされた一回限りの監査スクリプトで、今後のPRには発火しない。**通常のlint/test/build確認を行うCIは存在しない。**
@@ -93,21 +96,18 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 
 ## 今すぐ運営を始めるにあたって、致命的に足りないもの・ブロックしているもの(優先順位順)
 
-1. ~~NSFW・違法コンテンツの自動検知の有無が未確認~~ **2026-07-16、OpenAI Moderation APIによる生成前チェックの本番適用・実機確認により解決済み(PR #82, #83)。** ただし以下は引き続き未対策の残課題:
-   - 実在人物・有名人の無断利用の検知(未対策)
-   - 児童性的虐待素材(CSAM)の専用検知(OpenAI Moderation APIのカバー範囲外、未対策)
-   - 著作権侵害の検知(未対策)
-   - 通報機能・管理者による動画非表示機能(NSFW対策の第2段階として未着手)
-2. ~~未認証で叩けるSECURITY DEFINER関数(特に `grant_annual_subscription_credits`)~~ **2026-07-15、PR #72の本番適用により解決済み**。
-3. ~~特定商取引法の表記が不十分(住所・電話番号・代表者個人名の欠落)~~ **開示請求方式(消費者庁ガイドラインに基づく)で対応済み。所在地・電話番号・運営統括責任者は請求時に開示、開示請求は `help.html` のお問い合わせフォーム経由。本番反映済み。**
-4. ~~RLSポリシーが1つも無いテーブルが3つ存在(`annual_credit_grant_log`, `flowvid_video_history`, `user_subscriptions`)~~ **2026-07-15、3テーブルすべてテーブルレベル権限をservice_role限定へ修正し、本番DBで実測確認済み。解決済み。**
-5. **Railway watermark-serverの実際の稼働状況が未確認**。2026-07-16の本番実機テストで動画生成自体は成功しウォーターマークも確認できたが、Railway側の稼働状況を直接確認したわけではないため、正式な確認としては別途要確認。
-6. ~~本番Stripeキーがlive modeになっているか未確認~~ **2026-07-16、確認完了。ユーザー本人がVercelダッシュボードで直接確認し、Production環境がlive modeであることを確認済み。** あわせて `STRIPE_WEBHOOK_SECRET` がProduction環境に未設定だった問題も同日発見・修正済み(詳細は上記2026-07-16追加分を参照)。
-7. **年齢確認が規約の文言だけで技術的な強制がない可能性**。未成年利用の法的リスク。未確認のまま。
-8. **サインアップフローの詳細が未確認**(メール確認は必須になっているか、等)。なりすまし・大量アカウント作成のリスクに関わる。
-9. **CIが実質存在しない**。今後の変更で正常系を壊すリスク(7月に実際に複数回発生した問題)が継続する。少なくともbuild確認だけでも自動化すべき。
-10. **`.env.example` が実態と乖離**していて、今後別の担当者・AIが環境構築するときに間違った変数を設定するリスクがある。
-11. **Supabase StorageのCORS設定確認など、その他の運用チェック項目**(2026-07-16時点で未着手)。
+1. **実在人物への無断なりすまし対策・CSAM専用検知の実装が未完了(現在の最優先課題)。** OpenAI Moderation APIでは実在人物判定、本人同意、画像内の児童判定、CSAM専用検知を代替できない。安全対策としてPR #85を2026-07-16に本番反映し、参照画像生成モードは一時停止済み。テキストのみの生成は通常稼働。専用検知を実装し本番確認できるまで参照画像モードを再開しない。
+2. ~~NSFW・違法コンテンツの自動検知の有無が未確認~~ **2026-07-16、OpenAI Moderation APIによる生成前チェックの本番適用・実機確認により解決済み(PR #82, #83)。**
+3. ~~未認証で叩けるSECURITY DEFINER関数(特に `grant_annual_subscription_credits`)~~ **2026-07-15、PR #72の本番適用により解決済み**。
+4. ~~特定商取引法の表記が不十分(住所・電話番号・代表者個人名の欠落)~~ **PR #84で開示請求方式を本番反映済み。**
+5. ~~RLSポリシーが1つも無いテーブルが3つ存在(`annual_credit_grant_log`, `flowvid_video_history`, `user_subscriptions`)~~ **2026-07-15、3テーブルすべてテーブルレベル権限をservice_role限定へ修正し、本番DBで実測確認済み。解決済み。**
+6. ~~Railway watermark-serverの実際の稼働状況が未確認~~ **2026-07-16、本番実機テストとRailway確認により解決済み。`gallant-balance` が本番稼働中。**
+7. ~~本番Stripeキーがlive modeになっているか未確認~~ **2026-07-16、確認完了。** あわせて `STRIPE_WEBHOOK_SECRET` のProduction未設定も同日発見・修正済み。
+8. **年齢確認が規約の文言だけで技術的な強制がない可能性**。未成年利用の法的リスク。未確認のまま。
+9. **サインアップフローの詳細が未確認**(メール確認は必須になっているか、等)。なりすまし・大量アカウント作成のリスクに関わる。
+10. **CIが実質存在しない**。今後の変更で正常系を壊すリスクが継続する。少なくともbuild確認だけでも自動化すべき。
+11. **`.env.example` が実態と乖離**していて、今後別の担当者・AIが環境構築するときに間違った変数を設定するリスクがある。
+12. **Supabase StorageのCORS設定確認など、その他の運用チェック項目**(2026-07-16時点で未着手)。
 
 ---
 
