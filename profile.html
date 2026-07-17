@@ -64,38 +64,45 @@ function checkoutRequested(){const c=(new URLSearchParams(location.search).get('
 function startCheckoutPolling(user,base){if(_checkoutPoll||!user||!client)return;const b=base||{plan:'free',total:0};let tries=0;const max=10;_checkoutPoll=setInterval(async()=>{tries++;let cur=null;try{cur=await loadDb(user);}catch(_){cur=null;}const changed=cur&&(cur.total>b.total||(cur.plan!=='free'&&cur.plan!==b.plan));if(changed||tries>=max){clearInterval(_checkoutPoll);_checkoutPoll=null;}},3000);}
 window.addEventListener('beforeunload',()=>{if(_checkoutPoll){clearInterval(_checkoutPoll);_checkoutPoll=null;}});
 
+let _profileAuthCheckRunning=false;
+let _profileInitialized=false;
 async function initializeConfirmedProfile(){
-  if(!authReady){
-    showGuest('SupabaseのURLとanon keyが未設定です。');
-    return;
-  }
-
-  const guard=window.FlowVidAuthGuard;
-  if(!guard){
-    location.replace('./login.html');
-    return;
-  }
-
-  const user=await guard.requireConfirmedUser(client);
-  if(!user)return;
-
-  const base=await loadDb(user);
-  if(checkoutRequested())startCheckoutPolling(user,base);
-}
-
-initializeConfirmedProfile().catch(()=>{
-  location.replace('./login.html');
-});
-
-if(client){
-  client.auth.onAuthStateChange(async(_event,session)=>{
-    if(!session){
-      showGuest();
+  if(_profileAuthCheckRunning)return;
+  _profileAuthCheckRunning=true;
+  try{
+    if(!authReady){
+      showGuest('SupabaseのURLとanon keyが未設定です。');
       return;
     }
     const guard=window.FlowVidAuthGuard;
-    const user=guard?await guard.requireConfirmedUser(client):null;
-    if(user)loadDb(user);
+    if(!guard){
+      location.replace('./login.html');
+      return;
+    }
+    const user=await guard.requireConfirmedUser(client);
+    if(!user)return;
+    const base=await loadDb(user);
+    _profileInitialized=true;
+    if(checkoutRequested())startCheckoutPolling(user,base);
+  }finally{
+    _profileAuthCheckRunning=false;
+  }
+}
+initializeConfirmedProfile().catch(()=>{
+  location.replace('./login.html');
+});
+if(client){
+  client.auth.onAuthStateChange((event,session)=>{
+    if(event==='SIGNED_OUT'||!session){
+      showGuest();
+      return;
+    }
+    if(event==='INITIAL_SESSION'&&_profileInitialized)return;
+    setTimeout(()=>{
+      initializeConfirmedProfile().catch(()=>{
+        location.replace('./login.html');
+      });
+    },0);
   });
 }
 
