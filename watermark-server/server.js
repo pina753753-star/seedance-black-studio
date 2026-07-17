@@ -212,6 +212,11 @@ function getAllowedVideoHost() {
 }
 const EDIT_ALLOWED_VIDEO_HOST = getAllowedVideoHost();
 
+// Only the reference-images bucket (the one /edit itself uploads outputs to)
+// is allowed as a clip source — narrower than "any public Supabase Storage
+// bucket on this host" to keep the SSRF allowlist as tight as possible.
+const EDIT_ALLOWED_VIDEO_PATH_PREFIX = '/storage/v1/object/public/reference-images/';
+
 function isAllowedEditVideoUrl(raw) {
   if (typeof raw !== 'string') return false;
   let u;
@@ -222,7 +227,7 @@ function isAllowedEditVideoUrl(raw) {
   }
   if (u.protocol !== 'https:') return false;
   if (!EDIT_ALLOWED_VIDEO_HOST || u.host !== EDIT_ALLOWED_VIDEO_HOST) return false;
-  if (!u.pathname.startsWith('/storage/v1/object/public/')) return false;
+  if (!u.pathname.startsWith(EDIT_ALLOWED_VIDEO_PATH_PREFIX)) return false;
   return true;
 }
 
@@ -238,24 +243,14 @@ const EDIT_DOWNLOAD_TIMEOUT_MS = 60000;
 const EDIT_MAX_CLIP_DURATION_SEC = 30; // 30s per clip
 const EDIT_MAX_TOTAL_DURATION_SEC = 180; // 3 min combined
 
-// Overall processing (probe done, normalize+concat remaining) time budget.
-// Scales with total input duration so a handful of short clips finishes
-// fast while a full 3-minute combine still gets a bounded, generous window
-// (fast-preset x264 transcode is normally faster than realtime, but Railway
-// containers can be slow/shared, so this leaves ample margin).
-const EDIT_TIMEOUT_BASE_MS = 45000;
-const EDIT_TIMEOUT_PER_SEC_MS = 1500;
-const EDIT_TIMEOUT_MAX_MS = 300000; // 5 min hard cap
-
+// A single deadline for the *entire* /edit request — download, probe, and
+// all ffmpeg steps share it. Without one shared deadline, per-phase caps
+// stack (max 6 clips x 60s download + 6 x 15s probe + 5min ffmpeg budget
+// could add up to ~12.5 minutes worst case); a single deadline created
+// before the first download keeps total wall-clock time for one request
+// bounded regardless of which phase is slow.
+const EDIT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000; // 5 min for the whole request
 const EDIT_FFPROBE_TIMEOUT_MS = 15000;
-
-function computeEditDeadline(totalInputDurationSec) {
-  const budget = Math.min(
-    EDIT_TIMEOUT_MAX_MS,
-    EDIT_TIMEOUT_BASE_MS + totalInputDurationSec * EDIT_TIMEOUT_PER_SEC_MS
-  );
-  return Date.now() + budget;
-}
 
 function remainingMs(deadline) {
   return deadline - Date.now();
@@ -263,13 +258,14 @@ function remainingMs(deadline) {
 
 function assertDeadlineNotPassed(deadline, stage) {
   if (remainingMs(deadline) <= 0) {
-    throw new Error(`edit processing exceeded its time budget (${stage})`);
+    throw editError('PROCESSING_TIMEOUT', `edit processing exceeded its time budget (${stage})`);
   }
 }
 
-function editProbe(file) {
+function editProbe(file, deadline) {
+  const timeoutMs = Math.max(1000, Math.min(EDIT_FFPROBE_TIMEOUT_MS, remainingMs(deadline)));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('ffprobe timed out')), EDIT_FFPROBE_TIMEOUT_MS);
+    const timer = setTimeout(() => reject(new Error('ffprobe timed out')), timeoutMs);
     ffmpeg.ffprobe(file, (err, data) => {
       clearTimeout(timer);
       if (err) reject(err);
@@ -285,13 +281,18 @@ function editParseFps(rFrameRate) {
   return Number.isFinite(fps) && fps > 0 && fps <= 120 ? fps : 24;
 }
 
-async function editDownload(url, filePath) {
-  const response = await fetch(url, { timeout: EDIT_DOWNLOAD_TIMEOUT_MS });
-  if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+async function editDownload(url, filePath, deadline) {
+  const timeoutMs = Math.max(1000, Math.min(EDIT_DOWNLOAD_TIMEOUT_MS, remainingMs(deadline)));
+  // redirect: 'manual' means a 3xx response is returned as-is (not
+  // followed) instead of being validated against the host allowlist again,
+  // so it simply fails the !response.ok check below rather than letting a
+  // clip source redirect us to an arbitrary off-allowlist host.
+  const response = await fetch(url, { timeout: timeoutMs, redirect: 'manual' });
+  if (!response.ok) throw editError('CLIP_DOWNLOAD_FAILED', `Download failed: ${response.status}`);
 
   const contentLength = Number(response.headers.get('content-length') || 0);
   if (contentLength && contentLength > EDIT_MAX_DOWNLOAD_BYTES) {
-    throw new Error('clip exceeds maximum allowed file size');
+    throw editError('CLIP_TOO_LARGE', `clip content-length ${contentLength} exceeds ${EDIT_MAX_DOWNLOAD_BYTES}`);
   }
 
   await new Promise((resolve, reject) => {
@@ -308,7 +309,7 @@ async function editDownload(url, filePath) {
     response.body.on('data', (chunk) => {
       total += chunk.length;
       if (total > EDIT_MAX_DOWNLOAD_BYTES) {
-        fail(new Error('clip exceeds maximum allowed file size'));
+        fail(editError('CLIP_TOO_LARGE', `clip body exceeded ${EDIT_MAX_DOWNLOAD_BYTES} bytes`));
       }
     });
     response.body.on('error', fail);
@@ -320,19 +321,43 @@ async function editDownload(url, filePath) {
   });
 }
 
-// Internal error messages may reference ffmpeg internals or /tmp paths;
-// only a curated allowlist of our own validation-style messages is
-// forwarded to the client, everything else becomes a generic message.
-// Full details are always logged server-side.
+// ---- allowlist-based public error messages ----
+// Every message returned to the client must come from this fixed map, keyed
+// by an explicit `publicCode` attached to the thrown error. Anything without
+// a recognized code (ffmpeg internals, Supabase SDK errors, unexpected
+// exceptions, etc.) falls through to the generic PROCESSING_FAILED message.
+// Full error detail is always logged server-side via console.error, never
+// forwarded to the client.
+const EDIT_PUBLIC_ERRORS = {
+  CLIP_DOWNLOAD_FAILED: 'Failed to download one of the clips',
+  CLIP_TOO_LARGE: 'One of the clips exceeds the maximum allowed file size',
+  CLIP_UNREADABLE: 'One of the clips could not be read',
+  CLIP_NO_VIDEO_STREAM: 'One of the clips has no readable video stream',
+  CLIP_TOO_LONG: 'One of the clips exceeds the maximum allowed duration',
+  TOTAL_TOO_LONG: 'Combined clip duration exceeds the maximum allowed length',
+  CLIP_TRIM_INVALID: 'One of the clips has an invalid trim range',
+  PROCESSING_TIMEOUT: 'Video processing exceeded its time limit',
+  UPLOAD_FAILED: 'Failed to store the edited video',
+  PROCESSING_FAILED: 'Video processing failed',
+};
+
+function editError(code, detail) {
+  return Object.assign(new Error(detail || code), { publicCode: code });
+}
+
+function ffmpegStageError(err, stageLabel) {
+  const code = /timed out/i.test(err.message) ? 'PROCESSING_TIMEOUT' : 'PROCESSING_FAILED';
+  return editError(code, `${stageLabel}: ${err.message}`);
+}
+
 function safeEditErrorMessage(err) {
-  const msg = String((err && err.message) || '');
-  if (!msg || /ffmpeg|ENOENT|EACCES|EPIPE|\/tmp\/|node_modules|at [A-Za-z]+\.<anonymous>/i.test(msg)) {
-    return 'Video processing failed';
-  }
-  return msg;
+  const code = err && err.publicCode;
+  return EDIT_PUBLIC_ERRORS[code] || EDIT_PUBLIC_ERRORS.PROCESSING_FAILED;
 }
 
 async function runEditJob({ clips, transition, transitionDuration, ownerSegment }) {
+  // Single deadline for the whole request, created before any work starts.
+  const deadline = Date.now() + EDIT_REQUEST_TIMEOUT_MS;
   const uid = uuidv4();
   const tempFiles = [];
   const makeTmp = (name) => {
@@ -345,21 +370,28 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
     // 1) ダウンロード
     const inputFiles = [];
     for (let i = 0; i < clips.length; i++) {
+      assertDeadlineNotPassed(deadline, `download clip ${i}`);
       const f = makeTmp(`edit_in_${i}`);
-      await editDownload(clips[i].videoUrl, f);
+      await editDownload(clips[i].videoUrl, f, deadline);
       inputFiles.push(f);
     }
 
     // 2) メタデータ取得 + 長さ検証
     const metas = [];
     for (const f of inputFiles) {
-      const data = await editProbe(f);
+      assertDeadlineNotPassed(deadline, 'probe');
+      let data;
+      try {
+        data = await editProbe(f, deadline);
+      } catch (err) {
+        throw editError('CLIP_UNREADABLE', `probe failed: ${err.message}`);
+      }
       const v = (data.streams || []).find((s) => s.codec_type === 'video');
       const a = (data.streams || []).find((s) => s.codec_type === 'audio');
-      if (!v) throw new Error('No video stream found in input');
+      if (!v) throw editError('CLIP_NO_VIDEO_STREAM', 'No video stream found in input');
       const duration = Number(data.format && data.format.duration) || 0;
       if (duration > EDIT_MAX_CLIP_DURATION_SEC) {
-        throw new Error(`clip duration (${duration.toFixed(1)}s) exceeds maximum allowed (${EDIT_MAX_CLIP_DURATION_SEC}s)`);
+        throw editError('CLIP_TOO_LONG', `clip duration (${duration.toFixed(1)}s) exceeds maximum allowed (${EDIT_MAX_CLIP_DURATION_SEC}s)`);
       }
       metas.push({
         duration,
@@ -372,10 +404,8 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
 
     const totalInputDuration = metas.reduce((s, m) => s + m.duration, 0);
     if (totalInputDuration > EDIT_MAX_TOTAL_DURATION_SEC) {
-      throw new Error(`total clip duration (${totalInputDuration.toFixed(1)}s) exceeds maximum allowed (${EDIT_MAX_TOTAL_DURATION_SEC}s)`);
+      throw editError('TOTAL_TOO_LONG', `total clip duration (${totalInputDuration.toFixed(1)}s) exceeds maximum allowed (${EDIT_MAX_TOTAL_DURATION_SEC}s)`);
     }
-
-    const deadline = computeEditDeadline(totalInputDuration);
 
     // 出力解像度・fpsは1本目のクリップに合わせる
     const W = metas[0].width;
@@ -386,22 +416,22 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
     const plans = clips.map((clip, i) => {
       const dur = metas[i].duration;
       if (!Number.isFinite(dur) || dur <= 0) {
-        throw new Error(`clip ${i}: could not determine video duration`);
+        throw editError('CLIP_TRIM_INVALID', `clip ${i}: could not determine video duration`);
       }
       let start = Number(clip.start);
       if (!Number.isFinite(start)) start = 0;
       if (start < 0) start = 0;
       if (start >= dur) {
-        throw new Error(`clip ${i}: trim start (${start}s) is at or beyond video duration (${dur}s) — specify a start within the video`);
+        throw editError('CLIP_TRIM_INVALID', `clip ${i}: trim start (${start}s) is at or beyond video duration (${dur}s)`);
       }
       let end = clip.end != null ? Number(clip.end) : dur;
       if (!Number.isFinite(end)) end = dur;
       if (end > dur) end = dur;
       if (end <= start) {
-        throw new Error(`clip ${i}: trim end (${end}s) must be greater than start (${start}s)`);
+        throw editError('CLIP_TRIM_INVALID', `clip ${i}: trim end (${end}s) must be greater than start (${start}s)`);
       }
       const tdur = end - start;
-      if (tdur < 0.2) throw new Error(`clip ${i}: trim range too short (${tdur.toFixed(3)}s, minimum 0.2s)`);
+      if (tdur < 0.2) throw editError('CLIP_TRIM_INVALID', `clip ${i}: trim range too short (${tdur.toFixed(3)}s, minimum 0.2s)`);
       return { start, end, tdur };
     });
 
@@ -468,7 +498,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
       try {
         await runFfmpeg(buildNormalizeCmd, remainingMs(deadline));
       } catch (err) {
-        throw new Error(`ffmpeg normalize clip ${i}: ${err.message}`);
+        throw ffmpegStageError(err, `normalize clip ${i}`);
       }
       normFiles.push(outFile);
     }
@@ -485,7 +515,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
           remainingMs(deadline)
         );
       } catch (err) {
-        throw new Error(`ffmpeg remux: ${err.message}`);
+        throw ffmpegStageError(err, 'remux');
       }
     } else if (transition === 'crossfade') {
       const n = normFiles.length;
@@ -528,7 +558,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
       try {
         await runFfmpeg(buildCrossfadeCmd, remainingMs(deadline));
       } catch (err) {
-        throw new Error(`ffmpeg crossfade: ${err.message}`);
+        throw ffmpegStageError(err, 'crossfade');
       }
     } else {
       // cut / fade: 単純連結（fadeは正規化時にフェード適用済み）
@@ -560,7 +590,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
       try {
         await runFfmpeg(buildConcatCmd, remainingMs(deadline));
       } catch (err) {
-        throw new Error(`ffmpeg concat: ${err.message}`);
+        throw ffmpegStageError(err, 'concat');
       }
     }
 
@@ -572,7 +602,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
     const { error: uploadError } = await supabase.storage
       .from(EDIT_BUCKET)
       .upload(storagePath, fileBuffer, { contentType: 'video/mp4', upsert: false });
-    if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+    if (uploadError) throw editError('UPLOAD_FAILED', `Upload failed: ${uploadError.message}`);
 
     const { data: urlData } = supabase.storage.from(EDIT_BUCKET).getPublicUrl(storagePath);
 
@@ -588,7 +618,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
       transition,
     };
   } catch (err) {
-    console.error('[edit] error:', err.message);
+    console.error('[edit] error:', err.publicCode || 'UNKNOWN', err.message);
     return { ok: false, error: safeEditErrorMessage(err) };
   } finally {
     for (const f of tempFiles) {
