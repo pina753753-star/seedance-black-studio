@@ -288,12 +288,16 @@ $('sbAnalyzeBtn').onclick=async()=>{
     if(!sbCuts.length)throw new Error('カットが検出されませんでした');
     $('sbStyle').textContent=data.result?.style||'';
     $('sbCuts').innerHTML=sbCuts.map(c=>`<div class="sbCutCard"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:13px">カット${esc(c.cut_number)}</b><span style="color:#888;font-size:11px">${esc(c.duration||5)}秒</span></div><div style="color:#bbb;font-size:12px;margin-bottom:4px">${esc(c.content||'')}</div><div style="color:#7dd3fc;font-size:11px;line-height:1.4">${esc(c.prompt||'')}</div>${c.camera?'<div style="color:#777;font-size:10px;margin-top:4px">📷 '+esc(c.camera)+'</div>':''}</div>`).join('');
-    // 絵コンテ画像をアップロードしてURLを保存
-        try{
-          const uploadRes=await fetch('/api/upload-reference-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataUrl:'data:image/jpeg;base64,'+base64,filename:'storyboard.jpg',contentType:'image/jpeg'})});
-          const uploadData=await uploadRes.json();
-          if(uploadData.ok)window._sbImageUrl=uploadData.publicUrl||uploadData.url||'';
-        }catch(_){}
+    // 絵コンテ画像をアップロードしてURLを保存（参照画像なしでは生成させないため、失敗時は解析自体を失敗として扱う）
+    window._sbImageUrl='';
+    const uploadToken=await getToken();
+    if(!uploadToken)throw new Error('ログインが必要です。再ログインしてから絵コンテ画像をアップロードしてください。');
+    const uploadRes=await fetch('/api/upload-reference-image',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+uploadToken},body:JSON.stringify({dataUrl:'data:image/jpeg;base64,'+base64,filename:'storyboard.jpg',contentType:'image/jpeg'})});
+    const uploadData=await uploadRes.json();
+    if(!uploadRes.ok||!uploadData.ok||!(uploadData.publicUrl||uploadData.url)){
+      throw new Error('絵コンテ画像のアップロードに失敗しました: '+(uploadData?.message||uploadData?.error||('HTTP '+uploadRes.status)));
+    }
+    window._sbImageUrl=uploadData.publicUrl||uploadData.url;
     $('sbResults').style.display='block';
   }catch(e){
     alert('解析エラー: '+e.message+'\nstack: '+(e.stack||'').slice(0,200));
@@ -305,6 +309,7 @@ $('sbAnalyzeBtn').onclick=async()=>{
 
 $('sbGenerateBtn').onclick=async()=>{
   if(!sbCuts.length)return;
+  if(!window._sbImageUrl){alert('絵コンテ画像がアップロードされていないため生成できません。もう一度「解析する」からやり直してください。');return}
   const token=await getToken();
   if(!token){alert('ログインが必要です。');location.href='./login.html';return}
   $('sbResults').style.display='none';
