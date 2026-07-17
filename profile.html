@@ -32,6 +32,7 @@
 <div class='drawer' id='drawer'><div class='shade' id='shade'></div><div class='menu'><div class='menuHead'><b>メニュー</b><button class='close' id='close'>×</button></div><a href='./index.html'>ホーム <span>›</span></a><a href='./generate.html'>生成 <span>›</span></a><a href='./login.html'>ログイン / 新規登録 <span>›</span></a><a href='./profile.html'>マイページ <span>›</span></a><a href='./pricing.html'>サブスクリプション <span>›</span></a><a href='./pricing.html#credit'>クレジット購入 <span>›</span></a><a href='./help.html'>ヘルプセンター <span>›</span></a><a class='logout' href='./logout.html'>ログアウト <span>›</span></a></div></div>
 <script src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'></script>
 <script src='./auth-config.js?v=4a1f0c1'></script>
+<script src='./auth-guard.js?v=1'></script>
 <script>
 const d=document.getElementById('drawer');document.getElementById('menuBtn').onclick=()=>d.classList.add('open');document.getElementById('shade').onclick=()=>d.classList.remove('open');document.getElementById('close').onclick=()=>d.classList.remove('open');
 const cfg=window.FLOWVID_AUTH||{};const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;const authReady=Boolean(client);const $=id=>document.getElementById(id);const jpPlan={free:'フリープラン',standard:'スタンダード',premium:'プレミアム',scale:'スケール',ultimate:'アルティメット',team:'チーム'};
@@ -62,7 +63,42 @@ let _checkoutPoll=null;
 function checkoutRequested(){const c=(new URLSearchParams(location.search).get('checkout')||'').toLowerCase();return c==='complete'||c==='success';}
 function startCheckoutPolling(user,base){if(_checkoutPoll||!user||!client)return;const b=base||{plan:'free',total:0};let tries=0;const max=10;_checkoutPoll=setInterval(async()=>{tries++;let cur=null;try{cur=await loadDb(user);}catch(_){cur=null;}const changed=cur&&(cur.total>b.total||(cur.plan!=='free'&&cur.plan!==b.plan));if(changed||tries>=max){clearInterval(_checkoutPoll);_checkoutPoll=null;}},3000);}
 window.addEventListener('beforeunload',()=>{if(_checkoutPoll){clearInterval(_checkoutPoll);_checkoutPoll=null;}});
-if(!authReady){showGuest('SupabaseのURLとanon keyが未設定です。');}else{client.auth.getSession().then(({data,error})=>{if(error||!data.session){showGuest();return;}loadDb(data.session.user).then(base=>{if(checkoutRequested())startCheckoutPolling(data.session.user,base);});});client.auth.onAuthStateChange((_event,session)=>{session?loadDb(session.user):showGuest();});}
+
+async function initializeConfirmedProfile(){
+  if(!authReady){
+    showGuest('SupabaseのURLとanon keyが未設定です。');
+    return;
+  }
+
+  const guard=window.FlowVidAuthGuard;
+  if(!guard){
+    location.replace('./login.html');
+    return;
+  }
+
+  const user=await guard.requireConfirmedUser(client);
+  if(!user)return;
+
+  const base=await loadDb(user);
+  if(checkoutRequested())startCheckoutPolling(user,base);
+}
+
+initializeConfirmedProfile().catch(()=>{
+  location.replace('./login.html');
+});
+
+if(client){
+  client.auth.onAuthStateChange(async(_event,session)=>{
+    if(!session){
+      showGuest();
+      return;
+    }
+    const guard=window.FlowVidAuthGuard;
+    const user=guard?await guard.requireConfirmedUser(client):null;
+    if(user)loadDb(user);
+  });
+}
+
 // ---- 生成履歴セクション ----
 (function(){
   const FAVS_KEY='flowvidFavoriteJobs';

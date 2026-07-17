@@ -42,6 +42,7 @@
   </main>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-config.js?v=4a1f0c1"></script>
+  <script src="./auth-guard.js?v=1"></script>
   <script>
     let mode='login';
     const loginTab=document.getElementById('loginTab');
@@ -140,10 +141,32 @@
       if(!isSignup)birthDate.value='';
       clearMessage();
     }
+    function showRedirectMessage(){
+      const text=new URLSearchParams(location.search).get('authMessage');
+      if(!text)return;
+      setMessage(text,'error');
+      try{
+        const cleanUrl=location.pathname+location.hash;
+        history.replaceState(null,'',cleanUrl);
+      }catch(_){}
+    }
+
     loginTab.onclick=()=>setMode('login');
     signupTab.onclick=()=>setMode('signup');
     if(!authReady){setMessage('ログイン接続は未設定です。SupabaseのURLと公開可能キーを読み込めていません。数分待って再読み込みしてください。','error');submitBtn.disabled=true;}
-    if(client){client.auth.getSession().then(({data})=>{if(data.session) location.href='./profile.html';});}
+    showRedirectMessage();
+
+    if(client){
+      client.auth.getSession().then(async({data,error})=>{
+        if(error||!data?.session)return;
+        const guard=window.FlowVidAuthGuard;
+        const user=guard
+          ? await guard.requireConfirmedUser(client,{redirect:false})
+          : null;
+        if(user)location.replace('./profile.html');
+      }).catch(()=>{});
+    }
+
     form.onsubmit=async(e)=>{
       e.preventDefault();
       if(!client)return;
@@ -185,9 +208,22 @@
         submitBtn.disabled=false;
       }
       if(result.error){setMessage(authMessage(result.error.message),'error');return;}
+
       if(mode==='signup'){
+        if(result.data?.session){
+          try{
+            await client.auth.signOut();
+          }catch(_){
+          }
+        }
         setMessage('確認メールを送りました。メール内のリンクを開いてログインしてください。','ok');
         return;
+      }
+
+      const guard=window.FlowVidAuthGuard;
+      if(guard){
+        const confirmedUser=await guard.requireConfirmedUser(client);
+        if(!confirmedUser)return;
       }
       location.href='./profile.html';
     };

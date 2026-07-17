@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 
 const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
@@ -6,12 +7,6 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/webp'
 ]);
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-
-function bearerToken(req) {
-  const auth = String(req.headers?.authorization || req.headers?.Authorization || '');
-  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
-  return '';
-}
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -26,18 +21,16 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'Missing Supabase environment variables' });
   }
 
-  const token = bearerToken(req);
-  if (!token) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  const auth = await requireConfirmedAuth(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json(auth.body);
   }
 
-  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-  try {
-    const { data: userData, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !userData?.user) {
-      return res.status(401).json({ ok: false, error: 'Unauthorized' });
-    }
+  const supabase = auth.supabase || createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false }
+  });
 
+  try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const dataUrl = String(body.dataUrl || '');
     const filename = String(body.filename || `reference-${Date.now()}.jpg`);

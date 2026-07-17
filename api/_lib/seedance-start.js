@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { moderateContent } = require('./openai-moderation.js');
+const { requireConfirmedAuth } = require('./confirmed-auth.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
@@ -127,28 +128,9 @@ function extractJobId(data) {
   return null;
 }
 
-function bearerToken(req) {
-  const auth = String(req.headers?.authorization || req.headers?.Authorization || '');
-  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
-  return '';
-}
-
 function serviceClient() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
-}
-
-async function getUserFromToken(token) {
-  if (!token) return null;
-  const db = serviceClient();
-  if (!db) return null;
-  try {
-    const { data, error } = await db.auth.getUser(token);
-    if (error || !data?.user) return null;
-    return data.user;
-  } catch (_) {
-    return null;
-  }
 }
 
 // Reads the current balance and deducts creditCost atomically using optimistic
@@ -424,12 +406,15 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY || '';
   if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
 
-  // Authenticate the user
-  const token = bearerToken(req);
-  const user = await getUserFromToken(token);
-  if (!user) return res.status(401).json({ ok: false, error: 'ログインが必要です', redirect: '/login.html' });
+  // Authenticate against Supabase Auth and reject unconfirmed addresses before
+  // moderation, balance reads, task creation, credit use, or OpenRouter calls.
+  const auth = await requireConfirmedAuth(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json(auth.body);
+  }
 
-  const db = serviceClient();
+  const user = auth.user;
+  const db = auth.supabase || serviceClient();
   if (!db) return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
 
   let taskId = null;
