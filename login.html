@@ -58,14 +58,40 @@
     const authReady=Boolean(client);
     function setMessage(text,type='error'){message.textContent=text;message.className='message show '+type;}
     function clearMessage(){message.textContent='';message.className='message';}
-    function formatLocalDate(date){
-      const year=String(date.getFullYear()).padStart(4,'0');
-      const month=String(date.getMonth()+1).padStart(2,'0');
-      const day=String(date.getDate()).padStart(2,'0');
+    function formatDateParts(parts){
+      const year=String(parts.year).padStart(4,'0');
+      const month=String(parts.month).padStart(2,'0');
+      const day=String(parts.day).padStart(2,'0');
       return `${year}-${month}-${day}`;
     }
-    function getAdultCutoffDate(today=new Date()){
-      return formatLocalDate(new Date(today.getFullYear()-18,today.getMonth(),today.getDate()));
+    function getTokyoToday(now=new Date()){
+      const parts=new Intl.DateTimeFormat('en-CA',{
+        timeZone:'Asia/Tokyo',
+        year:'numeric',
+        month:'2-digit',
+        day:'2-digit'
+      }).formatToParts(now);
+      const values={};
+      for(const part of parts){
+        if(part.type==='year'||part.type==='month'||part.type==='day'){
+          values[part.type]=Number(part.value);
+        }
+      }
+      if(!values.year||!values.month||!values.day){
+        throw new Error('日本時間の日付を取得できませんでした。');
+      }
+      return values;
+    }
+    function getAdultCutoffDate(today=getTokyoToday()){
+      const cutoffDay=today.month===2&&today.day===29?28:today.day;
+      return formatDateParts({year:today.year-18,month:today.month,day:cutoffDay});
+    }
+    function isLeapYear(year){
+      return year%4===0&&(year%100!==0||year%400===0);
+    }
+    function daysInMonth(year,month){
+      if(month===2)return isLeapYear(year)?29:28;
+      return [4,6,9,11].includes(month)?30:31;
     }
     function parseBirthDate(value){
       const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value||''));
@@ -73,15 +99,14 @@
       const year=Number(match[1]);
       const month=Number(match[2]);
       const day=Number(match[3]);
-      const parsed=new Date(year,month-1,day);
-      if(parsed.getFullYear()!==year||parsed.getMonth()!==month-1||parsed.getDate()!==day)return null;
-      return {year,month,day,date:parsed};
+      if(month<1||month>12||day<1||day>daysInMonth(year,month))return null;
+      return {year,month,day,value:formatDateParts({year,month,day})};
     }
-    function calculateFullAge(value,today=new Date()){
+    function calculateFullAge(value,today=getTokyoToday()){
       const parsed=parseBirthDate(value);
       if(!parsed)return null;
-      let age=today.getFullYear()-parsed.year;
-      const beforeBirthday=today.getMonth()+1<parsed.month||(today.getMonth()+1===parsed.month&&today.getDate()<parsed.day);
+      let age=today.year-parsed.year;
+      const beforeBirthday=today.month<parsed.month||(today.month===parsed.month&&today.day<parsed.day);
       if(beforeBirthday)age-=1;
       return age;
     }
@@ -107,7 +132,11 @@
       password.autocomplete=isSignup?'new-password':'current-password';
       birthDateField.hidden=!isSignup;
       birthDate.required=isSignup;
-      birthDate.max=getAdultCutoffDate();
+      try{
+        birthDate.max=getAdultCutoffDate();
+      }catch(error){
+        birthDate.removeAttribute('max');
+      }
       if(!isSignup)birthDate.value='';
       clearMessage();
     }
@@ -127,9 +156,14 @@
         const parsed=parseBirthDate(value);
         if(!value){setMessage('生年月日を入力してください。','error');birthDate.focus();return;}
         if(!parsed){setMessage('正しい生年月日を入力してください。','error');birthDate.focus();return;}
-        const today=new Date();
-        const todayStart=new Date(today.getFullYear(),today.getMonth(),today.getDate());
-        if(parsed.date>todayStart){setMessage('未来の日付は生年月日として使用できません。','error');birthDate.focus();return;}
+        let today;
+        try{
+          today=getTokyoToday();
+        }catch(error){
+          setMessage('年齢確認を完了できませんでした。時間をおいてもう一度お試しください。','error');
+          return;
+        }
+        if(parsed.value>formatDateParts(today)){setMessage('未来の日付は生年月日として使用できません。','error');birthDate.focus();return;}
         const age=calculateFullAge(value,today);
         if(age===null){setMessage('正しい生年月日を入力してください。','error');birthDate.focus();return;}
         if(age<18){setMessage('18歳未満の方は登録できません。','error');birthDate.focus();return;}
