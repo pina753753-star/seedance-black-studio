@@ -18,36 +18,68 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const WATERMARK_SECRET = process.env.WATERMARK_SECRET || '';
 const PORT = process.env.PORT || 3000;
 
-// ---- concurrency guard for /watermark ----
+// ---- concurrency guard shared by /watermark and /edit ----
 // Without a limit, overlapping requests (e.g. a client retrying every ~10s
 // while a previous attempt is still stuck/slow) each spawn their own ffmpeg
 // process, multiplying peak memory/CPU and starving whatever is already
 // running — this matched what production logs showed for the SIGKILL
 // incidents (repeated /watermark calls piling up for the same job).
-// MAX_CONCURRENT_JOBS bounds how many /watermark jobs run at once; anything
-// beyond that waits in a FIFO queue instead of running in parallel.
-// NOTE: /edit does not use this guard yet — it has no production traffic
-// (nothing calls it), so it's out of scope for this fix. Wire /edit into the
-// same guard before it goes live, since both endpoints share this container.
+// MAX_CONCURRENT_JOBS bounds how many jobs (of either kind) run at once;
+// anything beyond that waits in a queue instead of running in parallel.
+// /edit is additionally capped by MAX_CONCURRENT_EDIT_JOBS so it can never
+// occupy every slot — at least one slot always stays available for
+// /watermark, and queued /watermark requests are dispatched ahead of queued
+// /edit requests so /watermark's responsiveness doesn't degrade because of
+// /edit traffic sharing this container.
 const MAX_CONCURRENT_JOBS = 2;
+const MAX_CONCURRENT_EDIT_JOBS = 1;
 let activeJobs = 0;
-const jobQueue = [];
+let activeEditJobs = 0;
+const jobQueue = []; // { type: 'watermark' | 'edit', resolve }
 
-function acquireSlot() {
-  if (activeJobs < MAX_CONCURRENT_JOBS) {
-    activeJobs++;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => jobQueue.push(resolve));
+function canRunJob(type) {
+  if (activeJobs >= MAX_CONCURRENT_JOBS) return false;
+  if (type === 'edit' && activeEditJobs >= MAX_CONCURRENT_EDIT_JOBS) return false;
+  return true;
 }
 
-function releaseSlot() {
-  const next = jobQueue.shift();
-  if (next) {
-    next();
-  } else {
-    activeJobs--;
+function pumpQueue() {
+  for (let i = 0; i < jobQueue.length; i++) {
+    const item = jobQueue[i];
+    if (canRunJob(item.type)) {
+      jobQueue.splice(i, 1);
+      activeJobs++;
+      if (item.type === 'edit') activeEditJobs++;
+      item.resolve();
+      i--;
+    }
   }
+}
+
+function acquireSlot(type = 'watermark') {
+  if (canRunJob(type)) {
+    activeJobs++;
+    if (type === 'edit') activeEditJobs++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const item = { type, resolve };
+    if (type === 'watermark') {
+      // Jump ahead of any queued /edit jobs, but stay behind other queued
+      // /watermark jobs (FIFO within the same priority).
+      let idx = jobQueue.findIndex((q) => q.type === 'edit');
+      if (idx === -1) idx = jobQueue.length;
+      jobQueue.splice(idx, 0, item);
+    } else {
+      jobQueue.push(item);
+    }
+  });
+}
+
+function releaseSlot(type = 'watermark') {
+  activeJobs--;
+  if (type === 'edit') activeEditJobs--;
+  pumpQueue();
 }
 
 // Hard cap on how long a single ffmpeg run may take. Without this, a stuck
@@ -94,7 +126,7 @@ function runFfmpeg(build, timeoutMs = FFMPEG_TIMEOUT_MS) {
 const inFlightWatermarks = new Map(); // videoUrl -> Promise<{ok, watermarkedUrl?, error?}>
 
 async function runWatermarkJob(videoUrl) {
-  await acquireSlot();
+  await acquireSlot('watermark');
   const uid = uuidv4();
   const inputFile = path.join('/tmp', `in_${uid}.mp4`);
   const outputFile = path.join('/tmp', `out_${uid}.mp4`);
@@ -135,7 +167,7 @@ async function runWatermarkJob(videoUrl) {
   } finally {
     try { if (fs.existsSync(inputFile)) fs.unlinkSync(inputFile); } catch (_) {}
     try { if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile); } catch (_) {}
-    releaseSlot();
+    releaseSlot('watermark');
   }
 }
 
@@ -163,15 +195,86 @@ app.post('/watermark', async (req, res) => {
 
 // ================================================================
 // VIDEO EDIT ENDPOINT (trim / concat / transitions)
-// 既存の /watermark には一切影響しない追加機能
 // ================================================================
 
 const EDIT_MAX_CLIPS = 6;
 const EDIT_BUCKET = 'reference-images';
 
+// SSRF guard: only Supabase Storage public URLs on this project's own
+// Supabase host are allowed as clip sources. Arbitrary external URLs are
+// rejected outright.
+function getAllowedVideoHost() {
+  try {
+    return new URL(SUPABASE_URL).host || null;
+  } catch (_) {
+    return null;
+  }
+}
+const EDIT_ALLOWED_VIDEO_HOST = getAllowedVideoHost();
+
+function isAllowedEditVideoUrl(raw) {
+  if (typeof raw !== 'string') return false;
+  let u;
+  try {
+    u = new URL(raw);
+  } catch (_) {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  if (!EDIT_ALLOWED_VIDEO_HOST || u.host !== EDIT_ALLOWED_VIDEO_HOST) return false;
+  if (!u.pathname.startsWith('/storage/v1/object/public/')) return false;
+  return true;
+}
+
+// Per-clip download cap. Generated clips are short (seconds to low minutes)
+// so this comfortably covers legitimate use while bounding worst-case
+// memory/disk from a single request.
+const EDIT_MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024; // 200MB
+const EDIT_DOWNLOAD_TIMEOUT_MS = 60000;
+
+// Duration limits, checked after ffprobe.
+// Generated clips are short-form (typically up to ~15s each), so these
+// caps are sized for combining SNS-style short clips, not long-form video.
+const EDIT_MAX_CLIP_DURATION_SEC = 30; // 30s per clip
+const EDIT_MAX_TOTAL_DURATION_SEC = 180; // 3 min combined
+
+// Overall processing (probe done, normalize+concat remaining) time budget.
+// Scales with total input duration so a handful of short clips finishes
+// fast while a full 3-minute combine still gets a bounded, generous window
+// (fast-preset x264 transcode is normally faster than realtime, but Railway
+// containers can be slow/shared, so this leaves ample margin).
+const EDIT_TIMEOUT_BASE_MS = 45000;
+const EDIT_TIMEOUT_PER_SEC_MS = 1500;
+const EDIT_TIMEOUT_MAX_MS = 300000; // 5 min hard cap
+
+const EDIT_FFPROBE_TIMEOUT_MS = 15000;
+
+function computeEditDeadline(totalInputDurationSec) {
+  const budget = Math.min(
+    EDIT_TIMEOUT_MAX_MS,
+    EDIT_TIMEOUT_BASE_MS + totalInputDurationSec * EDIT_TIMEOUT_PER_SEC_MS
+  );
+  return Date.now() + budget;
+}
+
+function remainingMs(deadline) {
+  return deadline - Date.now();
+}
+
+function assertDeadlineNotPassed(deadline, stage) {
+  if (remainingMs(deadline) <= 0) {
+    throw new Error(`edit processing exceeded its time budget (${stage})`);
+  }
+}
+
 function editProbe(file) {
   return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(file, (err, data) => (err ? reject(err) : resolve(data)));
+    const timer = setTimeout(() => reject(new Error('ffprobe timed out')), EDIT_FFPROBE_TIMEOUT_MS);
+    ffmpeg.ffprobe(file, (err, data) => {
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(data);
+    });
   });
 }
 
@@ -183,32 +286,53 @@ function editParseFps(rFrameRate) {
 }
 
 async function editDownload(url, filePath) {
-  const response = await fetch(url, { timeout: 120000 });
+  const response = await fetch(url, { timeout: EDIT_DOWNLOAD_TIMEOUT_MS });
   if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-  const buffer = await response.buffer();
-  fs.writeFileSync(filePath, buffer);
+
+  const contentLength = Number(response.headers.get('content-length') || 0);
+  if (contentLength && contentLength > EDIT_MAX_DOWNLOAD_BYTES) {
+    throw new Error('clip exceeds maximum allowed file size');
+  }
+
+  await new Promise((resolve, reject) => {
+    let total = 0;
+    let rejected = false;
+    const dest = fs.createWriteStream(filePath);
+    const fail = (err) => {
+      if (rejected) return;
+      rejected = true;
+      try { dest.destroy(); } catch (_) {}
+      try { response.body.destroy(); } catch (_) {}
+      reject(err);
+    };
+    response.body.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > EDIT_MAX_DOWNLOAD_BYTES) {
+        fail(new Error('clip exceeds maximum allowed file size'));
+      }
+    });
+    response.body.on('error', fail);
+    dest.on('error', fail);
+    dest.on('finish', () => {
+      if (!rejected) resolve();
+    });
+    response.body.pipe(dest);
+  });
 }
 
-app.post('/edit', async (req, res) => {
-  const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  if (WATERMARK_SECRET && auth !== WATERMARK_SECRET) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+// Internal error messages may reference ffmpeg internals or /tmp paths;
+// only a curated allowlist of our own validation-style messages is
+// forwarded to the client, everything else becomes a generic message.
+// Full details are always logged server-side.
+function safeEditErrorMessage(err) {
+  const msg = String((err && err.message) || '');
+  if (!msg || /ffmpeg|ENOENT|EACCES|EPIPE|\/tmp\/|node_modules|at [A-Za-z]+\.<anonymous>/i.test(msg)) {
+    return 'Video processing failed';
   }
+  return msg;
+}
 
-  const { clips, transition = 'cut', transitionDuration } = req.body || {};
-
-  if (!Array.isArray(clips) || clips.length < 1 || clips.length > EDIT_MAX_CLIPS) {
-    return res.status(400).json({ ok: false, error: `clips must be an array of 1-${EDIT_MAX_CLIPS} items` });
-  }
-  if (!['cut', 'crossfade', 'fade'].includes(transition)) {
-    return res.status(400).json({ ok: false, error: 'transition must be one of: cut, crossfade, fade' });
-  }
-  for (const clip of clips) {
-    if (!clip || typeof clip.videoUrl !== 'string' || !/^https?:\/\//.test(clip.videoUrl)) {
-      return res.status(400).json({ ok: false, error: 'each clip requires a valid videoUrl' });
-    }
-  }
-
+async function runEditJob({ clips, transition, transitionDuration, ownerSegment }) {
   const uid = uuidv4();
   const tempFiles = [];
   const makeTmp = (name) => {
@@ -226,21 +350,32 @@ app.post('/edit', async (req, res) => {
       inputFiles.push(f);
     }
 
-    // 2) メタデータ取得
+    // 2) メタデータ取得 + 長さ検証
     const metas = [];
     for (const f of inputFiles) {
       const data = await editProbe(f);
       const v = (data.streams || []).find((s) => s.codec_type === 'video');
       const a = (data.streams || []).find((s) => s.codec_type === 'audio');
       if (!v) throw new Error('No video stream found in input');
+      const duration = Number(data.format && data.format.duration) || 0;
+      if (duration > EDIT_MAX_CLIP_DURATION_SEC) {
+        throw new Error(`clip duration (${duration.toFixed(1)}s) exceeds maximum allowed (${EDIT_MAX_CLIP_DURATION_SEC}s)`);
+      }
       metas.push({
-        duration: Number(data.format && data.format.duration) || 0,
+        duration,
         width: v.width,
         height: v.height,
         fps: editParseFps(v.r_frame_rate),
         hasAudio: !!a,
       });
     }
+
+    const totalInputDuration = metas.reduce((s, m) => s + m.duration, 0);
+    if (totalInputDuration > EDIT_MAX_TOTAL_DURATION_SEC) {
+      throw new Error(`total clip duration (${totalInputDuration.toFixed(1)}s) exceeds maximum allowed (${EDIT_MAX_TOTAL_DURATION_SEC}s)`);
+    }
+
+    const deadline = computeEditDeadline(totalInputDuration);
 
     // 出力解像度・fpsは1本目のクリップに合わせる
     const W = metas[0].width;
@@ -281,6 +416,7 @@ app.post('/edit', async (req, res) => {
     // 4) 各クリップを正規化（トリム + 解像度/fps統一 + 音声統一）
     const normFiles = [];
     for (let i = 0; i < inputFiles.length; i++) {
+      assertDeadlineNotPassed(deadline, `normalize clip ${i}`);
       const outFile = makeTmp(`edit_norm_${i}`);
       const p = plans[i];
 
@@ -305,7 +441,7 @@ app.post('/edit', async (req, res) => {
         if (aParts.length) af += ',' + aParts.join(',');
       }
 
-      await new Promise((resolve, reject) => {
+      const buildNormalizeCmd = () => {
         let cmd = ffmpeg(inputFiles[i]).inputOptions(['-ss', String(p.start)]);
 
         if (!metas[i].hasAudio) {
@@ -315,7 +451,7 @@ app.post('/edit', async (req, res) => {
             .outputOptions(['-map', '0:v:0', '-map', '1:a:0', '-shortest']);
         }
 
-        cmd
+        return cmd
           .outputOptions([
             '-t', String(p.tdur),
             '-vf', vf,
@@ -326,33 +462,33 @@ app.post('/edit', async (req, res) => {
             '-c:a', 'aac',
             '-b:a', '128k',
           ])
-          .output(outFile)
-          .on('end', resolve)
-          .on('error', (err) => reject(new Error(`ffmpeg normalize clip ${i}: ${err.message}`)))
-          .run();
-      });
+          .output(outFile);
+      };
+
+      try {
+        await runFfmpeg(buildNormalizeCmd, remainingMs(deadline));
+      } catch (err) {
+        throw new Error(`ffmpeg normalize clip ${i}: ${err.message}`);
+      }
       normFiles.push(outFile);
     }
 
     // 5) 結合
+    assertDeadlineNotPassed(deadline, 'combine');
     const finalFile = makeTmp('edit_final');
 
     if (normFiles.length === 1) {
       // トリミングのみ: remuxしてfaststartを付ける
-      await new Promise((resolve, reject) => {
-        ffmpeg(normFiles[0])
-          .outputOptions(['-c', 'copy', '-movflags', '+faststart'])
-          .output(finalFile)
-          .on('end', resolve)
-          .on('error', (err) => reject(new Error(`ffmpeg remux: ${err.message}`)))
-          .run();
-      });
+      try {
+        await runFfmpeg(
+          () => ffmpeg(normFiles[0]).outputOptions(['-c', 'copy', '-movflags', '+faststart']).output(finalFile),
+          remainingMs(deadline)
+        );
+      } catch (err) {
+        throw new Error(`ffmpeg remux: ${err.message}`);
+      }
     } else if (transition === 'crossfade') {
       const n = normFiles.length;
-      let cmd = ffmpeg();
-      normFiles.forEach((f) => {
-        cmd = cmd.input(f);
-      });
 
       const filters = [];
       let vPrev = '[0:v]';
@@ -369,8 +505,12 @@ app.post('/edit', async (req, res) => {
         cumulative = cumulative + plans[i].tdur - fd;
       }
 
-      await new Promise((resolve, reject) => {
-        cmd
+      const buildCrossfadeCmd = () => {
+        let cmd = ffmpeg();
+        normFiles.forEach((f) => {
+          cmd = cmd.input(f);
+        });
+        return cmd
           .complexFilter(filters.join(';'))
           .outputOptions([
             '-map', '[vout]',
@@ -382,24 +522,27 @@ app.post('/edit', async (req, res) => {
             '-b:a', '128k',
             '-movflags', '+faststart',
           ])
-          .output(finalFile)
-          .on('end', resolve)
-          .on('error', (err) => reject(new Error(`ffmpeg crossfade: ${err.message}`)))
-          .run();
-      });
+          .output(finalFile);
+      };
+
+      try {
+        await runFfmpeg(buildCrossfadeCmd, remainingMs(deadline));
+      } catch (err) {
+        throw new Error(`ffmpeg crossfade: ${err.message}`);
+      }
     } else {
       // cut / fade: 単純連結（fadeは正規化時にフェード適用済み）
       const n = normFiles.length;
-      let cmd = ffmpeg();
-      normFiles.forEach((f) => {
-        cmd = cmd.input(f);
-      });
       const labels = [];
       for (let i = 0; i < n; i++) labels.push(`[${i}:v][${i}:a]`);
       const graph = `${labels.join('')}concat=n=${n}:v=1:a=1[vout][aout]`;
 
-      await new Promise((resolve, reject) => {
-        cmd
+      const buildConcatCmd = () => {
+        let cmd = ffmpeg();
+        normFiles.forEach((f) => {
+          cmd = cmd.input(f);
+        });
+        return cmd
           .complexFilter(graph)
           .outputOptions([
             '-map', '[vout]',
@@ -411,17 +554,20 @@ app.post('/edit', async (req, res) => {
             '-b:a', '128k',
             '-movflags', '+faststart',
           ])
-          .output(finalFile)
-          .on('end', resolve)
-          .on('error', (err) => reject(new Error(`ffmpeg concat: ${err.message}`)))
-          .run();
-      });
+          .output(finalFile);
+      };
+
+      try {
+        await runFfmpeg(buildConcatCmd, remainingMs(deadline));
+      } catch (err) {
+        throw new Error(`ffmpeg concat: ${err.message}`);
+      }
     }
 
-    // 6) Supabase Storage にアップロード
+    // 6) Supabase Storage にアップロード（ユーザー/ジョブ単位でパスを分離）
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
     const fileBuffer = fs.readFileSync(finalFile);
-    const storagePath = `edited/${uid}.mp4`;
+    const storagePath = `edited/${ownerSegment}/${uid}.mp4`;
 
     const { error: uploadError } = await supabase.storage
       .from(EDIT_BUCKET)
@@ -435,15 +581,15 @@ app.post('/edit', async (req, res) => {
         ? plans.reduce((s, p) => s + p.tdur, 0) - fd * (plans.length - 1)
         : plans.reduce((s, p) => s + p.tdur, 0);
 
-    return res.json({
+    return {
       ok: true,
       editedUrl: urlData.publicUrl,
       duration: Number(totalDuration.toFixed(2)),
       transition,
-    });
+    };
   } catch (err) {
     console.error('[edit] error:', err.message);
-    return res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: safeEditErrorMessage(err) };
   } finally {
     for (const f of tempFiles) {
       try {
@@ -451,6 +597,39 @@ app.post('/edit', async (req, res) => {
       } catch (_) {}
     }
   }
+}
+
+app.post('/edit', async (req, res) => {
+  const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  if (WATERMARK_SECRET && auth !== WATERMARK_SECRET) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+
+  const { clips, transition = 'cut', transitionDuration, userId } = req.body || {};
+
+  if (!Array.isArray(clips) || clips.length < 1 || clips.length > EDIT_MAX_CLIPS) {
+    return res.status(400).json({ ok: false, error: `clips must be an array of 1-${EDIT_MAX_CLIPS} items` });
+  }
+  if (!['cut', 'crossfade', 'fade'].includes(transition)) {
+    return res.status(400).json({ ok: false, error: 'transition must be one of: cut, crossfade, fade' });
+  }
+  for (const clip of clips) {
+    if (!clip || !isAllowedEditVideoUrl(clip.videoUrl)) {
+      return res.status(400).json({ ok: false, error: 'each clip requires a valid videoUrl from Supabase Storage' });
+    }
+  }
+
+  const ownerSegment = typeof userId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(userId) ? userId : 'unassigned';
+
+  await acquireSlot('edit');
+  let result;
+  try {
+    result = await runEditJob({ clips, transition, transitionDuration, ownerSegment });
+  } finally {
+    releaseSlot('edit');
+  }
+
+  return res.status(result.ok ? 200 : 500).json(result);
 });
 
 app.listen(PORT, () => {
