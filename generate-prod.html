@@ -16,7 +16,7 @@
 .pt-stage{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;width:100%;padding:0 20px;box-sizing:border-box}.pt-stage-label{color:#c8cad6;font-weight:700;font-size:13px;text-align:center}.pt-prog-track{width:48%;max-width:200px;height:3px;background:#1a1f2b;border-radius:999px;overflow:hidden}.pt-prog-fill{height:100%;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);border-radius:999px;transition:width .8s ease}@media(prefers-reduced-motion:reduce){.pt-prog-fill{transition:none}}
 /* ---- Video edit tab ---- */
 #videoEditSection .old{position:relative}#videoEditSection .old.ve-selected{border-color:rgba(142,216,255,.6);background:#161c26}.ve-select-btn{position:absolute;right:10px;top:10px;z-index:5;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;cursor:pointer}.ve-select-btn.on{background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-color:transparent}#veSelectedBar{display:flex;gap:8px;overflow-x:auto;padding:2px 0}
-.ve-slider-wrap{position:relative;height:44px;margin-top:6px}.ve-slider-track{position:absolute;left:10px;right:10px;top:50%;transform:translateY(-50%);height:4px;border-radius:999px;background:#2a2f3a;pointer-events:none}.ve-slider-range{position:absolute;top:50%;transform:translateY(-50%);height:4px;border-radius:999px;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);pointer-events:none}.ve-range{position:absolute;left:0;top:0;width:100%;height:44px;margin:0;background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none}.ve-range::-webkit-slider-runnable-track{-webkit-appearance:none;height:44px;background:transparent}.ve-range::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;width:44px;height:44px;border-radius:50%;cursor:pointer;background:radial-gradient(circle at center,#fff 0 8px,rgba(0,0,0,.35) 8px 9px,transparent 9px 44px)}.ve-range.ve-range-start::-webkit-slider-thumb{background:radial-gradient(circle at center,#8ed8ff 0 9px,#fff 9px 10px,transparent 10px 44px)}.ve-range.ve-range-end::-webkit-slider-thumb{background:radial-gradient(circle at center,#8b5cf6 0 9px,#fff 9px 10px,transparent 10px 44px)}.ve-range::-moz-range-track{height:4px;background:transparent}.ve-range::-moz-range-thumb{pointer-events:auto;width:24px;height:24px;border-radius:50%;border:0;cursor:pointer;background:#fff}.ve-range.ve-range-start::-moz-range-thumb{box-shadow:0 0 0 3px #8ed8ff}.ve-range.ve-range-end::-moz-range-thumb{box-shadow:0 0 0 3px #8b5cf6}.ve-time-row{display:flex;justify-content:space-between;gap:6px;color:#9ca3af;font-size:11px;font-weight:700;margin-top:2px}.ve-time-row [data-ve-dur-label]{color:#c8cad6}
+.ve-slider-wrap{position:relative;height:44px;margin-top:6px}.ve-filmstrip-viewport{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:36px;border-radius:8px;overflow:hidden;background:#2a2f3a;pointer-events:none}.ve-filmstrip-fallback{position:absolute;inset:0;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);opacity:.3}.ve-filmstrip{position:absolute;inset:0;display:flex}.ve-filmstrip canvas{flex:1 1 0%;min-width:0;width:100%;height:100%;display:block}.ve-slider-range{position:absolute;top:0;bottom:0;background:transparent;box-shadow:0 0 0 9999px rgba(0,0,0,.55)}.ve-range{position:absolute;left:0;top:0;width:100%;height:44px;margin:0;background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none}.ve-range::-webkit-slider-runnable-track{-webkit-appearance:none;height:44px;background:transparent}.ve-range::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;width:44px;height:44px;border-radius:50%;cursor:pointer;background:radial-gradient(circle at center,#fff 0 8px,rgba(0,0,0,.35) 8px 9px,transparent 9px 44px)}.ve-range.ve-range-start::-webkit-slider-thumb{background:radial-gradient(circle at center,#8ed8ff 0 9px,#fff 9px 10px,transparent 10px 44px)}.ve-range.ve-range-end::-webkit-slider-thumb{background:radial-gradient(circle at center,#8b5cf6 0 9px,#fff 9px 10px,transparent 10px 44px)}.ve-range::-moz-range-track{height:4px;background:transparent}.ve-range::-moz-range-thumb{pointer-events:auto;width:24px;height:24px;border-radius:50%;border:0;cursor:pointer;background:#fff}.ve-range.ve-range-start::-moz-range-thumb{box-shadow:0 0 0 3px #8ed8ff}.ve-range.ve-range-end::-moz-range-thumb{box-shadow:0 0 0 3px #8b5cf6}.ve-time-row{display:flex;justify-content:space-between;gap:6px;color:#9ca3af;font-size:11px;font-weight:700;margin-top:2px}.ve-time-row [data-ve-dur-label]{color:#c8cad6}
 </style>
 </head>
 <body>
@@ -262,8 +262,11 @@ function veClampClip(clip,dur){
   clip.end=Math.round(end*10)/10;
 }
 function veTrimEditorHtml(clip){const dur=clip.duration||5;const startPct=dur>0?(clip.start/dur*100):0;const endPct=dur>0?(clip.end/dur*100):100;return '<div class="ve-slider-wrap">'
-  +'<div class="ve-slider-track"></div>'
+  +'<div class="ve-filmstrip-viewport" data-ve-filmstrip-viewport>'
+  +'<div class="ve-filmstrip-fallback" data-ve-filmstrip-fallback></div>'
+  +'<div class="ve-filmstrip" data-ve-filmstrip></div>'
   +'<div class="ve-slider-range" data-ve-range-bar style="left:'+startPct+'%;right:'+(100-endPct)+'%"></div>'
+  +'</div>'
   +'<input type="range" class="ve-range ve-range-start" min="0" max="'+dur+'" step="0.1" value="'+clip.start+'" aria-label="開始秒">'
   +'<input type="range" class="ve-range ve-range-end" min="0" max="'+dur+'" step="0.1" value="'+clip.end+'" aria-label="終了秒">'
   +'</div>'
@@ -276,7 +279,131 @@ function veCard(v,selIndex){const dur=Number(v.duration_seconds)||5;const sel=se
   +(sel?veTrimEditorHtml(clip):'')
   +'<div style="color:#6b7280;font-size:11px">尺: '+dur+'秒</div>'
   +'</article>';}
-function veRenderList(){const list=$('veList');if(!list)return;if(!veVideos.length){$('veEmpty').style.display='block';list.innerHTML='';return}$('veEmpty').style.display='none';list.innerHTML=veVideos.map(v=>{const idx=veSelected.findIndex(s=>s.videoId===v.id);return veCard(v,idx)}).join('')}
+function veRenderList(){const list=$('veList');if(!list)return;if(!veVideos.length){$('veEmpty').style.display='block';list.innerHTML='';return}$('veEmpty').style.display='none';list.innerHTML=veVideos.map(v=>{const idx=veSelected.findIndex(s=>s.videoId===v.id);return veCard(v,idx)}).join('');veFilmstripSyncSelected()}
+
+// ---- フィルムストリップ（サムネイル帯）生成: veSelected/veClampClip/veSubmit等の
+// トリム本体ロジックには一切触れず、表示だけをvideoId単位でメモリ上に生成・キャッシュする ----
+const VE_FILMSTRIP_MAX_CACHE=10; // 選択解除後も直近10本まではキャッシュを保持
+const VE_FILMSTRIP_FRAME_TIMEOUT_MS=3500; // 1コマあたりのタイムアウト(2〜4秒の範囲)
+const VE_FILMSTRIP_TOTAL_TIMEOUT_MS=14000; // 1本あたりの合計タイムアウト(10〜15秒の範囲)
+const VE_FILMSTRIP_THUMB_W=64,VE_FILMSTRIP_THUMB_H=96; // 表示はCSSでcoverするため内部解像度は小さめでよい
+const veFilmstripCache=new Map(); // videoId -> {frames: HTMLCanvasElement[]}
+const veFilmstripOrder=[]; // LRU順(古い順)。上限本数を超えたら古いものから破棄
+const veFilmstripQueue=[]; // 生成待ちvideoIdのキュー(重複なし)
+let veFilmstripBusy=false; // 直列処理の排他フラグ(同時に生成するのは常に1本のみ)
+let veFilmstripHiddenVideo=null; // 画面には表示しない、サムネイル生成専用の<video>
+let veFilmstripObserver=null; // 画面内に見えている選択カードを優先生成するためのIntersectionObserver
+
+function veFilmstripGetHiddenVideo(){
+  if(veFilmstripHiddenVideo)return veFilmstripHiddenVideo;
+  const v=document.createElement('video');
+  v.muted=true;v.playsInline=true;v.crossOrigin='anonymous';v.preload='auto';
+  v.style.position='fixed';v.style.left='-9999px';v.style.top='0';v.style.width='1px';v.style.height='1px';
+  document.body.appendChild(v);
+  veFilmstripHiddenVideo=v;
+  return v;
+}
+function veFilmstripThumbCount(trackWidthPx){const n=Math.round((trackWidthPx||240)/40);return Math.max(4,Math.min(8,n||6))}
+function veFilmstripTouchCache(videoId){const idx=veFilmstripOrder.indexOf(videoId);if(idx>=0)veFilmstripOrder.splice(idx,1);veFilmstripOrder.push(videoId);while(veFilmstripOrder.length>VE_FILMSTRIP_MAX_CACHE){const evictId=veFilmstripOrder.shift();veFilmstripCache.delete(evictId)}}
+function veFilmstripLoadVideoSrc(video,url){return new Promise((resolve,reject)=>{let done=false;const timer=setTimeout(()=>{if(done)return;done=true;cleanup();reject(new Error('filmstrip-load-timeout'))},VE_FILMSTRIP_FRAME_TIMEOUT_MS*2);function onLoaded(){if(done)return;done=true;cleanup();resolve()}function onError(){if(done)return;done=true;cleanup();reject(new Error('filmstrip-load-error'))}function cleanup(){clearTimeout(timer);video.removeEventListener('loadedmetadata',onLoaded);video.removeEventListener('error',onError)}video.addEventListener('loadedmetadata',onLoaded,{once:true});video.addEventListener('error',onError,{once:true});video.src=url})}
+function veFilmstripWaitSeeked(video,time){return new Promise((resolve,reject)=>{let done=false;const timer=setTimeout(()=>{if(done)return;done=true;cleanup();reject(new Error('filmstrip-seek-timeout'))},VE_FILMSTRIP_FRAME_TIMEOUT_MS);function onSeeked(){if(done)return;done=true;cleanup();resolve()}function onError(){if(done)return;done=true;cleanup();reject(new Error('filmstrip-seek-error'))}function cleanup(){clearTimeout(timer);video.removeEventListener('seeked',onSeeked);video.removeEventListener('error',onError)}video.addEventListener('seeked',onSeeked,{once:true});video.addEventListener('error',onError,{once:true});video.currentTime=time})}
+// 動画1本分のコマをvideo.currentTime→seeked待ち→drawImage()の順で1コマずつ直列生成する。
+// 巨大な1枚canvasやtoDataURL()による画像化は行わず、コマごとに小さな個別canvasを作る。
+async function veFilmstripGenerateFrames(videoUrl,fallbackDuration,count){
+  const start=Date.now();
+  const video=veFilmstripGetHiddenVideo();
+  if(video.dataset.veCurrentSrc!==videoUrl){
+    await veFilmstripLoadVideoSrc(video,videoUrl);
+    video.dataset.veCurrentSrc=videoUrl;
+  }
+  const realDur=Number.isFinite(video.duration)&&video.duration>0?video.duration:fallbackDuration;
+  const frames=[];
+  for(let i=0;i<count;i++){
+    if(Date.now()-start>VE_FILMSTRIP_TOTAL_TIMEOUT_MS)throw new Error('filmstrip-total-timeout');
+    const raw=realDur*(i+0.5)/count; // 終端に余白を持たせるための(index+0.5)/count
+    const t=Math.min(Math.max(0,raw),Math.max(0,realDur-0.05));
+    await veFilmstripWaitSeeked(video,t);
+    const c=document.createElement('canvas');
+    c.width=VE_FILMSTRIP_THUMB_W;c.height=VE_FILMSTRIP_THUMB_H;
+    c.getContext('2d').drawImage(video,0,0,VE_FILMSTRIP_THUMB_W,VE_FILMSTRIP_THUMB_H);
+    frames.push(c);
+  }
+  return frames;
+}
+function veFilmstripRenderCached(card,videoId){
+  const entry=veFilmstripCache.get(videoId);
+  if(!entry)return false;
+  const host=card.querySelector('[data-ve-filmstrip]');
+  const fallback=card.querySelector('[data-ve-filmstrip-fallback]');
+  if(!host)return false;
+  host.innerHTML='';
+  entry.frames.forEach(srcCanvas=>{
+    const c=document.createElement('canvas');
+    c.width=srcCanvas.width;c.height=srcCanvas.height;
+    c.getContext('2d').drawImage(srcCanvas,0,0);
+    host.appendChild(c);
+  });
+  if(fallback)fallback.style.display='none';
+  veFilmstripTouchCache(videoId);
+  return true;
+}
+function veFilmstripApplyToVisibleCard(videoId){const card=document.querySelector('[data-ve-id="'+CSS.escape(videoId)+'"]');if(card)veFilmstripRenderCached(card,videoId)}
+async function veFilmstripPump(){
+  if(veFilmstripBusy)return;
+  veFilmstripBusy=true;
+  try{
+    while(veFilmstripQueue.length){
+      const videoId=veFilmstripQueue.shift();
+      if(!veSelected.some(s=>s.videoId===videoId))continue; // 生成前に選択解除されていたらスキップ
+      if(veFilmstripCache.has(videoId)){veFilmstripApplyToVisibleCard(videoId);continue}
+      const v=veVideos.find(x=>x.id===videoId);
+      if(!v||!v.video_url)continue;
+      const clip=veSelected.find(s=>s.videoId===videoId);
+      const fallbackDuration=clip?.duration||Number(v.duration_seconds)||5;
+      const card=document.querySelector('[data-ve-id="'+CSS.escape(videoId)+'"]');
+      const trackW=card?.querySelector('[data-ve-filmstrip-viewport]')?.clientWidth||240;
+      const count=veFilmstripThumbCount(trackW);
+      try{
+        const frames=await veFilmstripGenerateFrames(v.video_url,fallbackDuration,count);
+        veFilmstripCache.set(videoId,{frames});
+        veFilmstripTouchCache(videoId);
+        veFilmstripApplyToVisibleCard(videoId);
+      }catch(_){
+        // 失敗時は何もしない: フィルムストリップ用フォールバック(グラデーション)表示のまま画面は壊れない
+      }
+    }
+  }finally{
+    veFilmstripBusy=false;
+  }
+}
+function veFilmstripEnqueue(videoId){
+  if(veFilmstripCache.has(videoId))return;
+  if(veFilmstripQueue.includes(videoId))return;
+  veFilmstripQueue.push(videoId);
+  veFilmstripPump();
+}
+function veFilmstripPrioritize(videoId){const idx=veFilmstripQueue.indexOf(videoId);if(idx>0){veFilmstripQueue.splice(idx,1);veFilmstripQueue.unshift(videoId)}}
+function veFilmstripEnsureObserver(){
+  if(veFilmstripObserver)return veFilmstripObserver;
+  veFilmstripObserver=new IntersectionObserver(entries=>{
+    entries.forEach(entry=>{if(entry.isIntersecting){const id=entry.target.getAttribute('data-ve-id');if(id)veFilmstripPrioritize(id)}});
+  },{root:null,threshold:0.2});
+  return veFilmstripObserver;
+}
+// veRenderList()の直後に呼ぶ。選択中クリップぶんだけ、キャッシュ済みなら即描画、未生成ならキューへ積む
+function veFilmstripSyncSelected(){
+  if(veFilmstripObserver)veFilmstripObserver.disconnect();
+  veSelected.forEach(clip=>{
+    const card=document.querySelector('[data-ve-id="'+CSS.escape(clip.videoId)+'"]');
+    if(!card)return;
+    if(veFilmstripCache.has(clip.videoId)){
+      veFilmstripRenderCached(card,clip.videoId);
+    }else{
+      veFilmstripEnqueue(clip.videoId);
+      veFilmstripEnsureObserver().observe(card);
+    }
+  });
+}
 function veCreditEstimate(){const count=veSelected.length;const total=veSelected.reduce((s,c)=>s+Math.max(0,c.end-c.start),0);return(count>3||total>30)?15:10}
 function veRenderBar(){const bar=$('veBar');if(!bar)return;if(!veSelected.length){bar.style.display='none';return}bar.style.display='block';$('veCost').textContent=String(veCreditEstimate());const strip=$('veSelectedBar');strip.innerHTML=veSelected.map((c,i)=>{const v=veVideos.find(x=>x.id===c.videoId);return '<div style="flex:0 0 auto;width:56px;height:80px;border-radius:10px;overflow:hidden;position:relative;background:#050506;border:1px solid rgba(255,255,255,.1)"><video muted playsinline preload="metadata" src="'+esc(v?.video_url||'')+'#t=0.2" style="width:100%;height:100%;object-fit:cover;pointer-events:none"></video><span style="position:absolute;left:3px;top:3px;background:rgba(0,0,0,.7);border-radius:6px;padding:1px 5px;font-size:10px;font-weight:800">'+(i+1)+'</span></div>'}).join('')}
 function veToggleSelect(id){const idx=veSelected.findIndex(s=>s.videoId===id);if(idx>=0){veSelected.splice(idx,1)}else{if(veSelected.length>=VE_MAX_CLIPS)return;const v=veVideos.find(x=>x.id===id);if(!v)return;const dur=Number(v.duration_seconds)||5;const clip={videoId:id,start:0,end:dur,duration:dur};veClampClip(clip,dur);veSelected.push(clip)}veRenderList();veRenderBar()}
