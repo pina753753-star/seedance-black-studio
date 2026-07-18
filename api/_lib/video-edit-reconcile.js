@@ -42,11 +42,17 @@ function editedObjectPath(userId, taskId) {
 // not there" from "couldn't tell", because the caller (reconcileVideoEditTask)
 // must never treat an inconclusive check as grounds for a refund:
 //   { state: 'exists',  publicUrl, bytes } — confirmed present and readable as a video
-//   { state: 'missing' }                   — a definite 404 from both HEAD and the Range GET
-//   { state: 'unknown' }                   — fetch threw (network error/timeout), or a
-//                                             response came back but was inconclusive
-//                                             (wrong content-type, too small, non-404
-//                                             non-206 status, etc.) — NOT proof of absence
+//   { state: 'missing' }                   — HEAD returned 404 AND the follow-up Range GET
+//                                             also returned 404. This is the ONLY condition
+//                                             that produces 'missing' — any other HEAD/Range
+//                                             combination (including a HEAD/Range mismatch,
+//                                             e.g. HEAD 200 but Range 404, or HEAD 500) falls
+//                                             through to 'unknown' instead.
+//   { state: 'unknown' }                   — fetch threw (network error/timeout), a response
+//                                             came back but was inconclusive (wrong
+//                                             content-type, too small, non-404/non-206/non-2xx
+//                                             status), or HEAD and Range disagreed — NOT proof
+//                                             of absence
 async function verifyEditedObjectExists(db, path) {
   const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
   const publicUrl = data?.publicUrl;
@@ -77,7 +83,11 @@ async function verifyEditedObjectExists(db, path) {
     const contentType = rangeRes.headers.get('content-type') || '';
     await rangeRes.body?.cancel().catch(() => {});
 
-    if (rangeRes.status === 404) return { state: 'missing' };
+    // HEAD was not a clean 404 here (that's the only branch that reaches
+    // this code), so a 404 from the Range GET is a HEAD/Range mismatch, not
+    // an agreed-upon "missing" — 'missing' is only ever returned from the
+    // HEAD-404 branch below, where both checks agree.
+    if (rangeRes.status === 404) return { state: 'unknown' };
     if (!rangeRes.ok && rangeRes.status !== 206) return { state: 'unknown' };
 
     const contentRange = rangeRes.headers.get('content-range') || '';
