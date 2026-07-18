@@ -236,7 +236,31 @@ const VE_MAX_CLIPS=6;
 let veVideos=[],veSelected=[]; // veSelected: [{videoId,start,end,duration}]
 function veFmtTime(s){s=Math.max(0,Number(s)||0);return s.toFixed(1)+'s'}
 // veSelectedを唯一の正本として、常にstart/endをduration内・最小0.1秒差に丸める
-function veClampClip(clip,dur){dur=Math.max(0.2,Number(dur)||clip.duration||5);clip.duration=dur;let start=Math.max(0,Math.min(Number(clip.start)||0,dur-0.1));let end=Math.max(start+0.1,Math.min(Number(clip.end)||dur,dur));clip.start=Math.round(start*10)/10;clip.end=Math.round(end*10)/10}
+// start/endを0.1秒単位に丸める際、四捨五入(Math.round)だとend側がdurationを
+// 超過しうる（例: duration=5.05 → round(5.05*10)/10=5.1）。そのためstartは
+// 切り下げ(floor)・endは切り上げ(ceil)し、丸め後にもう一度「0以上」「duration以下
+// (実測値ベースの0.1秒刻み上限)」「end-start>=0.1秒」の3条件を再検証して補正する。
+// duration自体が0.2秒未満の極端に短い動画は、0.1秒刻み・最小間隔0.1秒を両立できる
+// 下限として0.2秒として扱う（それ未満は編集素材として意味を持たないため）。
+function veClampClip(clip,dur){
+  dur=Math.max(0.2,Number(dur)||clip.duration||5);
+  clip.duration=dur;
+  const durFloor=Math.floor(dur*10)/10; // 実測durationを超えない0.1秒単位の安全な上限
+  let start=Math.max(0,Math.min(Number(clip.start)||0,dur));
+  let end=Math.max(0,Math.min(Number(clip.end)||dur,dur));
+  if(end-start<0.1)end=Math.min(dur,start+0.1);
+  start=Math.floor(start*10)/10;
+  end=Math.ceil(end*10)/10;
+  // 丸め後の最終再検証（3条件: 0以上・duration以下・最小間隔0.1秒）
+  if(start<0)start=0;
+  if(end>durFloor)end=durFloor;
+  if(end-start<0.1){
+    start=Math.max(0,Math.round((end-0.1)*10)/10);
+    if(end-start<0.1)end=Math.min(durFloor,Math.round((start+0.1)*10)/10);
+  }
+  clip.start=Math.round(start*10)/10;
+  clip.end=Math.round(end*10)/10;
+}
 function veTrimEditorHtml(clip){const dur=clip.duration||5;const startPct=dur>0?(clip.start/dur*100):0;const endPct=dur>0?(clip.end/dur*100):100;return '<div class="ve-slider-wrap">'
   +'<div class="ve-slider-track"></div>'
   +'<div class="ve-slider-range" data-ve-range-bar style="left:'+startPct+'%;right:'+(100-endPct)+'%"></div>'
@@ -270,7 +294,7 @@ $('veList').addEventListener('change',e=>veHandleSliderInput(e,true));
 $('veList').addEventListener('loadedmetadata',e=>{const video=e.target;if(!video||video.tagName!=='VIDEO')return;const card=video.closest('[data-ve-id]');if(!card)return;const id=card.getAttribute('data-ve-id');const clip=veSelected.find(s=>s.videoId===id);if(!clip)return;const real=video.duration;if(Number.isFinite(real)&&real>0){veClampClip(clip,real);veUpdateSliderDom(card,clip)}},true);
 
 let _veClientRequestId='';
-async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){if(!(c.end>c.start)){err.textContent='終了秒は開始秒より大きい値にしてください。';err.style.display='block';return}}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};await veSend(body,token)}
+async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){const dur=Number(c.duration)||0;if(!(c.end>c.start)||!(c.start>=0)||!(c.end<=dur)||!(c.end-c.start>=0.1)){err.textContent='トリム範囲が不正です。開始・終了位置を選び直してください。';err.style.display='block';return}}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};await veSend(body,token)}
 async function veSend(body,token,attempt){attempt=attempt||0;try{const res=await fetch('/api/video-edit',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});if(res.status===401){location.href='./login.html';return}if(res.status===403){$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;showVideoEditModal();return}if(res.status===402){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='クレジットが不足しています（必要: '+(data.required||veCreditEstimate())+' cr）。クレジットを購入してください。';$('veError').style.display='block';return}if(res.status===409){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||'現在処理中の動画編集があります。完了後にもう一度お試しください。';$('veError').style.display='block';return}const data=await res.json().catch(()=>({}));if(data.status==='queued'||data.status==='processing'){vePollStatus(data.taskId,token);return}if(data.status==='completed'){veShowCompleted(data.editedUrl);return}if(data.status==='failed'){veShowFailed(data.message||data.error,data.refunded,data.taskId);return}if(res.status===502){veShowFailed(data.detail||data.error,data.refunded,data.taskId);return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||data.error||('編集の開始に失敗しました（'+res.status+'）');$('veError').style.display='block'}catch(e){if(attempt<3){setTimeout(()=>veSend(body,token,attempt+1),1500*(attempt+1));return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='通信エラーが発生しました。もう一度お試しください。';$('veError').style.display='block'}}
 function veShowCompleted(url){$('veProcessing').style.display='none';$('veResult').style.display='block';$('veResultVideo').src=url;$('veResultSave').href=url;veSelected=[];_veClientRequestId='';$('veSubmit').disabled=false;veRenderList();veRenderBar()}
 function veShowFailed(msg,refunded,taskId){$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;const refundNote=refunded===true?'クレジットは自動返金されています。':'返金状況を確認できないため、タスクID（'+(taskId||'不明')+'）を添えてサポートへお問い合わせください。';$('veError').textContent=(msg||'編集に失敗しました。')+' '+refundNote;$('veError').style.display='block'}
