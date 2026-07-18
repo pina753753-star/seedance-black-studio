@@ -26,6 +26,10 @@
     {
       "path": "/api/openrouter-reconcile",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/video-edit-reconcile",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
