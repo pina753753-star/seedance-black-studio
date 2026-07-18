@@ -360,10 +360,11 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
   const deadline = Date.now() + EDIT_REQUEST_TIMEOUT_MS;
   // uid is only used to namespace this job's own /tmp scratch files, so
   // concurrent jobs never collide there. The Storage output path uses
-  // outputId (the caller's video_edit_tasks id when available) instead of
-  // uid, so the caller can predict where the finished file will land even
-  // if its own HTTP request to us times out or the connection drops before
-  // we respond (see api/video-edit-status.js's reconciliation check).
+  // outputId (the caller's video_edit_tasks id — required, validated as a
+  // UUID by the /edit route handler) instead, so the caller can predict
+  // where the finished file will land even if its own HTTP request to us
+  // times out or the connection drops before we respond (see
+  // api/video-edit-status.js's reconciliation check).
   const uid = uuidv4();
   const tempFiles = [];
   const makeTmp = (name) => {
@@ -603,7 +604,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
     // 6) Supabase Storage にアップロード（ユーザー/ジョブ単位でパスを分離）
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
     const fileBuffer = fs.readFileSync(finalFile);
-    const storagePath = `edited/${ownerSegment}/${outputId || uid}.mp4`;
+    const storagePath = `edited/${ownerSegment}/${outputId}.mp4`;
 
     const { error: uploadError } = await supabase.storage
       .from(EDIT_BUCKET)
@@ -655,15 +656,20 @@ app.post('/edit', async (req, res) => {
     }
   }
 
+  // taskId is required and must be a UUID: it becomes the Storage output
+  // filename (edited/<ownerSegment>/<taskId>.mp4), which the caller
+  // (api/video-edit.js) predicts up front from its own video_edit_tasks row
+  // id so it can recover the result later even if the original HTTP request
+  // to this endpoint never completed (timeout, dropped connection). No
+  // fallback to a random id: an un-parented output file that nothing can
+  // ever look up defeats the whole point of this path being deterministic.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (typeof taskId !== 'string' || !UUID_RE.test(taskId)) {
+    return res.status(400).json({ ok: false, error: 'taskId is required and must be a UUID' });
+  }
+  const outputId = taskId;
+
   const ownerSegment = typeof userId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(userId) ? userId : 'unassigned';
-  // outputId, when provided by the caller, becomes the Storage output
-  // filename (edited/<ownerSegment>/<outputId>.mp4) instead of a random
-  // uuid. This lets the caller (api/video-edit.js) predict the output path
-  // up front using its own video_edit_tasks row id, and recover the result
-  // later even if the original HTTP request to this endpoint never
-  // completed (timeout, dropped connection). Falls back to a random uid
-  // (previous behavior) when omitted or malformed.
-  const outputId = typeof taskId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(taskId) ? taskId : null;
 
   await acquireSlot('edit');
   let result;

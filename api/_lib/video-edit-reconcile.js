@@ -9,13 +9,11 @@
 // left in 'processing'. Without a separate recovery path, such a task (and
 // the credits deducted for it) would never resolve.
 //
-// Recovery relies on watermark-server/server.js's /edit endpoint now
-// accepting a `taskId` and using it as a deterministic Storage output path
-// (edited/<userId>/<taskId>.mp4) instead of a random uuid — see the
-// `outputId` parameter added there. That means this module can always
-// predict where a given task's finished file would be, independent of
-// whether the original Vercel request that triggered the edit ever
-// returned.
+// Recovery relies on watermark-server/server.js's /edit endpoint requiring a
+// `taskId` and using it as the Storage output path
+// (edited/<userId>/<taskId>.mp4). That means this module can always predict
+// where a given task's finished file would be, independent of whether the
+// original Vercel request that triggered the edit ever returned.
 //
 // Used by:
 //   - api/video-edit-status.js: on-demand, when a client polls a specific
@@ -37,48 +35,83 @@ function editedObjectPath(userId, taskId) {
   return `edited/${userId}/${taskId}.mp4`;
 }
 
-// Confirms a Storage object exists and looks like a video, without
-// downloading the body. Mirrors verifyPublicObject() in api/seedance-status.js
-// and verifyStorageObjectExists() in api/generated-videos.js.
+// Confirms whether a Storage object exists and looks like a video, without
+// downloading the body. Mirrors verifyPublicObject() in
+// api/seedance-status.js and verifyStorageObjectExists() in
+// api/generated-videos.js, but — unlike those — distinguishes "definitely
+// not there" from "couldn't tell", because the caller (reconcileVideoEditTask)
+// must never treat an inconclusive check as grounds for a refund:
+//   { state: 'exists',  publicUrl, bytes } — confirmed present and readable as a video
+//   { state: 'missing' }                   — a definite 404 from both HEAD and the Range GET
+//   { state: 'unknown' }                   — fetch threw (network error/timeout), or a
+//                                             response came back but was inconclusive
+//                                             (wrong content-type, too small, non-404
+//                                             non-206 status, etc.) — NOT proof of absence
 async function verifyEditedObjectExists(db, path) {
+  const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
+  const publicUrl = data?.publicUrl;
+  if (!publicUrl) return { state: 'unknown' };
+
+  let headRes;
   try {
-    const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
-    const publicUrl = data?.publicUrl;
-    if (!publicUrl) return { exists: false };
+    headRes = await fetch(publicUrl, { method: 'HEAD' });
+  } catch (_) {
+    return { state: 'unknown' };
+  }
 
-    const headRes = await fetch(publicUrl, { method: 'HEAD' });
-    const headContentType = headRes.headers.get('content-type') || '';
-    const headContentLength = Number(headRes.headers.get('content-length') || 0);
-    if (headRes.ok && /video|octet-stream/i.test(headContentType) && headContentLength >= 1024) {
-      return { exists: true, publicUrl, bytes: headContentLength };
+  const headContentType = headRes.headers.get('content-type') || '';
+  const headContentLength = Number(headRes.headers.get('content-length') || 0);
+  if (headRes.ok && /video|octet-stream/i.test(headContentType) && headContentLength >= 1024) {
+    return { state: 'exists', publicUrl, bytes: headContentLength };
+  }
+  if (headRes.status !== 404) {
+    // HEAD succeeded but wasn't a clean "found" or "404" (e.g. inconclusive
+    // content-type/length, or a non-404 error) — fall through to the Range
+    // GET for a second opinion rather than deciding from HEAD alone.
+    let rangeRes;
+    try {
+      rangeRes = await fetch(publicUrl, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
+    } catch (_) {
+      return { state: 'unknown' };
     }
-
-    const rangeRes = await fetch(publicUrl, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
     const contentType = rangeRes.headers.get('content-type') || '';
     await rangeRes.body?.cancel().catch(() => {});
 
-    if (!rangeRes.ok && rangeRes.status !== 206) return { exists: false };
+    if (rangeRes.status === 404) return { state: 'missing' };
+    if (!rangeRes.ok && rangeRes.status !== 206) return { state: 'unknown' };
 
     const contentRange = rangeRes.headers.get('content-range') || '';
     const totalMatch = contentRange.match(/\/(\d+)$/);
     const totalBytes = totalMatch ? Number(totalMatch[1]) : Number(rangeRes.headers.get('content-length') || 0);
-    if (!totalBytes || totalBytes < 1024) return { exists: false };
-    if (!/video|octet-stream/i.test(contentType)) return { exists: false };
+    if (!totalBytes || totalBytes < 1024) return { state: 'unknown' };
+    if (!/video|octet-stream/i.test(contentType)) return { state: 'unknown' };
 
-    return { exists: true, publicUrl, bytes: totalBytes };
-  } catch (_) {
-    // Network error / timeout: unverifiable, treat as not-yet-found so the
-    // caller keeps waiting rather than prematurely refunding.
-    return { exists: false };
+    return { state: 'exists', publicUrl, bytes: totalBytes };
   }
+
+  // HEAD returned a clean 404 — confirm with a Range GET before deciding
+  // "missing" (some Storage/CDN layers respond inconsistently to HEAD).
+  let rangeRes;
+  try {
+    rangeRes = await fetch(publicUrl, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
+  } catch (_) {
+    return { state: 'unknown' };
+  }
+  await rangeRes.body?.cancel().catch(() => {});
+  return rangeRes.status === 404 ? { state: 'missing' } : { state: 'unknown' };
 }
 
 // Attempts to resolve a single task currently in 'processing'. Returns:
-//   { changed: false, status: 'processing' }                      — still waiting, not stale yet
-//   { changed: true,  status: 'completed', editedUrl }             — Storage object found, task claimed
-//   { changed: true,  status: 'failed', refunded: true }           — stale + refunded
-//   { changed: false, status: 'processing' }                       — lost a race (another caller already resolved it)
+//   { changed: true,  status: 'completed', editedUrl }             — Storage object confirmed present, task claimed
+//   { changed: true,  status: 'failed', refunded: true }           — confirmed missing + stale -> refunded
+//   { changed: false, status: 'processing' }                       — still waiting (not stale, storage check
+//                                                                     inconclusive, or lost a race to another caller)
 // Never throws; never refunds twice (refund_video_edit_task RPC guards that).
+// Critically: a Storage check result of 'unknown' (network error, timeout,
+// or an inconclusive response) is NEVER treated as evidence the file is
+// missing — only a confirmed 'missing' result counts toward the staleness
+// clock's refund decision. This avoids refunding a task whose edit actually
+// succeeded but whose Storage object we simply failed to verify this time.
 async function reconcileVideoEditTask(db, task) {
   if (!task || task.status !== 'processing') {
     return { changed: false, status: task?.status || 'unknown' };
@@ -87,7 +120,7 @@ async function reconcileVideoEditTask(db, task) {
   const path = editedObjectPath(task.user_id, task.id);
   const check = await verifyEditedObjectExists(db, path);
 
-  if (check.exists) {
+  if (check.state === 'exists') {
     const { data: updated, error: updateErr } = await db
       .from('video_edit_tasks')
       .update({
@@ -115,6 +148,15 @@ async function reconcileVideoEditTask(db, task) {
     return { changed: false, status: 'processing' };
   }
 
+  if (check.state === 'unknown') {
+    // Inconclusive check (network error, timeout, or an ambiguous
+    // response) — do nothing. Never counts toward staleness/refund.
+    return { changed: false, status: 'processing' };
+  }
+
+  // check.state === 'missing': confirmed absent. Only refund once this has
+  // been true for long enough that Railway's own processing budget has
+  // certainly elapsed.
   const staleMs = Number(process.env.VIDEO_EDIT_RECONCILE_STALE_MS) || DEFAULT_STALE_MS;
   const referenceTime = task.started_at || task.created_at;
   const ageMs = referenceTime ? Date.now() - new Date(referenceTime).getTime() : 0;

@@ -55,6 +55,7 @@ module.exports = async function handler(req, res) {
         .from('video_edit_tasks')
         .select(STATUS_SELECT)
         .eq('id', taskId)
+        .eq('user_id', auth.user.id) // same ownership check as the initial read above
         .maybeSingle();
       if (freshTask) task = freshTask;
     }
