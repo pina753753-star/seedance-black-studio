@@ -14,6 +14,8 @@
 .sbUpload{background:#1b1e25;border:2px dashed rgba(255,255,255,.18);border-radius:22px;padding:32px 14px;text-align:center;cursor:pointer;position:relative;transition:border-color .2s}.sbUpload:hover{border-color:rgba(142,216,255,.5)}.sbCutCard{background:#1b1e25;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px;margin-bottom:8px}.sbProgCard{background:#1b1e25;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 /* ---- Pseudo-progress bar (generation card) ---- */
 .pt-stage{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;width:100%;padding:0 20px;box-sizing:border-box}.pt-stage-label{color:#c8cad6;font-weight:700;font-size:13px;text-align:center}.pt-prog-track{width:48%;max-width:200px;height:3px;background:#1a1f2b;border-radius:999px;overflow:hidden}.pt-prog-fill{height:100%;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);border-radius:999px;transition:width .8s ease}@media(prefers-reduced-motion:reduce){.pt-prog-fill{transition:none}}
+/* ---- Video edit tab ---- */
+#videoEditSection .old{position:relative}#videoEditSection .old.ve-selected{border-color:rgba(142,216,255,.6);background:#161c26}.ve-select-btn{position:absolute;right:10px;top:10px;z-index:2;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;cursor:pointer}.ve-select-btn.on{background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-color:transparent}.ve-trim-row{display:flex;gap:8px;margin-top:8px}.ve-trim-row .field{flex:1}.ve-trim-row label{display:block;color:#999;font-size:11px;margin-bottom:4px;font-weight:700}.ve-trim-row input{width:100%;background:#0e1117;color:#fff;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:9px}#veSelectedBar{display:flex;gap:8px;overflow-x:auto;padding:2px 0}
 </style>
 </head>
 <body>
@@ -24,7 +26,7 @@
   <button class="on" data-mode="reference_to_video">リファレンス</button>
   <button data-mode="image_to_video">画像から動画</button>
   <button data-mode="text_to_video">テキストから動画</button>
-  <button data-mode="video_edit" id="videoEditTab">動画編集 🔒</button>
+  <button data-mode="video_edit" id="videoEditTab">動画編集</button>
 </div>
 
 <!-- 動画編集: 有料プラン案内モーダル -->
@@ -87,6 +89,32 @@
     <button class="create" id="sbMergeBtn">動画を結合してダウンロード ↓</button>
     <div id="sbMergeStat" style="color:#888;font-size:12px;margin-top:8px"></div>
   </div>
+</section>
+
+<!-- 動画編集セクション -->
+<section id="videoEditSection" style="display:none">
+  <div class="section" style="margin-top:0"><h2>動画編集</h2></div>
+  <p style="color:#9ca3af;font-size:12px;line-height:1.7;margin:0 0 14px">過去の動画から最大6本まで選び、開始/終了秒を指定してつなげます。</p>
+  <div id="veLoading" style="display:none;color:#888;font-size:13px;padding:16px 0;text-align:center"><div class="spin" style="margin:0 auto 10px"></div>読み込み中…</div>
+  <div id="veEmpty" class="empty" style="display:none">編集できる動画がまだありません。</div>
+  <div id="veList" class="history"></div>
+
+  <div id="veBar" style="display:none;position:sticky;bottom:0;margin-top:16px;background:#0b0d13;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:14px">
+    <div id="veSelectedBar"></div>
+    <button class="create" id="veSubmit" style="margin-top:12px">編集する ✦ <span id="veCost">10</span></button>
+  </div>
+
+  <div id="veProcessing" style="display:none;margin-top:16px;text-align:center;padding:24px 0">
+    <div class="spin" style="margin:0 auto 12px"></div>
+    <div style="color:#c8cad6;font-weight:700;font-size:13px">編集処理中…</div>
+  </div>
+
+  <div id="veResult" style="display:none;margin-top:16px">
+    <video id="veResultVideo" controls style="width:100%;max-height:420px;background:#000;border-radius:16px"></video>
+    <a id="veResultSave" href="#" download style="display:block;text-align:center;margin-top:12px;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:14px;padding:14px;font-weight:800;text-decoration:none;font-size:14px">保存する ↓</a>
+  </div>
+
+  <div id="veError" style="display:none;margin-top:16px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;color:#fca5a5;font-size:13px;line-height:1.7"></div>
 </section>
 
 <div id="pendingSection" style="display:none">
@@ -194,15 +222,40 @@ async function start(){persistDraft();hideCreditStatus();if(isComboBlocked()){co
 function restoreDraft(){draft=readDraft();const p=draft['prompt_'+mode]||'';if(p)$('prompt').value=p;[['model',draft.model],['aspect',draft.aspect],['duration',draft.duration],['resolution',draft.resolution]].forEach(([id,val])=>{if($(id)&&val)$(id).value=val});urls=Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):urls}
 
 // ---- 動画編集タブ（有料プラン限定）----
-const VIDEO_EDIT_PAID_PLANS=['standard','premium','ultimate','team','scale'];
-async function getProfilePlan(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return null;if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return null;const{data}=await window.__flowvidUserClient.from('profiles').select('plan').eq('id',user.id).maybeSingle();return String(data?.plan||'free').toLowerCase()}catch(_){return 'free'}}
-function showVideoEditModal(paid){const m=$('videoEditModal');if(!m)return;if(paid){$('videoEditModalTitle').textContent='動画編集は近日対応予定です';$('videoEditModalBody').textContent='生成済み動画のトリミング、結合、字幕追加、BGM追加を準備中です。もうしばらくお待ちください。';$('videoEditModalUpgrade').style.display='none';$('videoEditModalLater').textContent='閉じる';}else{$('videoEditModalTitle').textContent='動画編集は有料プランで利用できます';$('videoEditModalBody').textContent='生成済み動画のトリミング、結合、字幕追加、BGM追加は有料プラン限定機能です。プランをアップグレードすると、SNS用の動画編集機能を利用できます。';$('videoEditModalUpgrade').style.display='block';$('videoEditModalLater').textContent='あとで';}m.style.display='block';}
+function showVideoEditModal(){const m=$('videoEditModal');if(!m)return;$('videoEditModalTitle').textContent='動画編集は有料プランで利用できます';$('videoEditModalBody').textContent='生成済み動画のトリミング、結合、字幕追加、BGM追加は有料プラン限定機能です。プランをアップグレードすると、SNS用の動画編集機能を利用できます。';$('videoEditModalUpgrade').style.display='block';$('videoEditModalLater').textContent='あとで';m.style.display='block';}
 function hideVideoEditModal(){const m=$('videoEditModal');if(m)m.style.display='none';}
-async function onVideoEditTab(){const token=await getToken();if(!token){location.href='./login.html';return}const plan=await getProfilePlan();if(plan===null){location.href='./login.html';return}showVideoEditModal(VIDEO_EDIT_PAID_PLANS.includes(plan));}
+async function onVideoEditTab(){const token=await getToken();if(!token){location.href='./login.html';return}document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode==='video_edit'));mode='video_edit';$('mainCard').style.display='none';$('sbSection').style.display='none';$('pendingSection').style.display='none';$('videoEditSection').style.display='block';localStorage.setItem('flowvidGenerateMode','video_edit');veLoadVideos()}
 $('videoEditModalLater').onclick=hideVideoEditModal;
 $('videoEditModalShade').onclick=hideVideoEditModal;
 
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.mode==='video_edit'){onVideoEditTab();return}setMode(b.dataset.mode)});
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.mode==='video_edit'){onVideoEditTab();return}$('videoEditSection').style.display='none';setMode(b.dataset.mode)});
+
+// ---- 動画編集: 過去動画一覧・選択・トリム・実行 ----
+const VE_MAX_CLIPS=6;
+let veVideos=[],veSelected=[]; // veSelected: [{videoId,start,end,duration}]
+function veCard(v,selIndex){const dur=Number(v.duration_seconds)||5;const sel=selIndex>=0;const arCss='9/16';return '<article class="old ve-card'+(sel?' ve-selected':'')+'" data-ve-id="'+esc(v.id)+'" style="padding:12px;border-radius:20px;display:grid;gap:10px">'
+  +'<div style="width:100%;height:168px;background:#050506;border-radius:14px;overflow:hidden;position:relative">'
+  +'<video muted playsinline preload="metadata" src="'+esc(v.video_url)+'#t=0.2" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none"></video>'
+  +'<button type="button" class="ve-select-btn'+(sel?' on':'')+'" data-ve-select="'+esc(v.id)+'">'+(sel?(selIndex+1):'＋')+'</button>'
+  +'</div>'
+  +(sel?('<div class="ve-trim-row"><div class="field"><label>開始（秒）</label><input type="number" min="0" step="0.1" value="'+esc(String(veSelected[selIndex].start))+'" data-ve-start="'+esc(v.id)+'"></div><div class="field"><label>終了（秒）</label><input type="number" min="0" step="0.1" value="'+esc(String(veSelected[selIndex].end))+'" data-ve-end="'+esc(v.id)+'"></div></div>'):'')
+  +'<div style="color:#6b7280;font-size:11px">尺: '+dur+'秒</div>'
+  +'</article>';}
+function veRenderList(){const list=$('veList');if(!list)return;if(!veVideos.length){$('veEmpty').style.display='block';list.innerHTML='';return}$('veEmpty').style.display='none';list.innerHTML=veVideos.map(v=>{const idx=veSelected.findIndex(s=>s.videoId===v.id);return veCard(v,idx)}).join('')}
+function veCreditEstimate(){const count=veSelected.length;const total=veSelected.reduce((s,c)=>s+Math.max(0,c.end-c.start),0);return(count>3||total>30)?15:10}
+function veRenderBar(){const bar=$('veBar');if(!bar)return;if(!veSelected.length){bar.style.display='none';return}bar.style.display='block';$('veCost').textContent=String(veCreditEstimate());const strip=$('veSelectedBar');strip.innerHTML=veSelected.map((c,i)=>{const v=veVideos.find(x=>x.id===c.videoId);return '<div style="flex:0 0 auto;width:56px;height:80px;border-radius:10px;overflow:hidden;position:relative;background:#050506;border:1px solid rgba(255,255,255,.1)"><video muted playsinline preload="metadata" src="'+esc(v?.video_url||'')+'#t=0.2" style="width:100%;height:100%;object-fit:cover;pointer-events:none"></video><span style="position:absolute;left:3px;top:3px;background:rgba(0,0,0,.7);border-radius:6px;padding:1px 5px;font-size:10px;font-weight:800">'+(i+1)+'</span></div>'}).join('')}
+function veToggleSelect(id){const idx=veSelected.findIndex(s=>s.videoId===id);if(idx>=0){veSelected.splice(idx,1)}else{if(veSelected.length>=VE_MAX_CLIPS)return;const v=veVideos.find(x=>x.id===id);if(!v)return;const dur=Number(v.duration_seconds)||5;veSelected.push({videoId:id,start:0,end:dur,duration:dur})}veRenderList();veRenderBar()}
+async function veLoadVideos(){$('veLoading').style.display='block';$('veList').innerHTML='';$('veEmpty').style.display='none';$('veError').style.display='none';$('veResult').style.display='none';$('veProcessing').style.display='none';const token=await getToken();if(!token){location.href='./login.html';return}try{const res=await fetch('/api/generated-videos?limit=50',{headers:{'Authorization':'Bearer '+token}});if(res.status===401){location.href='./login.html';return}const data=await res.json();veVideos=(data.rows||[]).filter(r=>r.video_url&&r.status==='completed');veRenderList()}catch(_){$('veEmpty').style.display='block';$('veEmpty').textContent='読み込みに失敗しました。もう一度お試しください。'}finally{$('veLoading').style.display='none'}}
+$('veList').addEventListener('click',e=>{const btn=e.target.closest('[data-ve-select]');if(!btn)return;veToggleSelect(btn.getAttribute('data-ve-select'))});
+$('veList').addEventListener('change',e=>{const t=e.target;const startId=t.getAttribute?.('data-ve-start');const endId=t.getAttribute?.('data-ve-end');const id=startId||endId;if(!id)return;const c=veSelected.find(s=>s.videoId===id);if(!c)return;const val=Number(t.value);if(!Number.isFinite(val))return;if(startId)c.start=Math.max(0,val);if(endId)c.end=Math.max(0,val);veRenderBar()});
+
+let _veClientRequestId='';
+async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){if(!(c.end>c.start)){err.textContent='終了秒は開始秒より大きい値にしてください。';err.style.display='block';return}}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};await veSend(body,token)}
+async function veSend(body,token,attempt){attempt=attempt||0;try{const res=await fetch('/api/video-edit',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});if(res.status===401){location.href='./login.html';return}if(res.status===403){$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;showVideoEditModal();return}if(res.status===402){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='クレジットが不足しています（必要: '+(data.required||veCreditEstimate())+' cr）。クレジットを購入してください。';$('veError').style.display='block';return}if(res.status===409){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||'現在処理中の動画編集があります。完了後にもう一度お試しください。';$('veError').style.display='block';return}const data=await res.json().catch(()=>({}));if(res.status===202&&data.status==='processing'){vePollStatus(data.taskId,token);return}if(res.ok&&data.status==='completed'){veShowCompleted(data.editedUrl);return}if(res.status===502){veShowFailed(data.detail||data.error);return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||data.error||('編集の開始に失敗しました（'+res.status+'）');$('veError').style.display='block'}catch(e){if(attempt<3){setTimeout(()=>veSend(body,token,attempt+1),1500*(attempt+1));return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='通信エラーが発生しました。もう一度お試しください。';$('veError').style.display='block'}}
+function veShowCompleted(url){$('veProcessing').style.display='none';$('veResult').style.display='block';$('veResultVideo').src=url;$('veResultSave').href=url;veSelected=[];_veClientRequestId='';$('veSubmit').disabled=false;veRenderList();veRenderBar()}
+function veShowFailed(msg){$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=(msg||'編集に失敗しました。')+' クレジットは自動返金されています。';$('veError').style.display='block'}
+async function vePollStatus(taskId,token){const poll=async()=>{try{const res=await fetch('/api/video-edit-status?taskId='+encodeURIComponent(taskId),{headers:{'Authorization':'Bearer '+token}});if(res.status===401){location.href='./login.html';return}const data=await res.json().catch(()=>({}));if(data.status==='completed'){veShowCompleted(data.editedUrl);return}if(data.status==='failed'){veShowFailed(data.message);return}setTimeout(poll,4000)}catch(_){setTimeout(poll,4000)}};setTimeout(poll,4000)}
+$('veSubmit').onclick=veSubmit;
 
 ['duration','resolution','model','aspect'].forEach(id=>$(id)?.addEventListener('change',()=>{persistDraft();updateCreditUi();syncComboWarning()}));
 $('prompt').addEventListener('input',persistDraft);
