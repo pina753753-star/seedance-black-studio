@@ -35,6 +35,29 @@
   - 使われていない別プロジェクト `joyful-enthusiasm` はビルド失敗状態だった。当初サービスのみ削除したところGitHub連携により自動再作成されたため、2026-07-16、ユーザー本人がプロジェクトごと完全に削除し解決済み。今後この件の失敗通知は発生しない。
 - **参照画像生成モードの一時停止**: **PR #85で本番反映済み。** 2026-07-16、実在人物への無断なりすまし対策・CSAM専用検知が未実装であることを踏まえ、安全のため参照画像を使った生成モードを一時停止。テキストのみの生成は通常通り稼働。上記2つの検知機能が実装され本番稼働し次第、再開する。
 
+## 2026-07-18 追加分: 完了・本番適用済み
+
+- **年齢確認機能の実装・本番反映(PR #86)**: `login.html`に生年月日入力欄を追加、18歳未満の登録をクライアント側でブロック。SupabaseのBefore User Created Hook(`hook_enforce_minimum_signup_age`)により、サーバー側でも18歳未満の登録を拒否。タイムゾーンはAsia/Tokyoに固定。実機テストで動作確認済み、本番稼働中。既存6ユーザーへの遡及適用は行っていない。
+- **メール確認の多重防御の実装・本番反映(PR #87)**: `auth-guard.js`(クライアント側)、`api/_lib/confirmed-auth.js`(サーバー側)を新規作成。`login.html`、`profile.html`に確認済みユーザーのみアクセスできるガードを追加。`api/_lib/seedance-start.js`、`api/upload-reference-image.js`に`requireConfirmedAuth()`を導入。`onAuthStateChange`のデッドロック問題を修正済み。
+- **CSAM専用検知(PhotoDNA)への申請 → 却下**: Microsoft PhotoDNA Cloud Serviceへ申請したが、「現時点では資格要件を満たしていない」との理由で却下された。法人化後に再申請予定。それまで保留。Thorn Saferは個別契約・審査不透明のため未着手。
+- **実在人物なりすまし検知の設計案完成、AWSアカウント作成待ちで保留中**: プロンプトでの人物名・なりすまし表現検査、Amazon RekognitionのRecognizeCelebritiesによる著名人一致検知(一般人の顔は通過)の設計案は完成済み。AWSアカウント作成(サインアップ確認メール未達で中断)がボトルネック、法人化まで保留と判断。
+- **参照画像モードは引き続き停止中(PR #85のまま)**: 実在人物なりすまし検知・CSAM専用検知が揃うまで再開しない方針を継続。
+- **Railway watermark-server /editエンドポイントの安全化(PR #88、マージ・デプロイ済み)**: `/watermark`との共有同時実行ガードへ接続(`MAX_CONCURRENT_EDIT_JOBS=1`で`/watermark`用の枠を確保)。リクエスト全体で単一のタイムアウト(300秒)。ダウンロードサイズ・クリップ尺(30秒/クリップ、180秒合計)の上限。SSRF対策(reference-imagesバケット配下のみ許可、リダイレクト無効化)、エラーメッセージの許可リスト化。
+- **動画編集Vercel API実装(PR #89、マージ・デプロイ・マイグレーション適用済み)**: `video_edit_tasks`テーブル、`reserve_video_edit_task`/`refund_video_edit_task` RPC新規作成。`requireConfirmedAuth()`による認証、videoIdベースの所有権確認。料金体系:基本10credits(1〜3クリップ・合計30秒以内)、15credits(4〜6クリップまたは30秒超)。taskIdを使った決定的なStorageパス(`edited/<userId>/<taskId>.mp4`)により、Vercel側のタイムアウト・切断時も後から処理結果を復旧できる仕組み(`video-edit-reconcile.js`、5分おきのcron)。Storage確認結果をexists/missing/unknownの3状態に分け、一時的な確認失敗では返金しない設計。テスト用に`hinaran53@gmail.com`の`subscription_expires_at`を一時的に更新済み(実際のStripe課金とは連動していない)。
+- **動画編集の最小UI実装(PR #90、マージ・デプロイ済み)**: `generate-prod.html`の「動画編集」タブを実画面に置き換え。過去動画一覧(`/api/generated-videos`流用)から最大6本選択。開始・終了秒の数値入力によるトリム指定(※使いにくいとのフィードバックあり、次回スライダー式UIへ改善予定)。冪等再送処理、ポーリング、エラーハンドリング実装済み。
+
+### 次回やるべきこと(優先順位順)
+
+1. 動画編集のトリミングUI改善:数値入力→スライダー式(VLLOやCapCut等を参考にした直感的な操作性)への変更。
+2. AWSアカウント作成(サインアップ確認メール未達の解決)→実在人物なりすまし検知(著名人認識+プロンプト検査)の実装。
+3. 法人化後、PhotoDNA再申請または他のCSAM検知手段の検討。
+4. 上記2・3が完了次第、参照画像モードの再開を検討。
+5. 新規フリーユーザー100人への100クレジット付与施策の実装状況確認(まだ着手していない)。
+6. 絵コンテ機能の残存コード(`?mode=storyboard`で開ける)の削除検討(優先度低)。
+7. 動画編集の追加機能(字幕+5credits、BGM+5credits、上限25credits)は将来段階として保留中。
+
+---
+
 ## 前提: このサイトは何か
 
 静的HTML(ルート直下の `*.html`) + Vercel Serverless Functions (`api/`) 構成。Next.jsは過去に導入されたが削除済み(コミット `614eacc`)。動画生成はOpenRouter経由でSeedanceモデルを呼び出す。fal.ai経由の旧生成経路は廃止済み(コミット `930ddba`)。決済はStripe。透かし(watermark)処理はRailway上の別サービス `watermark-server/`(Node/Express/ffmpeg)が担う。
