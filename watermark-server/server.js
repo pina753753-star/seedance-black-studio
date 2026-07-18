@@ -355,9 +355,15 @@ function safeEditErrorMessage(err) {
   return EDIT_PUBLIC_ERRORS[code] || EDIT_PUBLIC_ERRORS.PROCESSING_FAILED;
 }
 
-async function runEditJob({ clips, transition, transitionDuration, ownerSegment }) {
+async function runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId }) {
   // Single deadline for the whole request, created before any work starts.
   const deadline = Date.now() + EDIT_REQUEST_TIMEOUT_MS;
+  // uid is only used to namespace this job's own /tmp scratch files, so
+  // concurrent jobs never collide there. The Storage output path uses
+  // outputId (the caller's video_edit_tasks id when available) instead of
+  // uid, so the caller can predict where the finished file will land even
+  // if its own HTTP request to us times out or the connection drops before
+  // we respond (see api/video-edit-status.js's reconciliation check).
   const uid = uuidv4();
   const tempFiles = [];
   const makeTmp = (name) => {
@@ -597,7 +603,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment 
     // 6) Supabase Storage にアップロード（ユーザー/ジョブ単位でパスを分離）
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
     const fileBuffer = fs.readFileSync(finalFile);
-    const storagePath = `edited/${ownerSegment}/${uid}.mp4`;
+    const storagePath = `edited/${ownerSegment}/${outputId || uid}.mp4`;
 
     const { error: uploadError } = await supabase.storage
       .from(EDIT_BUCKET)
@@ -635,7 +641,7 @@ app.post('/edit', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
   }
 
-  const { clips, transition = 'cut', transitionDuration, userId } = req.body || {};
+  const { clips, transition = 'cut', transitionDuration, userId, taskId } = req.body || {};
 
   if (!Array.isArray(clips) || clips.length < 1 || clips.length > EDIT_MAX_CLIPS) {
     return res.status(400).json({ ok: false, error: `clips must be an array of 1-${EDIT_MAX_CLIPS} items` });
@@ -650,11 +656,19 @@ app.post('/edit', async (req, res) => {
   }
 
   const ownerSegment = typeof userId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(userId) ? userId : 'unassigned';
+  // outputId, when provided by the caller, becomes the Storage output
+  // filename (edited/<ownerSegment>/<outputId>.mp4) instead of a random
+  // uuid. This lets the caller (api/video-edit.js) predict the output path
+  // up front using its own video_edit_tasks row id, and recover the result
+  // later even if the original HTTP request to this endpoint never
+  // completed (timeout, dropped connection). Falls back to a random uid
+  // (previous behavior) when omitted or malformed.
+  const outputId = typeof taskId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(taskId) ? taskId : null;
 
   await acquireSlot('edit');
   let result;
   try {
-    result = await runEditJob({ clips, transition, transitionDuration, ownerSegment });
+    result = await runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId });
   } finally {
     releaseSlot('edit');
   }

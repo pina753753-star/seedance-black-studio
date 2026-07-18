@@ -12,15 +12,22 @@
 //
 // IMPORTANT — UNCONFIRMED: Vercel's serverless function execution time
 // limit for this project (Hobby/Pro plan, vercel.json functions.maxDuration)
-// has not been verified. Railway's /edit itself budgets up to 5 minutes
-// (EDIT_REQUEST_TIMEOUT_MS in watermark-server/server.js). VIDEO_EDIT_TIMEOUT_MS
-// below defaults conservatively short so this function fails safely (falls
-// into the "ambiguous, don't refund, stays processing" path) rather than
-// being hard-killed by Vercel mid-request with no chance to respond. This
-// must be confirmed against the actual Vercel plan/config before production
-// use; if Vercel's real limit is materially shorter than
-// VIDEO_EDIT_TIMEOUT_MS, requests will still be killed by Vercel itself
-// before our own AbortController fires.
+// has not been verified as of this writing. Railway's /edit itself budgets
+// up to 5 minutes (EDIT_REQUEST_TIMEOUT_MS in watermark-server/server.js);
+// measured processing time is up to ~64s for 3 clips and ~127s for 6 clips.
+// VIDEO_EDIT_TIMEOUT_MS below is sized for that measured worst case plus
+// margin. Regardless of whether Vercel's own limit is shorter than this
+// value (in which case Vercel kills the function first, before our own
+// AbortController fires), correctness does not depend on this number: if
+// this request is killed or its own fetch to Railway times out, the task is
+// simply left in 'processing' and recovered later via
+// api/_lib/video-edit-reconcile.js (used by both api/video-edit-status.js
+// on-demand and the api/video-edit-reconcile.js cron job), which checks for
+// the finished file at a path Railway can produce independently of whether
+// this request ever returns. This value should still be revisited once
+// Vercel's actual limit is confirmed, so a request has the best chance of
+// returning the "completed" response directly instead of falling back to
+// the async recovery path.
 const { createClient } = require('@supabase/supabase-js');
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 const { calculateVideoEditCreditCost } = require('./_lib/video-edit-pricing.js');
@@ -31,7 +38,11 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABAS
 const MAX_CLIPS = 6;
 const MAX_CLIP_DURATION_SECONDS = 30; // mirrors watermark-server EDIT_MAX_CLIP_DURATION_SEC
 const MAX_TOTAL_DURATION_SECONDS = 180; // mirrors watermark-server EDIT_MAX_TOTAL_DURATION_SEC
-const VIDEO_EDIT_TIMEOUT_MS = Number(process.env.VIDEO_EDIT_TIMEOUT_MS) || 50000;
+// Measured worst case: ~127s for 6 clips. 180s leaves ~53s margin while
+// staying well under Railway's own 5-minute /edit budget. See the module
+// header comment above for why correctness doesn't hinge on this value.
+const VIDEO_EDIT_TIMEOUT_MS = Number(process.env.VIDEO_EDIT_TIMEOUT_MS) || 180000;
+const CLIP_DURATION_TOLERANCE_SECONDS = 1; // rounding/encoding slack when comparing against stored duration_seconds
 const CLIENT_REQUEST_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 const EDIT_SOURCE_PATH_PREFIX = '/storage/v1/object/public/reference-images/';
 
@@ -104,7 +115,7 @@ async function resolveClipSources(db, userId, clips) {
   const videoIds = [...new Set(clips.map((c) => c.videoId))];
   const { data: rows, error } = await db
     .from('generation_tasks')
-    .select('id,user_id,status,output_url,watermarked_url')
+    .select('id,user_id,status,output_url,watermarked_url,duration_seconds')
     .in('id', videoIds);
 
   if (error) return { ok: false, status: 500, body: { ok: false, error: 'lookup_failed', message: '動画情報の確認に失敗しました。' } };
@@ -112,7 +123,8 @@ async function resolveClipSources(db, userId, clips) {
   const byId = new Map((rows || []).map((r) => [r.id, r]));
   const resolved = [];
 
-  for (const clip of clips) {
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
     const row = byId.get(clip.videoId);
     if (!row || row.user_id !== userId || row.status !== 'completed') {
       return { ok: false, status: 404, body: { ok: false, error: 'video_not_found', message: '指定された動画が見つからないか、まだ完了していません。' } };
@@ -120,6 +132,17 @@ async function resolveClipSources(db, userId, clips) {
     const sourceUrl = row.watermarked_url || row.output_url || '';
     if (!isAllowedSourceUrl(sourceUrl)) {
       return { ok: false, status: 422, body: { ok: false, error: 'video_source_unavailable', message: '指定された動画は編集に利用できません。' } };
+    }
+    // Cross-check the requested trim range against the source video's
+    // recorded generation duration (generation_tasks.duration_seconds — the
+    // length Seedance was asked to generate, and the closest duration figure
+    // available without downloading/probing the file ourselves). A missing
+    // or non-positive value means it can't be verified here; Railway's own
+    // ffprobe-based check (CLIP_TRIM_INVALID) remains the authoritative
+    // guard in that case.
+    const sourceDuration = Number(row.duration_seconds);
+    if (Number.isFinite(sourceDuration) && sourceDuration > 0 && clip.end > sourceDuration + CLIP_DURATION_TOLERANCE_SECONDS) {
+      return { ok: false, status: 400, body: { ok: false, error: 'clip_trim_exceeds_source_duration', message: `${i + 1}番目のクリップのトリム範囲が元動画の長さを超えています。` } };
     }
     resolved.push({ ...clip, sourceUrl });
   }
@@ -271,7 +294,12 @@ module.exports = async function handler(req, res) {
     const railwayPayload = {
       clips: resolvedClips.map((c) => ({ videoUrl: c.sourceUrl, start: c.start, end: c.end })),
       transition: 'cut',
-      userId: user.id
+      userId: user.id,
+      // Deterministic Storage output path (edited/<userId>/<taskId>.mp4 on
+      // the Railway side — see watermark-server/server.js's outputId
+      // handling). Lets api/_lib/video-edit-reconcile.js find the finished
+      // file even if this request never gets a response back from Railway.
+      taskId
     };
 
     let railwayResponse, railwayText, railwayData;

@@ -7,6 +7,9 @@
 // 'processing' rather than guessing at a refund (see the "unclear
 // disconnect" handling in video-edit.js's catch block).
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
+const { reconcileVideoEditTask } = require('./_lib/video-edit-reconcile.js');
+
+const STATUS_SELECT = 'id,user_id,status,edited_url,actual_output_duration,requested_output_duration,credit_cost,failure_code,created_at,started_at,completed_at,failed_at';
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -24,9 +27,9 @@ module.exports = async function handler(req, res) {
   const db = auth.supabase;
   if (!db) return res.status(500).json({ ok: false, error: 'SERVER_NOT_CONFIGURED' });
 
-  const { data: task, error } = await db
+  let { data: task, error } = await db
     .from('video_edit_tasks')
-    .select('id,user_id,status,edited_url,actual_output_duration,requested_output_duration,credit_cost,failure_code,created_at,started_at,completed_at,failed_at')
+    .select(STATUS_SELECT)
     .eq('id', taskId)
     .eq('user_id', auth.user.id) // ownership check, defense-in-depth alongside the service-role client
     .maybeSingle();
@@ -37,6 +40,24 @@ module.exports = async function handler(req, res) {
   }
   if (!task) {
     return res.status(404).json({ ok: false, error: 'task_not_found' });
+  }
+
+  // Recovery path for tasks the client's original /api/video-edit request
+  // never got a definite answer for (see api/_lib/video-edit-reconcile.js):
+  // check whether Railway actually finished (deterministic Storage path) or
+  // has been stuck long enough to refund. Never blocks longer than the
+  // Storage HEAD/Range check itself; a genuinely-still-processing task just
+  // falls through unchanged below.
+  if (task.status === 'processing') {
+    const outcome = await reconcileVideoEditTask(db, task).catch(() => ({ changed: false }));
+    if (outcome.changed) {
+      const { data: freshTask } = await db
+        .from('video_edit_tasks')
+        .select(STATUS_SELECT)
+        .eq('id', taskId)
+        .maybeSingle();
+      if (freshTask) task = freshTask;
+    }
   }
 
   return res.status(200).json({

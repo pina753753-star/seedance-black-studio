@@ -15,6 +15,18 @@
 --      only. Restores exactly the pools credits were deducted from and
 --      guards against double refund via refunded_at.
 --
+-- CONFIRMED (production Supabase, via dashboard, 2026-07-18): the only
+-- foreign key constraint on public.credit_transactions is
+-- credit_transactions_user_id_fkey (user_id -> profiles(id) ON DELETE
+-- CASCADE). related_task_id carries no foreign key in production, matching
+-- its declaration in 20260624000000_initial_flowvid_schema.sql
+-- ("related_task_id uuid," with no REFERENCES clause) — the same column
+-- already holds ids from generation_tasks for the existing video-generation
+-- flow with no constraint tying it to that table. Inserting
+-- video_edit_tasks ids into related_task_id (below, in
+-- reserve_video_edit_task / refund_video_edit_task) is therefore not a
+-- foreign key violation, and no constraint change is required.
+--
 -- DO NOT run against production without explicit approval.
 --
 -- ============================================================
