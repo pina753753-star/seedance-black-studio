@@ -31,22 +31,25 @@ module.exports = async function handler(req, res) {
   const rawOffset = Number(req.query.offset);
   const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.trunc(rawOffset) : 0;
 
-  // completed_atを主ソートキーとし、万一nullの行があってもupdated_at→created_at→id
-  // の順でタイブレークする。PostgRESTのクエリビルダーはCOALESCEによる単一ソート
-  // キー化をサポートしないため、複数order()チェーンで近似している。video-edit.js
-  // がstatus='completed'への遷移時に必ずcompleted_atを設定するため、実運用では
-  // completed_atが欠けるケースはほぼ発生しない想定(防御的なフォールバック)。
+  // 安全上限。1ユーザーの完了済み動画編集がこれを超える運用は現状想定していないため、
+  // ここではDB全件取得+JS側での正確な並び替えを選ぶ(下記コメント参照)。
+  const HARD_FETCH_CAP = 500;
+
+  // completed_at || updated_at || created_at の優先順で並べたいが、PostgRESTの
+  // クエリビルダーはCOALESCEによる単一ソートキー化をサポートしない。複数order()を
+  // チェーンする方式だと「completed_atがある行が全て先、無い行が全て後」という
+  // 2グループに分かれてしまい、意図した「無い場合だけ次のカラムで代用する」動きに
+  // ならないため、DB側では参考程度の粗いソート(created_at)だけ行い、正確な並びは
+  // 全件取得したうえでJS側でsortTime=completed_at||updated_at||created_atを計算して
+  // ソートし、その後でoffset/limitに応じたスライスを行う。
   const { data, error } = await db
     .from('video_edit_tasks')
     .select(SELECT_FIELDS)
     .eq('user_id', auth.user.id) // ownership check, defense-in-depth alongside the service-role client
     .eq('status', 'completed')
     .not('edited_url', 'is', null)
-    .order('completed_at', { ascending: false, nullsFirst: false })
-    .order('updated_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
-    .range(offset, offset + limit); // limit+1件取得してhasMoreを判定するため
+    .limit(HARD_FETCH_CAP);
 
   if (error) {
     console.error('[video-edit-history] query error:', error.message);
@@ -54,8 +57,21 @@ module.exports = async function handler(req, res) {
   }
 
   const rows = Array.isArray(data) ? data : [];
-  const hasMore = rows.length > limit;
-  const page = rows.slice(0, limit).map((row) => ({
+  const sorted = rows
+    .map((row) => {
+      const sortTime = row.completed_at || row.updated_at || row.created_at;
+      return { row, sortMs: sortTime ? new Date(sortTime).getTime() : 0 };
+    })
+    .sort((a, b) => {
+      if (b.sortMs !== a.sortMs) return b.sortMs - a.sortMs;
+      // 同時刻のタイブレーク: idの文字列比較で降順にするだけで良く、
+      // 意味のある順序ではなく単にページ間で結果が安定していれば十分
+      return String(b.row.id).localeCompare(String(a.row.id));
+    })
+    .map((x) => x.row);
+
+  const total = sorted.length;
+  const page = sorted.slice(offset, offset + limit).map((row) => ({
     id: row.id,
     editedUrl: row.edited_url,
     createdAt: row.created_at,
@@ -66,6 +82,7 @@ module.exports = async function handler(req, res) {
     transition: row.transition,
     creditCost: row.credit_cost
   }));
+  const hasMore = offset + limit < total;
 
   return res.status(200).json({
     ok: true,
