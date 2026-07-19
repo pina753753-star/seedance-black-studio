@@ -1,0 +1,52 @@
+name: PR95 fix STATUS.md
+
+on:
+  push:
+    branches:
+      - docs/video-edit-completion-20260719
+    paths:
+      - .github/workflows/pr95-fix-status.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/video-edit-completion-20260719
+          fetch-depth: 0
+      - name: Update STATUS.md and remove mistaken file
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('STATUS.md')
+          text = path.read_text()
+          text = text.replace('# FlowVid Studio 完成までの全体像(最終更新: 2026-07-16)', '# FlowVid Studio 完成までの全体像(最終更新: 2026-07-19)', 1)
+          marker = '## 2026-07-18 追加分: 完了・本番適用済み\n'
+          section = '''## 2026-07-19 追加分: 完了・本番適用済み\n\n- **動画編集のトリミング・複数クリップ結合UI完成・本番反映(PR #94)**: `generate-prod.html`の動画編集タブをVLLO風タイムラインUIへ更新し、過去動画から最大6クリップを追加、同じ動画の複数回追加、クリップ単位の並べ替え・削除、各クリップの開始/終了トリミング、選択範囲再生、全クリップ通し再生、再生ヘッド連動を実装。iPhone Safari実機で操作確認済み。本番mainへマージ済み(commit `b5f1817b1761c03afb19dfe498f2a4a12acdb2d7`)、Vercel Productionは`READY`。\n- **動画編集内容のリロード復元(PR #94)**: `flowvid-video-edit-vllo.js`で編集途中のクリップ情報を`localStorage`へ保存し、リロード後に過去動画一覧の読込完了後、安全確認を行って復元する仕組みを実装。クリップ数、同一動画の複数追加、並び順、各トリム範囲、選択中クリップを復元する。現在の過去動画一覧に存在しない動画は復元しない。実機で復元動作を確認済み。\n- **動画編集の既存仕様を維持**: API送信形式`{clientRequestId, transition:'cut', clips:[{videoId,start,end}]}`、最大6クリップ、1クリップ最大30秒、合計最大180秒、基本10credits/条件により15credits、冪等再送、ポーリング、返金・復旧処理は変更していない。\n- **今回の対象外**: 字幕・テロップ、BGM、音量調整・ミックス、トランジション、フィルター、速度変更は未実装で、今後の別工程。字幕・BGM関連の既存骨組みには触れていない。\n- **未実施の最終確認**: 実際の「編集する」ボタンによる有料の完成動画生成テストはまだ行っていない。新規動画生成なし、OpenRouter実API呼び出しなし、credits消費なし、本番DB・Supabase Storage・Vercel環境変数の変更なし。\n\n'''
+          if '## 2026-07-19 追加分: 完了・本番適用済み' not in text:
+              if marker not in text:
+                  raise SystemExit('insertion marker not found')
+              text = text.replace(marker, section + marker, 1)
+          path.write_text(text)
+          mistaken = Path('STATUS-2026-07-19.md')
+          if mistaken.exists():
+              mistaken.unlink()
+          PY
+      - name: Validate documentation-only diff
+        run: |
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "STATUS-2026-07-19.md STATUS.md "
+      - name: Commit correction and remove workflow
+        run: |
+          rm .github/workflows/pr95-fix-status.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add STATUS.md
+          git add -u STATUS-2026-07-19.md .github/workflows/pr95-fix-status.yml
+          git commit -m "docs: record completed video editing work in STATUS.md"
+          git push origin HEAD:docs/video-edit-completion-20260719
