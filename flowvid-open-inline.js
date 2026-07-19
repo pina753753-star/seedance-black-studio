@@ -341,7 +341,7 @@
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.querySelector('script[data-flowvid-vllo-editor]'))return;
     const script=document.createElement('script');
-    script.src='./flowvid-video-edit-vllo.js?v=12669ba3';
+    script.src='./flowvid-video-edit-vllo.js?v=31c03589';
     script.dataset.flowvidVlloEditor='1';
     document.head.appendChild(script);
   }
