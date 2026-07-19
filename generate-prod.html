@@ -16,7 +16,8 @@
 .pt-stage{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;width:100%;padding:0 20px;box-sizing:border-box}.pt-stage-label{color:#c8cad6;font-weight:700;font-size:13px;text-align:center}.pt-prog-track{width:48%;max-width:200px;height:3px;background:#1a1f2b;border-radius:999px;overflow:hidden}.pt-prog-fill{height:100%;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);border-radius:999px;transition:width .8s ease}@media(prefers-reduced-motion:reduce){.pt-prog-fill{transition:none}}
 /* ---- Video edit tab ---- */
 #videoEditSection .old{position:relative}#videoEditSection .old.ve-selected{border-color:rgba(142,216,255,.6);background:#161c26}.ve-select-btn{position:absolute;right:10px;top:10px;z-index:5;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;cursor:pointer}.ve-select-btn.on{background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-color:transparent}#veSelectedBar{display:flex;gap:8px;overflow-x:auto;padding:2px 0}
-.ve-slider-wrap{position:relative;height:44px;margin-top:6px}.ve-filmstrip-viewport{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:36px;border-radius:8px;overflow:hidden;background:#2a2f3a;pointer-events:none}.ve-filmstrip-fallback{position:absolute;inset:0;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);opacity:.3}.ve-filmstrip{position:absolute;inset:0;display:flex}.ve-filmstrip canvas{flex:1 1 0%;min-width:0;width:100%;height:100%;display:block}.ve-slider-range{position:absolute;top:0;bottom:0;background:transparent;box-shadow:0 0 0 9999px rgba(0,0,0,.55)}.ve-range{position:absolute;left:0;top:0;width:100%;height:44px;margin:0;background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none}.ve-range::-webkit-slider-runnable-track{-webkit-appearance:none;height:44px;background:transparent}.ve-range::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;width:44px;height:44px;border-radius:50%;cursor:pointer;background:radial-gradient(circle at center,#fff 0 8px,rgba(0,0,0,.35) 8px 9px,transparent 9px 44px)}.ve-range.ve-range-start::-webkit-slider-thumb{background:radial-gradient(circle at center,#8ed8ff 0 9px,#fff 9px 10px,transparent 10px 44px)}.ve-range.ve-range-end::-webkit-slider-thumb{background:radial-gradient(circle at center,#8b5cf6 0 9px,#fff 9px 10px,transparent 10px 44px)}.ve-range::-moz-range-track{height:4px;background:transparent}.ve-range::-moz-range-thumb{pointer-events:auto;width:24px;height:24px;border-radius:50%;border:0;cursor:pointer;background:#fff}.ve-range.ve-range-start::-moz-range-thumb{box-shadow:0 0 0 3px #8ed8ff}.ve-range.ve-range-end::-moz-range-thumb{box-shadow:0 0 0 3px #8b5cf6}.ve-time-row{display:flex;justify-content:space-between;gap:6px;color:#9ca3af;font-size:11px;font-weight:700;margin-top:2px}.ve-time-row [data-ve-dur-label]{color:#c8cad6}
+.ve-slider-wrap{position:relative;height:44px;margin-top:6px}.ve-filmstrip-viewport{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:36px;border-radius:8px;overflow:hidden;background:#2a2f3a;pointer-events:none}.ve-filmstrip-fallback{position:absolute;inset:0;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);opacity:.3}.ve-filmstrip{position:absolute;inset:0;display:flex}.ve-filmstrip canvas{flex:1 1 0%;min-width:0;width:100%;height:100%;display:block}.ve-slider-range{position:absolute;top:0;bottom:0;background:transparent;box-shadow:0 0 0 9999px rgba(0,0,0,.55)}.ve-range{position:absolute;left:0;top:0;width:100%;height:44px;margin:0;background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none}.ve-range::-webkit-slider-runnable-track{-webkit-appearance:none;height:44px;background:transparent}.ve-range::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;cursor:pointer;width:6px;height:28px;border-style:solid;border-color:transparent;border-width:7px 19px;border-radius:3px;background-clip:padding-box;background-color:#fff}.ve-range.ve-range-start::-webkit-slider-thumb{background-color:#8ed8ff;background-image:linear-gradient(to right,rgba(5,5,6,.45) 0 1px,transparent 1px 100%)}.ve-range.ve-range-end::-webkit-slider-thumb{background-color:#8b5cf6;background-image:linear-gradient(to left,rgba(5,5,6,.45) 0 1px,transparent 1px 100%)}.ve-range::-moz-range-track{height:4px;background:transparent}.ve-range::-moz-range-thumb{pointer-events:auto;cursor:pointer;box-sizing:content-box;width:6px;height:28px;border-style:solid;border-color:transparent;border-width:7px 19px;border-radius:3px;background-clip:padding-box;background-color:#fff}.ve-range.ve-range-start::-moz-range-thumb{background-color:#8ed8ff}.ve-range.ve-range-end::-moz-range-thumb{background-color:#8b5cf6}.ve-time-row{display:flex;justify-content:space-between;gap:6px;color:#9ca3af;font-size:11px;font-weight:700;margin-top:2px}.ve-time-row [data-ve-dur-label]{color:#c8cad6}
+.ve-move-btn,.ve-remove-btn{border:1px solid rgba(255,255,255,.14);background:#1e2230;color:#b8bcc8;border-radius:10px;width:34px;height:34px;font-size:14px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}.ve-move-btn:disabled{opacity:.3;cursor:default}.ve-remove-btn{color:#fca5a5;border-color:rgba(251,113,133,.3)}.ve-clip-head{display:flex;justify-content:space-between;align-items:center}.ve-clip-num{font-weight:800;font-size:13px;color:#c8cad6}.ve-clip-actions{display:flex;gap:6px}
 </style>
 </head>
 <body>
@@ -95,10 +96,14 @@
 <!-- 動画編集セクション -->
 <section id="videoEditSection" style="display:none">
   <div class="section" style="margin-top:0"><h2>動画編集</h2></div>
-  <p style="color:#9ca3af;font-size:12px;line-height:1.7;margin:0 0 14px">過去の動画から最大6本まで選び、開始/終了秒を指定してつなげます。</p>
+  <p style="color:#9ca3af;font-size:12px;line-height:1.7;margin:0 0 14px">過去の動画から素材を選ぶと編集リストに追加されます。同じ動画を何度でも追加でき、最大6クリップまでつなげられます。</p>
   <div id="veLoading" style="display:none;color:#888;font-size:13px;padding:16px 0;text-align:center"><div class="spin" style="margin:0 auto 10px"></div>読み込み中…</div>
   <div id="veEmpty" class="empty" style="display:none">編集できる動画がまだありません。</div>
   <div id="veList" class="history"></div>
+
+  <div class="section"><h2 style="font-size:15px">編集リスト</h2></div>
+  <div id="veClipEmpty" class="empty" style="display:block">上の一覧からタップして動画を追加してください。</div>
+  <div id="veClipList" class="history"></div>
 
   <div id="veBar" style="display:none;position:sticky;bottom:0;margin-top:16px;background:#0b0d13;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:14px">
     <div id="veSelectedBar"></div>
@@ -143,7 +148,7 @@
 })();
 </script>
 <script src="./flowvid-history.js?v=112"></script>
-<script src="./flowvid-open-inline.js?v=2"></script>
+<script src="./flowvid-open-inline.js?v=3"></script>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -233,7 +238,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset
 
 // ---- 動画編集: 過去動画一覧・選択・トリム・実行 ----
 const VE_MAX_CLIPS=6;
-let veVideos=[],veSelected=[]; // veSelected: [{videoId,start,end,duration}]
+let veVideos=[],veSelected=[]; // veSelected: [{clipId,videoId,start,end,duration}] (同じvideoIdを複数クリップとして持てる)
 function veFmtTime(s){s=Math.max(0,Number(s)||0);return s.toFixed(1)+'s'}
 // veSelectedを唯一の正本として、常にstart/endをduration内・最小0.1秒差に丸める
 // start/endを0.1秒単位に丸める際、四捨五入(Math.round)だとend側がdurationを
@@ -271,15 +276,40 @@ function veTrimEditorHtml(clip){const dur=clip.duration||5;const startPct=dur>0?
   +'<input type="range" class="ve-range ve-range-end" min="0" max="'+dur+'" step="0.1" value="'+clip.end+'" aria-label="終了秒">'
   +'</div>'
   +'<div class="ve-time-row"><span data-ve-start-label>'+veFmtTime(clip.start)+'</span><span data-ve-dur-label>使用: '+veFmtTime(clip.end-clip.start)+'</span><span data-ve-end-label>'+veFmtTime(clip.end)+'</span></div>';}
-function veCard(v,selIndex){const dur=Number(v.duration_seconds)||5;const sel=selIndex>=0;const clip=sel?veSelected[selIndex]:null;return '<article class="old ve-card'+(sel?' ve-selected':'')+'" data-ve-id="'+esc(v.id)+'" style="padding:12px;border-radius:20px;display:grid;gap:10px">'
+// 素材一覧のカード。タップするたびに新しいクリップを追加する(選択状態のトグルではない)。
+// 同じ動画が既に何回か追加済みなら「＋」の代わりに追加済み回数を表示する。
+function veMaterialCard(v){const dur=Number(v.duration_seconds)||5;const count=veSelected.filter(c=>c.videoId===v.id).length;return '<article class="old" data-ve-material-id="'+esc(v.id)+'" style="padding:12px;border-radius:20px;display:grid;gap:10px">'
   +'<div style="width:100%;height:168px;background:#050506;border-radius:14px;overflow:hidden;position:relative">'
   +'<video muted playsinline preload="metadata" src="'+esc(v.video_url)+'#t=0.2" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none"></video>'
-  +'<button type="button" class="ve-select-btn'+(sel?' on':'')+'" data-ve-select="'+esc(v.id)+'">'+(sel?(selIndex+1):'＋')+'</button>'
+  +'<button type="button" class="ve-select-btn'+(count>0?' on':'')+'" data-ve-add="'+esc(v.id)+'">'+(count>0?String(count):'＋')+'</button>'
   +'</div>'
-  +(sel?veTrimEditorHtml(clip):'')
   +'<div style="color:#6b7280;font-size:11px">尺: '+dur+'秒</div>'
   +'</article>';}
-function veRenderList(){const list=$('veList');if(!list)return;if(!veVideos.length){$('veEmpty').style.display='block';list.innerHTML='';return}$('veEmpty').style.display='none';list.innerHTML=veVideos.map(v=>{const idx=veSelected.findIndex(s=>s.videoId===v.id);return veCard(v,idx)}).join('');veFilmstripSyncSelected()}
+// 編集リストの各クリップカード。clipIdで一意に識別する(同じvideoIdの重複クリップも独立して扱う)。
+function veClipCard(clip,index){const v=veVideos.find(x=>x.id===clip.videoId);const first=index===0;const last=index===veSelected.length-1;return '<article class="old ve-selected" data-ve-clip-id="'+esc(clip.clipId)+'" data-ve-video-id="'+esc(clip.videoId)+'" style="padding:12px;border-radius:20px;display:grid;gap:10px">'
+  +'<div class="ve-clip-head"><span class="ve-clip-num">クリップ '+(index+1)+'</span><div class="ve-clip-actions">'
+  +'<button type="button" class="ve-move-btn" data-ve-move-up="'+esc(clip.clipId)+'"'+(first?' disabled':'')+' aria-label="上へ">↑</button>'
+  +'<button type="button" class="ve-move-btn" data-ve-move-down="'+esc(clip.clipId)+'"'+(last?' disabled':'')+' aria-label="下へ">↓</button>'
+  +'<button type="button" class="ve-remove-btn" data-ve-remove="'+esc(clip.clipId)+'" aria-label="削除">✕</button>'
+  +'</div></div>'
+  +'<div style="width:100%;height:168px;background:#050506;border-radius:14px;overflow:hidden;position:relative">'
+  +'<video muted playsinline preload="metadata" src="'+esc(v?.video_url||'')+'#t=0.2" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none"></video>'
+  +'</div>'
+  +veTrimEditorHtml(clip)
+  +'</article>';}
+function veRenderList(){
+  const list=$('veList');
+  if(list){
+    if(!veVideos.length){$('veEmpty').style.display='block';list.innerHTML=''}
+    else{$('veEmpty').style.display='none';list.innerHTML=veVideos.map(v=>veMaterialCard(v)).join('')}
+  }
+  const clipList=$('veClipList');
+  if(clipList){
+    if(!veSelected.length){$('veClipEmpty').style.display='block';clipList.innerHTML=''}
+    else{$('veClipEmpty').style.display='none';clipList.innerHTML=veSelected.map((c,i)=>veClipCard(c,i)).join('')}
+  }
+  veFilmstripSyncSelected();
+}
 
 // ---- フィルムストリップ（サムネイル帯）生成: veSelected/veClampClip/veSubmit等の
 // トリム本体ロジックには一切触れず、表示だけをvideoId単位でメモリ上に生成・キャッシュする ----
@@ -347,7 +377,9 @@ function veFilmstripRenderCached(card,videoId){
   veFilmstripTouchCache(videoId);
   return true;
 }
-function veFilmstripApplyToVisibleCard(videoId){const card=document.querySelector('[data-ve-id="'+CSS.escape(videoId)+'"]');if(card)veFilmstripRenderCached(card,videoId)}
+// 同じvideoIdのクリップが編集リストに複数枚あっても、キャッシュ生成は1回だけ行い、
+// 該当するすべてのクリップカードへ同じキャッシュ済みコマを描画する。
+function veFilmstripApplyToVisibleCard(videoId){document.querySelectorAll('[data-ve-video-id="'+CSS.escape(videoId)+'"]').forEach(card=>veFilmstripRenderCached(card,videoId))}
 async function veFilmstripPump(){
   if(veFilmstripBusy)return;
   veFilmstripBusy=true;
@@ -360,7 +392,7 @@ async function veFilmstripPump(){
       if(!v||!v.video_url)continue;
       const clip=veSelected.find(s=>s.videoId===videoId);
       const fallbackDuration=clip?.duration||Number(v.duration_seconds)||5;
-      const card=document.querySelector('[data-ve-id="'+CSS.escape(videoId)+'"]');
+      const card=document.querySelector('[data-ve-video-id="'+CSS.escape(videoId)+'"]');
       const trackW=card?.querySelector('[data-ve-filmstrip-viewport]')?.clientWidth||240;
       const count=veFilmstripThumbCount(trackW);
       try{
@@ -386,15 +418,16 @@ function veFilmstripPrioritize(videoId){const idx=veFilmstripQueue.indexOf(video
 function veFilmstripEnsureObserver(){
   if(veFilmstripObserver)return veFilmstripObserver;
   veFilmstripObserver=new IntersectionObserver(entries=>{
-    entries.forEach(entry=>{if(entry.isIntersecting){const id=entry.target.getAttribute('data-ve-id');if(id)veFilmstripPrioritize(id)}});
+    entries.forEach(entry=>{if(entry.isIntersecting){const vid=entry.target.getAttribute('data-ve-video-id');if(vid)veFilmstripPrioritize(vid)}});
   },{root:null,threshold:0.2});
   return veFilmstripObserver;
 }
-// veRenderList()の直後に呼ぶ。選択中クリップぶんだけ、キャッシュ済みなら即描画、未生成ならキューへ積む
+// veRenderList()の直後に呼ぶ。クリップ(clipId)ごとに自分のカードを探して描画対象にするが、
+// 生成キュー投入(videoId単位)は同じ動画で重複させない。
 function veFilmstripSyncSelected(){
   if(veFilmstripObserver)veFilmstripObserver.disconnect();
   veSelected.forEach(clip=>{
-    const card=document.querySelector('[data-ve-id="'+CSS.escape(clip.videoId)+'"]');
+    const card=document.querySelector('[data-ve-clip-id="'+CSS.escape(clip.clipId)+'"]');
     if(!card)return;
     if(veFilmstripCache.has(clip.videoId)){
       veFilmstripRenderCached(card,clip.videoId);
@@ -406,19 +439,29 @@ function veFilmstripSyncSelected(){
 }
 function veCreditEstimate(){const count=veSelected.length;const total=veSelected.reduce((s,c)=>s+Math.max(0,c.end-c.start),0);return(count>3||total>30)?15:10}
 function veRenderBar(){const bar=$('veBar');if(!bar)return;if(!veSelected.length){bar.style.display='none';return}bar.style.display='block';$('veCost').textContent=String(veCreditEstimate());const strip=$('veSelectedBar');strip.innerHTML=veSelected.map((c,i)=>{const v=veVideos.find(x=>x.id===c.videoId);return '<div style="flex:0 0 auto;width:56px;height:80px;border-radius:10px;overflow:hidden;position:relative;background:#050506;border:1px solid rgba(255,255,255,.1)"><video muted playsinline preload="metadata" src="'+esc(v?.video_url||'')+'#t=0.2" style="width:100%;height:100%;object-fit:cover;pointer-events:none"></video><span style="position:absolute;left:3px;top:3px;background:rgba(0,0,0,.7);border-radius:6px;padding:1px 5px;font-size:10px;font-weight:800">'+(i+1)+'</span></div>'}).join('')}
-function veToggleSelect(id){const idx=veSelected.findIndex(s=>s.videoId===id);if(idx>=0){veSelected.splice(idx,1)}else{if(veSelected.length>=VE_MAX_CLIPS)return;const v=veVideos.find(x=>x.id===id);if(!v)return;const dur=Number(v.duration_seconds)||5;const clip={videoId:id,start:0,end:dur,duration:dur};veClampClip(clip,dur);veSelected.push(clip)}veRenderList();veRenderBar()}
+// 素材をタップするたびに新しいクリップ(start:0、end:全長)を編集リストの末尾に追加する。
+// 同じvideoIdを何度でも追加できる。上限(VE_MAX_CLIPS)は総クリップ数で判定する。
+function veAddClip(videoId){if(veSelected.length>=VE_MAX_CLIPS)return;const v=veVideos.find(x=>x.id===videoId);if(!v)return;const dur=Number(v.duration_seconds)||5;const clip={clipId:crypto.randomUUID(),videoId,start:0,end:dur,duration:dur};veClampClip(clip,dur);veSelected.push(clip);veRenderList();veRenderBar()}
+function veRemoveClip(clipId){const idx=veSelected.findIndex(c=>c.clipId===clipId);if(idx<0)return;veSelected.splice(idx,1);veRenderList();veRenderBar()}
+function veMoveClip(clipId,dir){const idx=veSelected.findIndex(c=>c.clipId===clipId);if(idx<0)return;const t=idx+(dir==='up'?-1:1);if(t<0||t>=veSelected.length)return;const tmp=veSelected[idx];veSelected[idx]=veSelected[t];veSelected[t]=tmp;veRenderList();veRenderBar()}
 async function veLoadVideos(){$('veLoading').style.display='block';$('veList').innerHTML='';$('veEmpty').style.display='none';$('veError').style.display='none';$('veResult').style.display='none';$('veProcessing').style.display='none';const token=await getToken();if(!token){location.href='./login.html';return}try{const res=await fetch('/api/generated-videos?limit=50',{headers:{'Authorization':'Bearer '+token}});if(res.status===401){location.href='./login.html';return}const data=await res.json();veVideos=(data.rows||[]).filter(r=>r.video_url&&r.status==='completed');veRenderList()}catch(_){$('veEmpty').style.display='block';$('veEmpty').textContent='読み込みに失敗しました。もう一度お試しください。'}finally{$('veLoading').style.display='none'}}
 
 // ---- スライダーUI同期・プレビューシーク（veSelectedが正本、DOMは都度同期）----
 function veUpdateSliderDom(card,clip){if(!card||!clip)return;const dur=clip.duration||5;const startInput=card.querySelector('.ve-range-start');const endInput=card.querySelector('.ve-range-end');const bar=card.querySelector('[data-ve-range-bar]');const startLbl=card.querySelector('[data-ve-start-label]');const endLbl=card.querySelector('[data-ve-end-label]');const durLbl=card.querySelector('[data-ve-dur-label]');const startOnTop=clip.start>dur/2;if(startInput){startInput.max=String(dur);startInput.value=String(clip.start);startInput.style.zIndex=startOnTop?'3':'2'}if(endInput){endInput.max=String(dur);endInput.value=String(clip.end);endInput.style.zIndex=startOnTop?'2':'3'}if(bar){const sp=dur>0?clip.start/dur*100:0;const ep=dur>0?clip.end/dur*100:100;bar.style.left=sp+'%';bar.style.right=(100-ep)+'%'}if(startLbl)startLbl.textContent=veFmtTime(clip.start);if(endLbl)endLbl.textContent=veFmtTime(clip.end);if(durLbl)durLbl.textContent='使用: '+veFmtTime(clip.end-clip.start)}
-const _veSeekLast={}; // videoIdごとの直近シーク時刻。input中は30〜60ms間引き、change確定時は強制シーク
-function veSeekPreview(card,id,time,force){const now=Date.now();if(!force&&_veSeekLast[id]&&now-_veSeekLast[id]<40)return;_veSeekLast[id]=now;const video=card.querySelector('video');if(video&&Number.isFinite(time))video.currentTime=Math.max(0,time)}
-function veHandleSliderInput(e,commit){const input=e.target;const isStart=input.classList?.contains('ve-range-start');const isEnd=input.classList?.contains('ve-range-end');if(!isStart&&!isEnd)return;const card=input.closest('[data-ve-id]');if(!card)return;const id=card.getAttribute('data-ve-id');const clip=veSelected.find(s=>s.videoId===id);if(!clip)return;const val=Number(input.value);if(!Number.isFinite(val))return;if(isStart)clip.start=val;else clip.end=val;veClampClip(clip,clip.duration);veUpdateSliderDom(card,clip);veSeekPreview(card,id,isStart?clip.start:clip.end,commit===true);const costEl=$('veCost');if(costEl)costEl.textContent=String(veCreditEstimate())}
-$('veList').addEventListener('click',e=>{const btn=e.target.closest('[data-ve-select]');if(!btn)return;veToggleSelect(btn.getAttribute('data-ve-select'))});
-$('veList').addEventListener('input',e=>veHandleSliderInput(e,false));
-$('veList').addEventListener('change',e=>veHandleSliderInput(e,true));
+const _veSeekLast={}; // clipIdごとの直近シーク時刻。input中は30〜60ms間引き、change確定時は強制シーク
+function veSeekPreview(card,clipId,time,force){const now=Date.now();if(!force&&_veSeekLast[clipId]&&now-_veSeekLast[clipId]<40)return;_veSeekLast[clipId]=now;const video=card.querySelector('video');if(video&&Number.isFinite(time))video.currentTime=Math.max(0,time)}
+function veHandleSliderInput(e,commit){const input=e.target;const isStart=input.classList?.contains('ve-range-start');const isEnd=input.classList?.contains('ve-range-end');if(!isStart&&!isEnd)return;const card=input.closest('[data-ve-clip-id]');if(!card)return;const clipId=card.getAttribute('data-ve-clip-id');const clip=veSelected.find(s=>s.clipId===clipId);if(!clip)return;const val=Number(input.value);if(!Number.isFinite(val))return;if(isStart)clip.start=val;else clip.end=val;veClampClip(clip,clip.duration);veUpdateSliderDom(card,clip);veSeekPreview(card,clipId,isStart?clip.start:clip.end,commit===true);const costEl=$('veCost');if(costEl)costEl.textContent=String(veCreditEstimate())}
+$('veList').addEventListener('click',e=>{const btn=e.target.closest('[data-ve-add]');if(!btn)return;veAddClip(btn.getAttribute('data-ve-add'))});
+const veClipListEl=$('veClipList');
+veClipListEl.addEventListener('click',e=>{
+  const up=e.target.closest('[data-ve-move-up]');if(up){veMoveClip(up.getAttribute('data-ve-move-up'),'up');return}
+  const down=e.target.closest('[data-ve-move-down]');if(down){veMoveClip(down.getAttribute('data-ve-move-down'),'down');return}
+  const rm=e.target.closest('[data-ve-remove]');if(rm){veRemoveClip(rm.getAttribute('data-ve-remove'));return}
+});
+veClipListEl.addEventListener('input',e=>veHandleSliderInput(e,false));
+veClipListEl.addEventListener('change',e=>veHandleSliderInput(e,true));
 // loadedmetadataはバブリングしないため、キャプチャフェーズで委譲して実測durationにより補正する
-$('veList').addEventListener('loadedmetadata',e=>{const video=e.target;if(!video||video.tagName!=='VIDEO')return;const card=video.closest('[data-ve-id]');if(!card)return;const id=card.getAttribute('data-ve-id');const clip=veSelected.find(s=>s.videoId===id);if(!clip)return;const real=video.duration;if(Number.isFinite(real)&&real>0){veClampClip(clip,real);veUpdateSliderDom(card,clip)}},true);
+veClipListEl.addEventListener('loadedmetadata',e=>{const video=e.target;if(!video||video.tagName!=='VIDEO')return;const card=video.closest('[data-ve-clip-id]');if(!card)return;const clipId=card.getAttribute('data-ve-clip-id');const clip=veSelected.find(s=>s.clipId===clipId);if(!clip)return;const real=video.duration;if(Number.isFinite(real)&&real>0){veClampClip(clip,real);veUpdateSliderDom(card,clip)}},true);
 
 let _veClientRequestId='';
 async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){const dur=Number(c.duration)||0;if(!(c.end>c.start)||!(c.start>=0)||!(c.end<=dur)||!(c.end-c.start>=0.1)){err.textContent='トリム範囲が不正です。開始・終了位置を選び直してください。';err.style.display='block';return}}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};await veSend(body,token)}
