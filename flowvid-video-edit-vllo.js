@@ -1,9 +1,16 @@
 (function(){
   function ready(fn){document.readyState==='loading'?document.addEventListener('DOMContentLoaded',fn,{once:true}):fn()}
 
+  const INSTALL_MAX_ATTEMPTS=100; // 50ms間隔で最大約5秒。以前は上限なしで無期限にポーリングしていた
+  let installAttempts=0;
   function install(){
     if(window.__flowvidVlloEditorInstalled)return;
     if(!document.getElementById('videoEditSection')||typeof veRenderList!=='function'||typeof veAddClip!=='function'){
+      installAttempts++;
+      if(installAttempts>=INSTALL_MAX_ATTEMPTS){
+        console.warn('[flowvid-video-edit-vllo] 必要な要素が見つからないため初期化を諦めました。');
+        return;
+      }
       setTimeout(install,50);
       return;
     }

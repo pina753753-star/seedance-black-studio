@@ -479,7 +479,11 @@ $('create').onclick=start;window.flowvidCreateHandler=start;
 
 restoreDraft();
 const q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
-setMode(['reference_to_video','image_to_video','text_to_video','storyboard'].includes(q)?q:'reference_to_video');
+// video_editはsetMode()の対象外(mainCard/sbSectionの表示切り替えしか行わず、videoEditSectionを
+// 表示しないため)。以前はvideo_editが許可リストに無く常にreference_to_videoへ強制されており、
+// リロード直後に一瞬「参照ページ」が見える原因になっていた。ここでonVideoEditTab()を直接呼び、
+// 最初からvideo_editへ復元する。
+if(q==='video_edit'){onVideoEditTab()}else{setMode(['reference_to_video','image_to_video','text_to_video','storyboard'].includes(q)?q:'reference_to_video')}
 renderAssets();updateCreditUi();syncComboWarning();
 
 // ---- pending tasks ----
