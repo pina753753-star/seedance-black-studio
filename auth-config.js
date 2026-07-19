@@ -221,3 +221,20 @@ window.flowvidSupabaseClient = function(){
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start);
   else start();
 })();
+
+(function flowvidAdminAquariumLink(){
+  if(!/\/admin\.html$/.test(location.pathname)) return;
+  const addLink=()=>{
+    const nav=document.querySelector('#drawer .nav');
+    if(!nav||document.getElementById('adminAquariumLink')) return;
+    const logout=document.getElementById('drawerLogoutBtn');
+    const button=document.createElement('button');
+    button.id='adminAquariumLink';
+    button.type='button';
+    button.textContent='AI運営水族館';
+    button.onclick=()=>{location.href='./admin-ops.html'};
+    nav.insertBefore(button,logout||null);
+  };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',addLink,{once:true});
+  else addLink();
+})();
