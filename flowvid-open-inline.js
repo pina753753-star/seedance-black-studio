@@ -336,7 +336,17 @@
     openOverlay(url);
   },true);
   window.fvOpenOverlay=openOverlay;
-  function boot(){applyFastModelPricing();ensureGenerateHistory()}
+
+  function loadVlloEditor(){
+    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
+    if(document.querySelector('script[data-flowvid-vllo-editor]'))return;
+    const script=document.createElement('script');
+    script.src='./flowvid-video-edit-vllo.js?v=12669ba3';
+    script.dataset.flowvidVlloEditor='1';
+    document.head.appendChild(script);
+  }
+
+  function boot(){applyFastModelPricing();ensureGenerateHistory();loadVlloEditor()}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
-  window.addEventListener('pageshow',applyFastModelPricing);
+  window.addEventListener('pageshow',()=>{applyFastModelPricing();loadVlloEditor()});
 })();
