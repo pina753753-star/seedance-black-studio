@@ -68,6 +68,15 @@
       .ve-vllo-handle.end{--handle-color:#9b6cff;--handle-arrow:'◀'}
       .ve-vllo-time-row{margin-top:7px;color:#9ca3af;font-size:11px;font-weight:800}
       .ve-vllo-time-row .used{color:#d5d9e1}
+      .ve-vllo-history{margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px}
+      .ve-vllo-history-title{font-size:13px;font-weight:900;color:#cbd2dd;margin-bottom:8px}
+      .ve-vllo-history-empty{color:#6b7280;font-size:12px;font-weight:700;padding:8px 0}
+      .ve-vllo-history-list{display:grid;gap:8px}
+      .ve-vllo-history-card{background:#171b23;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:8px;display:grid;gap:6px}
+      .ve-vllo-history-card video{width:100%;max-height:220px;border-radius:8px;background:#050506;display:block}
+      .ve-vllo-history-meta{display:flex;justify-content:space-between;gap:8px;color:#8b93a4;font-size:10px;font-weight:700}
+      .ve-vllo-history-more{width:100%;min-height:40px;margin-top:8px;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;font-size:12px;font-weight:800}
+      .ve-vllo-history-more:disabled{opacity:.5}
       .ve-vllo-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
       .ve-vllo-tool{min-height:50px;border:1px solid rgba(255,255,255,.1);background:#1a1f29;color:#d5d9e1;border-radius:12px;font-size:10px;font-weight:800;display:grid;place-items:center;padding:5px}
       .ve-vllo-tool strong{font-size:19px}
@@ -98,7 +107,7 @@
 
     const shell=document.createElement('div');
     shell.className='ve-vllo-shell';
-    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div></div>`;
+    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div><div class="ve-vllo-history" id="veVlloHistorySection"><div class="ve-vllo-history-title">編集済み動画</div><div class="ve-vllo-history-empty" id="veVlloHistoryEmpty" style="display:none">まだ編集済みの動画はありません。</div><div class="ve-vllo-history-list" id="veVlloHistoryList"></div><button type="button" class="ve-vllo-history-more" id="veVlloHistoryMore" style="display:none">もっと見る</button></div>`;
 
     const shade=document.createElement('div');
     shade.className='ve-vllo-material-shade';
@@ -140,6 +149,44 @@
         }
       }catch(_){localStorage.removeItem(VIDEO_EDIT_DRAFT_KEY)}
       saveDraft();
+    }
+
+    // ---- 編集済み動画の履歴一覧(読み取り専用。/api/video-edit-historyのみ呼び出す) ----
+    const VE_HISTORY_LIMIT=5;
+    let veHistoryOffset=0;
+    let veHistoryLoading=false;
+    let veHistoryHasMore=false;
+    function veHistoryFmtDate(iso){const d=iso?new Date(iso):null;if(!d||Number.isNaN(d.getTime()))return '';return d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+    function veHistoryCardHtml(row){const dur=Number(row.actualOutputDuration)||Number(row.requestedOutputDuration)||0;const clips=Number(row.clipCount)||0;return '<div class="ve-vllo-history-card"><video controls playsinline preload="metadata" src="'+esc(row.editedUrl||'')+'"></video><div class="ve-vllo-history-meta"><span>'+esc(veHistoryFmtDate(row.completedAt||row.createdAt))+'</span><span>'+clips+'クリップ・'+veFmtTime(dur)+'</span></div></div>'}
+    async function loadVlloHistory(append){
+      if(veHistoryLoading)return;
+      veHistoryLoading=true;
+      const moreBtn=document.getElementById('veVlloHistoryMore');
+      const list=document.getElementById('veVlloHistoryList');
+      const empty=document.getElementById('veVlloHistoryEmpty');
+      if(moreBtn){moreBtn.disabled=true;moreBtn.textContent='読み込み中…'}
+      try{
+        const token=await getToken();
+        if(!token)return;
+        const res=await fetch('/api/video-edit-history?limit='+VE_HISTORY_LIMIT+'&offset='+veHistoryOffset,{headers:{'Authorization':'Bearer '+token}});
+        if(res.status===401)return;
+        const data=await res.json().catch(()=>({}));
+        const rows=Array.isArray(data.rows)?data.rows:[];
+        if(list){
+          if(!append)list.innerHTML='';
+          if(rows.length)list.innerHTML+=rows.map(veHistoryCardHtml).join('');
+        }
+        veHistoryOffset+=rows.length;
+        veHistoryHasMore=Boolean(data.hasMore);
+        if(empty)empty.style.display=(veHistoryOffset===0)?'block':'none';
+        if(moreBtn){moreBtn.style.display=veHistoryHasMore?'block':'none';moreBtn.textContent='もっと見る'}
+      }catch(_){
+        // 失敗しても画面は壊さない。「もっと見る」があれば再試行できる状態に戻すだけ
+        if(empty&&veHistoryOffset===0)empty.style.display='block';
+      }finally{
+        veHistoryLoading=false;
+        if(moreBtn)moreBtn.disabled=false;
+      }
     }
 
     function getClip(clipId){return veSelected.find(c=>c.clipId===clipId)||null}
@@ -239,6 +286,9 @@
 
     shade.querySelector('.ve-vllo-close').onclick=()=>shade.classList.remove('open');
     shade.onclick=e=>{if(e.target===shade)shade.classList.remove('open')};
+
+    document.getElementById('veVlloHistoryMore').onclick=()=>loadVlloHistory(true);
+    loadVlloHistory(false);
 
     function preserveModeInUrl(modeName){const url=new URL(location.href);if(url.searchParams.get('mode')!==modeName){url.searchParams.set('mode',modeName);history.replaceState(null,'',url)}}
     document.querySelectorAll('.tabs button').forEach(button=>button.addEventListener('click',()=>{const m=button.dataset.mode;if(m)preserveModeInUrl(m);setTimeout(setLegacyVisibility,0)},true));
