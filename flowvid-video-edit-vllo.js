@@ -13,6 +13,8 @@
     let restoreAttempts=0;
     let sequenceToken=0;
     let sequencePlaying=false;
+    let draftRestoreDone=false;
+    const VIDEO_EDIT_DRAFT_KEY='flowvidVideoEditDraftV1';
 
     const style=document.createElement('style');
     style.textContent=`
@@ -101,6 +103,38 @@
     const originalRenderList=veRenderList;
     const originalAddClip=veAddClip;
 
+    function saveDraft(){
+      if(!draftRestoreDone)return;
+      try{
+        const clips=veSelected.slice(0,6).map(c=>({clipId:String(c.clipId||''),videoId:String(c.videoId||''),start:Number(c.start)||0,end:Number(c.end)||0,duration:Number(c.duration)||5}));
+        localStorage.setItem(VIDEO_EDIT_DRAFT_KEY,JSON.stringify({version:1,activeClipId:activeClipId||null,clips,updatedAt:new Date().toISOString()}));
+      }catch(_){}
+    }
+    function restoreDraftOnce(){
+      if(draftRestoreDone||!veVideos.length)return;
+      draftRestoreDone=true;
+      try{
+        const raw=JSON.parse(localStorage.getItem(VIDEO_EDIT_DRAFT_KEY)||'null');
+        const available=new Set(veVideos.map(v=>String(v.id)));
+        const restored=[];
+        for(const item of Array.isArray(raw?.clips)?raw.clips:[]){
+          if(restored.length>=6)break;
+          const videoId=String(item?.videoId||'');
+          if(!videoId||!available.has(videoId))continue;
+          const clip={clipId:String(item?.clipId||'')||crypto.randomUUID(),videoId,start:Number(item?.start)||0,end:Number(item?.end)||Number(item?.duration)||5,duration:Number(item?.duration)||5};
+          veClampClip(clip,clip.duration);
+          restored.push(clip);
+        }
+        if(restored.length){
+          veSelected.splice(0,veSelected.length,...restored);
+          const requested=String(raw?.activeClipId||'');
+          activeClipId=restored.some(c=>c.clipId===requested)?requested:restored[0].clipId;
+          if(typeof veRenderBar==='function')veRenderBar();
+        }
+      }catch(_){localStorage.removeItem(VIDEO_EDIT_DRAFT_KEY)}
+      saveDraft();
+    }
+
     function getClip(clipId){return veSelected.find(c=>c.clipId===clipId)||null}
     function selected(){if(!veSelected.length)return null;let c=getClip(activeClipId);if(!c){c=veSelected[0];activeClipId=c.clipId}return c}
     function clock(v){v=Math.max(0,Number(v)||0);return String(Math.floor(v/60)).padStart(2,'0')+':'+String(Math.floor(v%60)).padStart(2,'0')}
@@ -142,7 +176,7 @@
     function renderTrim(c){const host=document.getElementById('veVlloTrim');host.innerHTML=c?trimMarkup(c):'';if(c)installTrimDrag(c.clipId)}
     function installTrimDrag(clipId){const root=document.querySelector('#veVlloTrim [data-ve-clip-id="'+CSS.escape(clipId)+'"]');const track=root?.querySelector('.ve-vllo-trim-track');if(!track)return;let kind=null,pointerId=null;const apply=(clientX,commit)=>{const clip=getClip(clipId);if(!clip)return;const r=track.getBoundingClientRect();if(!r.width)return;const raw=Math.max(0,Math.min(1,(clientX-r.left)/r.width))*clip.duration;if(kind==='start')clip.start=Math.min(raw,clip.end-.1);else clip.end=Math.max(raw,clip.start+.1);veClampClip(clip,clip.duration);syncTrimDom(clip);seekPreview(clip,kind==='start'?clip.start:Math.max(clip.start,clip.end-.05));if(commit){renderTimeline();syncFilmstrips();if(typeof veRenderBar==='function')veRenderBar()}};track.addEventListener('pointerdown',e=>{e.preventDefault();const clip=getClip(clipId);if(!clip)return;const handle=e.target.closest('[data-handle]');if(handle)kind=handle.dataset.handle;else{const r=track.getBoundingClientRect(),t=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*clip.duration;kind=Math.abs(t-clip.start)<=Math.abs(t-clip.end)?'start':'end'}pointerId=e.pointerId;track.setPointerCapture?.(pointerId);apply(e.clientX,false)});track.addEventListener('pointermove',e=>{if(pointerId!==e.pointerId)return;e.preventDefault();apply(e.clientX,false)});const finish=e=>{if(pointerId!==e.pointerId)return;e.preventDefault();apply(e.clientX,true);try{track.releasePointerCapture(pointerId)}catch(_){}pointerId=null;kind=null};track.addEventListener('pointerup',finish);track.addEventListener('pointercancel',e=>{if(pointerId===e.pointerId){pointerId=null;kind=null}})}
     function syncButtons(c){const i=c?veSelected.findIndex(x=>x.clipId===c.clipId):-1;document.getElementById('veVlloUp').disabled=i<=0;document.getElementById('veVlloDown').disabled=i<0||i>=veSelected.length-1;document.getElementById('veVlloRemove').disabled=i<0}
-    function renderAll(){const c=selected();renderPreview(c);renderTimeline();renderTrim(c);syncButtons(c);syncFilmstrips();if(empty)empty.style.display=veVideos.length?'none':'block';setLegacyVisibility()}
+    function renderAll(){const c=selected();renderPreview(c);renderTimeline();renderTrim(c);syncButtons(c);syncFilmstrips();if(empty)empty.style.display=veVideos.length?'none':'block';setLegacyVisibility();saveDraft()}
 
     async function playClipForSequence(clip,token){
       activeClipId=clip.clipId;
@@ -182,7 +216,7 @@
       if(token===sequenceToken){sequencePlaying=false;updateSequenceButton();const first=veSelected[0];if(first){activeClipId=first.clipId;renderAll();updatePlayhead(first,first.start)}}
     }
 
-    veRenderList=function(){if(!veVideos.length){if(empty)empty.style.display='block';list.innerHTML=''}else{if(empty)empty.style.display='none';list.innerHTML=veVideos.map(v=>veMaterialCard(v)).join('')}renderAll()};
+    veRenderList=function(){restoreDraftOnce();if(!veVideos.length){if(empty)empty.style.display='block';list.innerHTML=''}else{if(empty)empty.style.display='none';list.innerHTML=veVideos.map(v=>veMaterialCard(v)).join('')}renderAll()};
     veAddClip=function(id){stopSequence(false);const before=veSelected.length;originalAddClip(id);if(veSelected.length>before){const added=veSelected[veSelected.length-1];veSelected[veSelected.length-1]={clipId:added.clipId||crypto.randomUUID(),videoId:added.videoId,start:Number(added.start)||0,end:Number(added.end)||Number(added.duration)||5,duration:Number(added.duration)||5};activeClipId=veSelected[veSelected.length-1].clipId;shade.classList.remove('open');renderAll();if(typeof veRenderBar==='function')veRenderBar();setTimeout(()=>document.getElementById('veVlloTimelineWrap')?.scrollTo({left:99999,behavior:'smooth'}),0)}};
 
     shell.onclick=e=>{
