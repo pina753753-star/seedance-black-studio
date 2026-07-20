@@ -466,10 +466,75 @@ veClipListEl.addEventListener('loadedmetadata',e=>{const video=e.target;if(!vide
 let _veClientRequestId='';
 async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){const dur=Number(c.duration)||0;if(!(c.end>c.start)||!(c.start>=0)||!(c.end<=dur)||!(c.end-c.start>=0.1)){err.textContent='トリム範囲が不正です。開始・終了位置を選び直してください。';err.style.display='block';return}}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};await veSend(body,token)}
 async function veSend(body,token,attempt){attempt=attempt||0;try{const res=await fetch('/api/video-edit',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});if(res.status===401){location.href='./login.html';return}if(res.status===403){$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;showVideoEditModal();return}if(res.status===402){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='クレジットが不足しています（必要: '+(data.required||veCreditEstimate())+' cr）。クレジットを購入してください。';$('veError').style.display='block';return}if(res.status===409){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||'現在処理中の動画編集があります。完了後にもう一度お試しください。';$('veError').style.display='block';return}const data=await res.json().catch(()=>({}));if(data.status==='queued'||data.status==='processing'){vePollStatus(data.taskId,token);return}if(data.status==='completed'){veShowCompleted(data.editedUrl);return}if(data.status==='failed'){veShowFailed(data.message||data.error,data.refunded,data.taskId);return}if(res.status===502){veShowFailed(data.detail||data.error,data.refunded,data.taskId);return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||data.error||('編集の開始に失敗しました（'+res.status+'）');$('veError').style.display='block'}catch(e){if(attempt<3){setTimeout(()=>veSend(body,token,attempt+1),1500*(attempt+1));return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='通信エラーが発生しました。もう一度お試しください。';$('veError').style.display='block'}}
-function veShowCompleted(url){$('veProcessing').style.display='none';$('veResult').style.display='block';$('veResultVideo').src=url;$('veResultSave').href=url;veSelected=[];_veClientRequestId='';$('veSubmit').disabled=false;veRenderList();veRenderBar()}
+function veShowCompleted(url){
+  $('veProcessing').style.display='none';
+  $('veResult').style.display='block';
+  $('veResultVideo').src=url;
+  $('veResultSave').href=url;
+  $('veResultSave').dataset.videoUrl=url;
+  veSelected=[];
+  _veClientRequestId='';
+  $('veSubmit').disabled=false;
+  veRenderList();
+  veRenderBar();
+}
+
+async function veSaveEditedVideo(event){
+  event.preventDefault();
+
+  const link=event.currentTarget;
+  const url=String(link.dataset.videoUrl||'').trim();
+  if(!url)return;
+
+  const originalText=link.textContent||'保存する ↓';
+  const error=$('veError');
+
+  if(error)error.style.display='none';
+  link.style.pointerEvents='none';
+  link.setAttribute('aria-disabled','true');
+  link.textContent='保存中';
+
+  try{
+    const response=await fetch(url,{cache:'no-store'});
+    if(!response.ok)throw new Error('動画取得失敗: '+response.status);
+
+    const blob=await response.blob();
+    if(!blob.size)throw new Error('動画データが空です');
+
+    const blobUrl=URL.createObjectURL(blob);
+    const downloadLink=document.createElement('a');
+    downloadLink.href=blobUrl;
+    downloadLink.download='flowvid-edited-video.mp4';
+    downloadLink.style.display='none';
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+
+    setTimeout(()=>{
+      URL.revokeObjectURL(blobUrl);
+      downloadLink.remove();
+    },1500);
+
+    link.textContent='保存済';
+    setTimeout(()=>{
+      link.textContent=originalText;
+      link.style.pointerEvents='';
+      link.removeAttribute('aria-disabled');
+    },1600);
+  }catch(errorValue){
+    link.textContent=originalText;
+    link.style.pointerEvents='';
+    link.removeAttribute('aria-disabled');
+
+    if(error){
+      error.textContent='動画を保存できませんでした。通信環境を確認して、もう一度お試しください。';
+      error.style.display='block';
+    }
+  }
+}
 function veShowFailed(msg,refunded,taskId){$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;const refundNote=refunded===true?'クレジットは自動返金されています。':'返金状況を確認できないため、タスクID（'+(taskId||'不明')+'）を添えてサポートへお問い合わせください。';$('veError').textContent=(msg||'編集に失敗しました。')+' '+refundNote;$('veError').style.display='block'}
 async function vePollStatus(taskId,token){const poll=async()=>{try{const res=await fetch('/api/video-edit-status?taskId='+encodeURIComponent(taskId),{headers:{'Authorization':'Bearer '+token}});if(res.status===401){location.href='./login.html';return}const data=await res.json().catch(()=>({}));if(data.status==='completed'){veShowCompleted(data.editedUrl);return}if(data.status==='failed'){veShowFailed(data.message,data.refunded,taskId);return}setTimeout(poll,4000)}catch(_){setTimeout(poll,4000)}};setTimeout(poll,4000)}
 $('veSubmit').onclick=veSubmit;
+$('veResultSave').addEventListener('click',veSaveEditedVideo);
 
 ['duration','resolution','model','aspect'].forEach(id=>$(id)?.addEventListener('change',()=>{persistDraft();updateCreditUi();syncComboWarning()}));
 $('prompt').addEventListener('input',persistDraft);
