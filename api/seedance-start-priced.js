@@ -1,4 +1,5 @@
 const coreHandler = require('./_lib/seedance-start.js');
+const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
 const FAST_MODEL = 'bytedance/seedance-2.0-fast';
@@ -103,13 +104,28 @@ module.exports = async function handler(req, res) {
   // Temporary safety stop: block any request containing reference-image input
   // before the core handler can run moderation, create a task, deduct credits,
   // or call OpenRouter. Text-only requests continue through the existing path.
+  // Exception: a single allow-listed test user (Supabase user_id set via
+  // TEST_BYPASS_USER_ID) may bypass this block. This does not skip the
+  // moderation check in the core handler, which still always runs.
   if (hasReferenceImageInput(body)) {
-    return res.status(503).json({
-      ok: false,
-      error: 'reference_image_temporarily_disabled',
-      errorCategory: 'reference_image_temporarily_disabled',
-      message: '現在、参照画像を使った動画生成は一時的に停止しております。テキストのみでの動画生成は通常通りご利用いただけます。再開時期は追ってお知らせします。'
-    });
+    const bypassUserId = String(process.env.TEST_BYPASS_USER_ID || '').trim();
+    let bypassed = false;
+
+    if (bypassUserId) {
+      const auth = await requireConfirmedAuth(req);
+      if (auth.ok && auth.user?.id === bypassUserId) {
+        bypassed = true;
+      }
+    }
+
+    if (!bypassed) {
+      return res.status(503).json({
+        ok: false,
+        error: 'reference_image_temporarily_disabled',
+        errorCategory: 'reference_image_temporarily_disabled',
+        message: '現在、参照画像を使った動画生成は一時的に停止しております。テキストのみでの動画生成は通常通りご利用いただけます。再開時期は追ってお知らせします。'
+      });
+    }
   }
 
   const creditCost = calculateCreditCost({
