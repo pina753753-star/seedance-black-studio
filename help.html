@@ -64,10 +64,15 @@
     <select id="f-type">
       <option value="">選択してください</option>
       <option value="bug">バグ報告</option>
+      <option value="content_report">コンテンツ通報(著作権侵害・不適切コンテンツ・児童安全に関する懸念)</option>
       <option value="billing">課金・クレジット</option>
       <option value="usage">機能の使い方</option>
       <option value="other">その他</option>
     </select>
+  </div>
+  <div class="form-group" id="f-target-group" style="display:none">
+    <label for="f-target">対象の動画URL・ユーザー名など、分かる範囲で構いません</label>
+    <input type="text" id="f-target" />
   </div>
   <div class="form-group">
     <label for="f-body">お問い合わせ内容</label>
@@ -88,19 +93,31 @@ document.getElementById('menuBtn').onclick=()=>d.classList.add('open');
 document.getElementById('shade').onclick=()=>d.classList.remove('open');
 document.getElementById('close').onclick=()=>d.classList.remove('open');
 
+document.getElementById('f-type').onchange=function() {
+  document.getElementById('f-target-group').style.display = this.value === 'content_report' ? 'block' : 'none';
+};
+
 async function sendForm() {
   const name = document.getElementById('f-name').value.trim();
   const type = document.getElementById('f-type').value;
   const body = document.getElementById('f-body').value.trim();
-  if (!type || !body) { alert('お問い合わせ種別と内容をご入力ください。'); return; }
+  const target = document.getElementById('f-target').value.trim();
+  if (!type) { alert('お問い合わせ種別と内容をご入力ください。'); return; }
+  if (type === 'content_report') {
+    if (!target && !body) { alert('通報内容または対象情報のいずれかを入力してください'); return; }
+  } else if (!body) {
+    alert('お問い合わせ種別と内容をご入力ください。'); return;
+  }
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
   btn.textContent = '送信中...';
   try {
+    const payload = { name, type, message: body, category: type === 'content_report' ? 'urgent_content_report' : 'normal' };
+    if (type === 'content_report') { payload.target = target; }
     const res = await fetch('https://formspree.io/f/xnjynobp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ name, type, message: body })
+      body: JSON.stringify(payload)
     });
     if (res.ok) {
       document.getElementById('successMsg').style.display = 'block';
@@ -108,6 +125,8 @@ async function sendForm() {
       document.getElementById('f-name').value = '';
       document.getElementById('f-type').value = '';
       document.getElementById('f-body').value = '';
+      document.getElementById('f-target').value = '';
+      document.getElementById('f-target-group').style.display = 'none';
     } else {
       alert('送信に失敗しました。しばらく経ってから再度お試しください。');
       btn.disabled = false;
