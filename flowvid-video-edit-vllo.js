@@ -75,6 +75,8 @@
       .ve-vllo-history-card{background:#171b23;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:8px;display:grid;gap:6px}
       .ve-vllo-history-card video{width:100%;max-height:220px;border-radius:8px;background:#050506;display:block}
       .ve-vllo-history-meta{display:flex;justify-content:space-between;gap:8px;color:#8b93a4;font-size:10px;font-weight:700}
+      .ve-vllo-history-save{width:100%;min-height:40px;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;font-size:12px;font-weight:800}
+      .ve-vllo-history-save:disabled{opacity:.5}
       .ve-vllo-history-more{width:100%;min-height:40px;margin-top:8px;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;font-size:12px;font-weight:800}
       .ve-vllo-history-more:disabled{opacity:.5}
       .ve-vllo-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
@@ -157,7 +159,73 @@
     let veHistoryLoading=false;
     let veHistoryHasMore=false;
     function veHistoryFmtDate(iso){const d=iso?new Date(iso):null;if(!d||Number.isNaN(d.getTime()))return '';return d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
-    function veHistoryCardHtml(row){const dur=Number(row.actualOutputDuration)||Number(row.requestedOutputDuration)||0;const clips=Number(row.clipCount)||0;return '<div class="ve-vllo-history-card"><video controls playsinline preload="metadata" src="'+esc(row.editedUrl||'')+'"></video><div class="ve-vllo-history-meta"><span>'+esc(veHistoryFmtDate(row.completedAt||row.createdAt))+'</span><span>'+clips+'クリップ・'+veFmtTime(dur)+'</span></div></div>'}
+    function veHistoryCardHtml(row){
+      const dur=Number(row.actualOutputDuration)||Number(row.requestedOutputDuration)||0;
+      const clips=Number(row.clipCount)||0;
+      const editedUrl=esc(row.editedUrl||'');
+      const editId=esc(row.id||'');
+      return '<div class="ve-vllo-history-card">'
+        +'<video controls playsinline preload="metadata" src="'+editedUrl+'"></video>'
+        +'<div class="ve-vllo-history-meta">'
+        +'<span>'+esc(veHistoryFmtDate(row.completedAt||row.createdAt))+'</span>'
+        +'<span>'+clips+'クリップ・'+veFmtTime(dur)+'</span>'
+        +'</div>'
+        +'<button type="button" class="ve-vllo-history-save" data-url="'+editedUrl+'" data-edit-id="'+editId+'">保存</button>'
+        +'</div>';
+    }
+
+    async function saveVlloHistoryVideo(url,editId,button){
+      if(!url||!button)return;
+
+      const originalText=button.textContent||'保存';
+      const error=document.getElementById('veError');
+
+      button.disabled=true;
+      button.textContent='保存中';
+      if(error)error.style.display='none';
+
+      try{
+        const response=await fetch(url,{cache:'no-store'});
+        if(!response.ok)throw new Error('動画取得失敗: '+response.status);
+
+        const blob=await response.blob();
+        if(!blob.size)throw new Error('動画データが空です');
+
+        const blobUrl=URL.createObjectURL(blob);
+        const downloadLink=document.createElement('a');
+        const safeEditId=String(editId||Date.now()).replace(/[^a-zA-Z0-9_-]/g,'_');
+
+        downloadLink.href=blobUrl;
+        downloadLink.download='flowvid-edited-'+safeEditId+'.mp4';
+        downloadLink.style.display='none';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+
+        setTimeout(()=>{
+          URL.revokeObjectURL(blobUrl);
+          downloadLink.remove();
+        },1500);
+
+        button.textContent='保存済';
+        setTimeout(()=>{
+          button.textContent=originalText;
+          button.disabled=false;
+        },1600);
+      }catch(errorValue){
+        button.textContent='保存失敗';
+
+        if(error){
+          error.textContent='編集済み動画を保存できませんでした。通信環境を確認して、もう一度お試しください。';
+          error.style.display='block';
+        }
+
+        setTimeout(()=>{
+          button.textContent=originalText;
+          button.disabled=false;
+        },1600);
+      }
+    }
+
     async function loadVlloHistory(append){
       if(veHistoryLoading)return;
       veHistoryLoading=true;
@@ -188,6 +256,20 @@
         if(moreBtn)moreBtn.disabled=false;
       }
     }
+
+    document.getElementById('veVlloHistoryList').addEventListener('click',event=>{
+      const button=event.target.closest('.ve-vllo-history-save');
+      if(!button)return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      saveVlloHistoryVideo(
+        button.dataset.url||'',
+        button.dataset.editId||'',
+        button
+      );
+    });
 
     function getClip(clipId){return veSelected.find(c=>c.clipId===clipId)||null}
     function selected(){if(!veSelected.length)return null;let c=getClip(activeClipId);if(!c){c=veSelected[0];activeClipId=c.clipId}return c}
