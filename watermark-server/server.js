@@ -140,7 +140,7 @@ async function runWatermarkJob(videoUrl) {
     await runFfmpeg(() =>
       ffmpeg(inputFile)
         .outputOptions([
-          '-vf', "drawtext=text=FlowVid:fontsize=28:fontcolor=white@0.85:x=w-tw-20:y=h-th-20:shadowcolor=black@0.8:shadowx=2:shadowy=2",
+          '-vf', "drawtext=text='Pina Studio':fontsize=28:fontcolor=white@0.85:x=w-tw-20:y=h-th-20:shadowcolor=black@0.8:shadowx=2:shadowy=2",
           '-c:a', 'copy',
           '-movflags', '+faststart'
         ])
@@ -172,7 +172,7 @@ async function runWatermarkJob(videoUrl) {
 }
 
 app.get('/', (req, res) => {
-  res.json({ ok: true, service: 'FlowVid Watermark Server', version: '1.0.0' });
+  res.json({ ok: true, service: 'Pina Studio Watermark Server', version: '1.0.0' });
 });
 
 app.post('/watermark', async (req, res) => {
