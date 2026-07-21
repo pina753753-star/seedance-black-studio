@@ -1,6 +1,19 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-07-19)
+# FlowVid Studio 完成までの全体像(最終更新: 2026-07-21)
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
+
+## 2026-07-20〜21 追加分: 完了・本番適用済み
+
+- **お問い合わせフォームへの「コンテンツ通報」カテゴリ追加(PR #98)**: `help.html`のお問い合わせ種別セレクトに、著作権侵害・不適切コンテンツ・児童安全に関する懸念を通報するための「コンテンツ通報」を追加。選択時のみ対象の動画URL・ユーザー名等を入力する任意欄(`#f-target`)を表示し、Formspree送信データに`category`(`normal`/`urgent_content_report`)・`target`フィールドを追加。既存のbug/billing/usage/otherの挙動は変更なし。本番mainへマージ済み。
+- **参照画像生成の一時停止に対するテスト用バイパス機能の追加(PR #99)**: `api/seedance-start-priced.js`に、環境変数`TEST_BYPASS_USER_ID`(Supabaseの`user_id`のUUID、Vercelダッシュボードで設定)で指定した単一ユーザーのみ、参照画像を使った動画生成の一時停止(503)をバイパスできる仕組みを実装。バイパス判定は既存の`requireConfirmedAuth()`で取得したユーザーIDとの厳密一致で行い、バイパス時も`api/_lib/seedance-start.js`側の既存のOpenAI Moderation API検査・認証・課金処理は変更なくすべて実行される。テスト用途であり、テスト終了後は本コードと環境変数の削除を検討する前提。本番mainへマージ済み。
+- **OpenAI Moderation APIの複数画像対応(PR #100)**: `api/_lib/openai-moderation.js`の`moderateContent()`を修正。OpenAI Moderation APIは1リクエストにつき画像1枚までしか受け付けないため、参照画像が2枚以上のリクエストで`too_many_images`(400)エラーが発生し、安全側の503で生成が停止していた問題に対応。画像URLを1枚ずつ個別のAPIリクエストに分割(プロンプトテキストは1枚目に同梱)し、最大3並列で実行するよう変更。いずれか1枚でもflaggedなら全体をflagged扱いとし、categoriesは全呼び出し分を集約。いずれかの呼び出しでエラーが発生した場合は従来通り安全側の`{ ok: false }`として扱う。呼び出し元(`seedance-start.js`)から見たインターフェース(`moderation.ok`/`moderation.flagged`/`moderation.categories`)は変更なし。これにより参照画像最大9枚までのモデレーション検査に対応可能になった。本番mainへマージ済み。
+- **動画編集タブの保存ボタンをBlobダウンロード方式に統一(PR #101)**: `generate-prod.html`の動画編集タブの保存ボタン(`#veResultSave`)を、単純な`<a href>`直リンクから、動画をfetchで取得しBlobとしてダウンロードさせる方式(`veSaveEditedVideo`)に変更。取得失敗・空データ時は`#veError`にエラーメッセージを表示。本番mainへマージ済み。
+- **動画編集履歴カードへの個別保存ボタン追加(PR #102)**: `flowvid-video-edit-vllo.js`の編集済み動画履歴カード(`veHistoryCardHtml`)に、カードごとの「保存」ボタンを追加。PR #101と同じBlob取得→ダウンロード方式(`saveVlloHistoryVideo`)を実装し、ファイル名は編集ID付き`flowvid-edited-<editId>.mp4`。履歴リストへのイベント委任でクリックを処理。本番mainへマージ済み。
+- **新規登録者向け無料クレジット付与キャンペーンの実装(マイグレーション`20260720000000_add_signup_credit_campaign.sql`)**: `private.signup_credit_campaigns`(キャンペーン設定)・`private.signup_credit_grants`(付与記録)テーブルを新規作成し、`handle_new_user()`トリガー関数を置き換え。設定行を`FOR UPDATE`で排他ロックしたうえで新規登録者へクレジットを付与し、上限到達後は0クレジットで登録を継続する設計。キャンペーン処理部分だけで障害が起きた場合も新規登録自体は止めず0クレジットにフォールバックする。**Supabase本番DBへマイグレーション適用済み**、DB実測で`private.signup_credit_campaigns`・`private.signup_credit_grants`テーブルの作成、`handle_new_user()`の置き換えを確認済み。テストユーザー(`hinaran53+test1@gmail.com`)登録による実付与(`granted_count`0→1、`credits_per_user`100、`credit_transactions`への記録)も実機確認済み。当初`max_grants=10`で適用したが、その後の運用判断により本番DB上で`max_grants=100`へUPDATE済み(`credits_per_user=100`は変更なし)。現在`enabled=true`、`max_grants=100`、`credits_per_user=100`で本番稼働中。
+- **旧・先着100人無料クレジットキャンペーンのロジック廃止(PR #103)**: `api/ensure-user-credits.js`から、旧「先着100人・100credits」のハードコードされたロジック(`INITIAL_FREE_CREDITS`/`INITIAL_FREE_USER_LIMIT`定数、`countInitialFreeUsers()`)を削除。上記の新マイグレーションへ移行したことに伴う重複付与ロジックの廃止で、このAPIは`credit_balances`行が欠けている場合の補完専用(常に`free_credits:0`で作成)となった。本番mainへマージ済み。
+- **料金ページのFreeプラン表示調整(PR #104、#105)**: PR #104で`pricing.html`のFreeプラン`desc`から「先着100名限定」を一時削除(当時のキャンペーン`max_grants`が10だったため表示と実態が不一致だった)。その後キャンペーンの`max_grants`を100へ変更したことに伴い、PR #105で「先着100名限定」の文言を復活。いずれも表示テキストのみの変更で、価格計算・購入導線には影響なし。
+- **ドメイン取得**: `pinastudio.jp`を取得済み。Whois情報公開代行のメール転送オプションを申請中で、登録完了通知はまだ受領していない。
+- **サイトブランドの「FlowVid Studio」→「Pina Studio」への変更開始(PR #106、#107)**: 新ロゴ・アイコン等のブランド素材(`pina-logo-header-full.png`、`pina-icon-v1.png`、`pina-icon-v2-favicon.png`、`pina-mockup-black-wall.png`、`pina-ogp-share.png`)を`assets/brand/`ディレクトリへ配置(PR #106)。index.html、generate-prod.html、login.html、pricing.html、help.html、profile.html、legal.html、privacy.html、terms.html、content-policy.html、credits-info.htmlの計11ページのヘッダーロゴ画像・alt属性を新ロゴ(`/assets/brand/pina-logo-header-full.png`、alt="Pina Studio")へ差し替え(PR #107)。favicon・OGPタグ・本文中の「FlowVid Studio」表記・見出しの配色は今回未対応(下記「残タスク」参照)。
 
 ## 2026-07-15 追加分: 完了・本番適用済み(すべてSupabase本番DB実測 / GitHub PRマージ状態で検証済み)
 
@@ -60,9 +73,14 @@
 2. AWSアカウント作成(サインアップ確認メール未達の解決)→実在人物なりすまし検知(著名人認識+プロンプト検査)の実装。
 3. 法人化後、PhotoDNA再申請または他のCSAM検知手段の検討。
 4. 上記2・3が完了次第、参照画像モードの再開を検討。
-5. 新規フリーユーザー100人への100クレジット付与施策の実装状況確認(まだ着手していない)。
+5. ~~新規フリーユーザー100人への100クレジット付与施策の実装状況確認(まだ着手していない)~~ **2026-07-20〜21、`private.signup_credit_campaigns`マイグレーションの実装・本番適用、`api/ensure-user-credits.js`の旧ロジック廃止(PR #103)により対応済み。** 現在`max_grants=100`、`credits_per_user=100`で本番稼働中。
 6. 絵コンテ機能の残存コード(`?mode=storyboard`で開ける)の削除検討(優先度低)。
 7. 動画編集の追加機能(字幕+5credits、BGM+5credits、上限25credits)は将来段階として保留中。
+8. サイト内の見出し(h1)に残っている紫系グラデーションを、Pina Studioの配色(白または金の単色)へ変更。
+9. favicon・OGPタグの新規設定(素材は`assets/brand/`に準備済み。HTML側の`<link rel="icon">`・OGPメタタグの設定は未着手)。
+10. 本文・`<title>`タグ等に残る「FlowVid Studio」表記の洗い出しと置換(今回はヘッダーロゴの画像・alt属性のみ対応、テキスト表記は未対応)。
+11. 実際の動画編集有料テストの実施・履歴反映確認(継続中の残タスク)。
+12. Thorn Safer Match / Hive CSAM Detection APIへの申請検討(ドメイン`pinastudio.jp`のメールアドレス取得後)。
 
 ---
 
