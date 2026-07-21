@@ -10,10 +10,10 @@ function toIso(unixSeconds) {
   return unixSeconds ? new Date(unixSeconds * 1000).toISOString() : null;
 }
 
-function subscriptionToResponse(sub) {
+function subscriptionToResponse(sub, dbRow) {
   const item = sub.items?.data?.[0];
-  const plan = sub.metadata?.plan || item?.price?.nickname || 'unknown';
-  const billingInterval = item?.price?.recurring?.interval || sub.metadata?.billing_interval || 'month';
+  const plan = sub.metadata?.plan || dbRow?.plan || item?.price?.nickname || 'unknown';
+  const billingInterval = item?.price?.recurring?.interval || sub.metadata?.billing_interval || dbRow?.billing_interval || 'month';
   return {
     plan,
     billingInterval,
@@ -39,14 +39,19 @@ function verifySubscriptionOwnership(sub, profileStripeCustomerId, userId) {
 }
 
 // Locates the caller's single active/trialing/past_due subscription.
-// 1) Look in user_subscriptions by user_id first.
-// 2) If that finds nothing, fall back to listing Stripe subscriptions for
-//    profiles.stripe_customer_id (covers subscriptions not yet synced by webhook).
-// Either path: 0 matches -> no_active_subscription, 1 -> use it, 2+ -> multiple_active_subscriptions.
+// 1) Look in user_subscriptions by user_id first (also used as a plan/interval
+//    display fallback later — Stripe metadata can be missing on old subscriptions).
+// 2) If profiles.stripe_customer_id is known, ALWAYS cross-check against Stripe
+//    directly too — even when step 1 already found exactly one row — since the
+//    DB can be stale or missing a subscription the webhook hasn't synced yet.
+//    Stripe's live list is treated as authoritative for the active/multiple
+//    decision; a DB row whose id doesn't match Stripe's single active
+//    subscription is treated as an inconsistency and fails closed.
+// 0 matches -> no_active_subscription, 1 -> use it, 2+ -> multiple_active_subscriptions.
 async function findActiveSubscriptionId(db, stripe, userId, profileStripeCustomerId) {
   const { data: rows, error } = await db
     .from('user_subscriptions')
-    .select('stripe_subscription_id,status')
+    .select('stripe_subscription_id,status,plan,billing_interval')
     .eq('user_id', userId)
     .in('status', ACTIVE_STATUSES);
 
@@ -54,12 +59,11 @@ async function findActiveSubscriptionId(db, stripe, userId, profileStripeCustome
     return { error: 'db_error' };
   }
 
-  if (rows && rows.length > 0) {
-    if (rows.length > 1) return { error: 'multiple_active_subscriptions' };
-    return { subscriptionId: rows[0].stripe_subscription_id };
-  }
+  if (rows && rows.length > 1) return { error: 'multiple_active_subscriptions' };
+  const dbRow = rows && rows.length === 1 ? rows[0] : null;
 
   if (!profileStripeCustomerId) {
+    if (dbRow) return { subscriptionId: dbRow.stripe_subscription_id, dbRow };
     return { error: 'no_active_subscription' };
   }
 
@@ -73,7 +77,14 @@ async function findActiveSubscriptionId(db, stripe, userId, profileStripeCustome
 
   if (active.length === 0) return { error: 'no_active_subscription' };
   if (active.length > 1) return { error: 'multiple_active_subscriptions' };
-  return { subscriptionId: active[0].id, subscription: active[0] };
+
+  const stripeSub = active[0];
+  if (dbRow && dbRow.stripe_subscription_id !== stripeSub.id) {
+    // DB and Stripe disagree on which single subscription is active — fail
+    // safe rather than guessing which one is correct.
+    return { error: 'multiple_active_subscriptions' };
+  }
+  return { subscriptionId: stripeSub.id, subscription: stripeSub, dbRow };
 }
 
 module.exports = async function handler(req, res) {
@@ -123,12 +134,12 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-      return res.status(200).json({ ok: true, subscription: subscriptionToResponse(sub) });
+      return res.status(200).json({ ok: true, subscription: subscriptionToResponse(sub, found.dbRow) });
     }
 
     // POST: schedule cancellation at period end.
     if (sub.cancel_at_period_end) {
-      const already = subscriptionToResponse(sub);
+      const already = subscriptionToResponse(sub, found.dbRow);
       return res.status(200).json({
         ok: true,
         alreadyScheduled: true,
@@ -139,7 +150,7 @@ module.exports = async function handler(req, res) {
     }
 
     const updated = await stripe.subscriptions.update(sub.id, { cancel_at_period_end: true });
-    const result = subscriptionToResponse(updated);
+    const result = subscriptionToResponse(updated, found.dbRow);
     return res.status(200).json({
       ok: true,
       status: result.status,
