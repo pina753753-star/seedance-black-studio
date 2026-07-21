@@ -139,11 +139,16 @@ async function runWatermarkJob(videoUrl) {
 
     await runFfmpeg(() =>
       ffmpeg(inputFile)
-        .outputOptions([
+        // Passed as separate arguments (not a single array) so fluent-ffmpeg
+        // does not re-split any option value on internal spaces (it only
+        // applies that space-splitting heuristic to array-form calls, and
+        // "Pina Studio" contains exactly one space, which previously got
+        // split into two separate argv tokens and broke -vf's value).
+        .outputOptions(
           '-vf', "drawtext=text='Pina Studio':fontsize=28:fontcolor=white@0.85:x=w-tw-20:y=h-th-20:shadowcolor=black@0.8:shadowx=2:shadowy=2",
           '-c:a', 'copy',
           '-movflags', '+faststart'
-        ])
+        )
         .output(outputFile)
     );
 
