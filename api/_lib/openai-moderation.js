@@ -11,6 +11,20 @@ function normalizeImageUrls(imageUrls) {
     .filter((url) => /^https:\/\//i.test(url)))];
 }
 
+function inferAppliedInputTypesFromRequest(input) {
+  const types = new Set();
+
+  for (const item of Array.isArray(input) ? input : []) {
+    if (item?.type === 'text') {
+      types.add('text');
+    } else if (item?.type === 'image_url') {
+      types.add('image');
+    }
+  }
+
+  return [...types];
+}
+
 function flaggedCategories(result) {
   const categories = result?.categories;
   if (!categories || typeof categories !== 'object') return [];
@@ -123,16 +137,29 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs) {
     const categories = new Set();
     const categoryScores = {};
     const categoryAppliedInputTypes = {};
+    const inferredInputTypes = inferAppliedInputTypesFromRequest(input);
     let flagged = false;
 
     for (const result of data.results) {
       if (!result || typeof result.flagged !== 'boolean') {
         return { ok: false, flagged: false, errorCode: 'invalid_response' };
       }
-      if (result.flagged) flagged = true;
-      for (const category of flaggedCategories(result)) categories.add(category);
+
+      if (result.flagged) {
+        flagged = true;
+      }
+
+      const resultFlaggedCategories = flaggedCategories(result);
+
+      for (const category of resultFlaggedCategories) {
+        categories.add(category);
+
+        mergeAppliedInputTypes(categoryAppliedInputTypes, {
+          [category]: inferredInputTypes
+        });
+      }
+
       mergeMaxScores(categoryScores, result.category_scores);
-      mergeAppliedInputTypes(categoryAppliedInputTypes, result.category_applied_input_types);
     }
 
     return {
@@ -140,9 +167,13 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs) {
       flagged,
       categories: [...categories],
       categoryScores,
-      categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
+      categoryAppliedInputTypes: serializeAppliedInputTypes(
+        categoryAppliedInputTypes
+      ),
       checkedInputCount: input.length,
-      checkedImageCount: input.filter((item) => item?.type === 'image_url').length
+      checkedImageCount: input.filter(
+        (item) => item?.type === 'image_url'
+      ).length
     };
   } catch (error) {
     return {
