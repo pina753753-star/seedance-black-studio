@@ -165,3 +165,91 @@ test('二次判定API障害は503で停止', async () => {
   assert.equal(result.allow, false);
   assert.equal(result.ok, false);
 });
+
+test('二次判定で拒否された場合は機微情報を含めず判定項目だけをログに記録', async () => {
+  const logs = [];
+  const prompt = '診断用の秘密のプロンプト文字列';
+
+  const blockedClassification = {
+    fictional_setting: true,
+    adult_or_nonhuman_only: false,
+    real_person_target: false,
+    minor_harm: false,
+    graphic_injury: false,
+    lethal_or_maiming_action: false,
+    torture_or_execution: false,
+    sexual_violence: false,
+    weapon_instruction: false,
+    effects_hide_serious_harm: false,
+    non_graphic_action: true,
+    decision: 'block'
+  };
+
+  const result = await resolveModerationDecision(
+    prompt,
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text'] },
+      checkedImageCount: 3
+    },
+    {
+      apiKey: 'test',
+      logger: {
+        warn: (...args) => logs.push(args)
+      },
+      fetchImpl: async () => mockResponse(200, {
+        output_text: JSON.stringify(blockedClassification)
+      })
+    }
+  );
+
+  assert.equal(result.status, 422);
+  assert.equal(result.allow, false);
+  assert.equal(result.reason, 'classification_blocked');
+
+  assert.equal(logs.length, 1);
+  assert.equal(
+    logs[0][0],
+    '[moderation-decision] secondary classifier blocked request'
+  );
+
+  assert.deepEqual(logs[0][1], blockedClassification);
+
+  const serializedLog = JSON.stringify(logs);
+
+  assert.equal(serializedLog.includes(prompt), false);
+  assert.equal(serializedLog.includes('https://'), false);
+  assert.equal(serializedLog.includes('image_url'), false);
+  assert.equal(serializedLog.includes('apiKey'), false);
+  assert.equal(serializedLog.includes('test'), false);
+  assert.equal(serializedLog.includes('checkedImageCount'), false);
+});
+
+test('二次判定で許可された場合は診断警告ログを出さない', async () => {
+  const logs = [];
+
+  const result = await resolveModerationDecision(
+    '成人キャラクターの安全な架空アニメアクション',
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text'] }
+    },
+    {
+      apiKey: 'test',
+      logger: {
+        warn: (...args) => logs.push(args)
+      },
+      fetchImpl: async () => mockResponse(200, {
+        output_text: JSON.stringify(safeAllow())
+      })
+    }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(result.allow, true);
+  assert.equal(logs.length, 0);
+});
