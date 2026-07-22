@@ -66,6 +66,21 @@ test('画像由来のviolenceは例外許可しない', () => {
   });
 });
 
+
+test('画像入力が1枚でもあれば文章由来violenceでも二次判定しない', () => {
+  const decision = shouldRunFictionalActionClassifier({
+    ok: true,
+    flagged: true,
+    categories: ['violence'],
+    categoryAppliedInputTypes: { violence: ['text'] },
+    checkedImageCount: 1
+  });
+  assert.deepEqual(decision, {
+    run: false,
+    reason: 'secondary_classifier_disabled_for_image_input'
+  });
+});
+
 test('violence以外が混ざれば例外許可しない', () => {
   const decision = shouldRunFictionalActionClassifier({
     ok: true,

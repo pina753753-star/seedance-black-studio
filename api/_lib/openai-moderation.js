@@ -134,7 +134,8 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs) {
       categories: [...categories],
       categoryScores,
       categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
-      checkedInputCount: input.length
+      checkedInputCount: input.length,
+      checkedImageCount: input.filter((item) => item?.type === 'image_url').length
     };
   } catch (error) {
     return {
@@ -204,6 +205,7 @@ async function moderateContent(prompt, imageUrls, options = {}) {
   const categoryAppliedInputTypes = {};
   let flagged = false;
   let checkedInputCount = 0;
+  let checkedImageCount = 0;
 
   for (const result of results) {
     if (result.flagged) flagged = true;
@@ -214,6 +216,7 @@ async function moderateContent(prompt, imageUrls, options = {}) {
       result.categoryAppliedInputTypes
     );
     checkedInputCount += result.checkedInputCount || 0;
+    checkedImageCount += result.checkedImageCount || 0;
   }
 
   return {
@@ -222,7 +225,8 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     categories: [...categories],
     categoryScores,
     categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
-    checkedInputCount
+    checkedInputCount,
+    checkedImageCount
   };
 }
 
