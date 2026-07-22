@@ -2,48 +2,6 @@ const { createClient } = require('@supabase/supabase-js');
 const { moderateContent } = require('./openai-moderation.js');
 const { requireConfirmedAuth } = require('./confirmed-auth.js');
 
-// OpenAI omni-moderation category names that are always blocked, regardless
-// of what else is (or isn't) flagged alongside them. Kept separate from
-// "violence" so ordinary non-graphic action content (common in mainstream
-// Japanese anime: transformations, magic beams, punches/kicks, fights
-// against monsters, chases, non-graphic combat) isn't blocked purely for
-// tripping the general "violence" category.
-const SEVERE_MODERATION_CATEGORIES = new Set([
-  'sexual',
-  'sexual/minors',
-  'self-harm',
-  'self-harm/intent',
-  'self-harm/instructions',
-  'illicit',
-  'illicit/violent',
-  'hate/threatening',
-  'harassment/threatening',
-  'violence/graphic'
-]);
-
-// Decides whether a flagged moderation result should actually block
-// generation. Only called when moderation.flagged is true.
-//   - Any severe category present -> always block.
-//   - Flagged categories are exactly ["violence"] and nothing else -> allow
-//     (ordinary non-graphic action/combat content).
-//   - Anything else (empty/unknown category list, or any other category not
-//     explicitly allow-listed) -> block, fail safe.
-function classifyModerationDecision(moderation) {
-  const categories = Array.isArray(moderation?.categories) ? moderation.categories : [];
-
-  const hasSevereCategory = categories.some((category) => SEVERE_MODERATION_CATEGORIES.has(category));
-  if (hasSevereCategory) {
-    return { block: true, reason: 'severe_category' };
-  }
-
-  const onlyOrdinaryViolence = categories.length > 0 && categories.every((category) => category === 'violence');
-  if (onlyOrdinaryViolence) {
-    return { block: false, reason: 'violence_only_allowed' };
-  }
-
-  return { block: true, reason: 'other_category' };
-}
-
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
 const FAST_MODEL = 'bytedance/seedance-2.0-fast';
@@ -526,25 +484,13 @@ module.exports = async function handler(req, res) {
       });
     }
     if (moderation.flagged) {
-      const decision = classifyModerationDecision(moderation);
-      if (decision.block) {
-        console.warn(
-          '[seedance-start] moderation blocked request; decision:', decision.reason,
-          'categories:', moderation.categories || [],
-          'batchCount:', moderation.batches?.length || 0
-        );
-        return res.status(422).json({
-          ok: false,
-          error: 'content_policy_violation',
-          errorCategory: 'content_policy',
-          message: PROVIDER_ERROR_MESSAGES.content_policy
-        });
-      }
-      console.warn(
-        '[seedance-start] moderation flagged but allowed after review; decision:', decision.reason,
-        'categories:', moderation.categories || [],
-        'batchCount:', moderation.batches?.length || 0
-      );
+      console.warn('[seedance-start] moderation blocked request; categories:', moderation.categories || []);
+      return res.status(422).json({
+        ok: false,
+        error: 'content_policy_violation',
+        errorCategory: 'content_policy',
+        message: PROVIDER_ERROR_MESSAGES.content_policy
+      });
     }
 
     const creditCost = calculateCreditCost(body, mode, duration, resolution, model);

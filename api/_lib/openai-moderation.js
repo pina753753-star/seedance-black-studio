@@ -50,41 +50,7 @@ function buildInputBatches(text, urls) {
   });
 }
 
-// Merges per-input-item category_scores into one object per batch, keeping
-// the highest score seen for each category (mirrors how `categories` already
-// unions flagged categories across the items in a batch).
-function mergeCategoryScores(results) {
-  let merged = null;
-  for (const result of results) {
-    const scores = result?.category_scores;
-    if (!scores || typeof scores !== 'object') continue;
-    merged = merged || {};
-    for (const [category, score] of Object.entries(scores)) {
-      if (typeof score !== 'number') continue;
-      if (!(category in merged) || score > merged[category]) merged[category] = score;
-    }
-  }
-  return merged;
-}
-
-// Merges per-input-item category_applied_input_types into one object per
-// batch (union of input types per category).
-function mergeCategoryAppliedInputTypes(results) {
-  let merged = null;
-  for (const result of results) {
-    const applied = result?.category_applied_input_types;
-    if (!applied || typeof applied !== 'object') continue;
-    merged = merged || {};
-    for (const [category, types] of Object.entries(applied)) {
-      if (!Array.isArray(types)) continue;
-      const existing = merged[category] || [];
-      merged[category] = [...new Set([...existing, ...types])];
-    }
-  }
-  return merged;
-}
-
-async function runSingleModerationRequest(input, apiKey, timeoutMs, batchIndex) {
+async function runSingleModerationRequest(input, apiKey, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -118,40 +84,30 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs, batchIndex) 
         flagged: false,
         errorCode: 'openai_http_error',
         httpStatus: response.status,
-        errorDetail,
-        batchIndex
+        errorDetail
       };
     }
 
     if (!data || !Array.isArray(data.results) || data.results.length === 0) {
-      return { ok: false, flagged: false, errorCode: 'invalid_response', batchIndex };
+      return { ok: false, flagged: false, errorCode: 'invalid_response' };
     }
 
     const categories = new Set();
     let flagged = false;
     for (const result of data.results) {
       if (!result || typeof result.flagged !== 'boolean') {
-        return { ok: false, flagged: false, errorCode: 'invalid_response', batchIndex };
+        return { ok: false, flagged: false, errorCode: 'invalid_response' };
       }
       if (result.flagged) flagged = true;
       for (const category of flaggedCategories(result)) categories.add(category);
     }
 
-    return {
-      ok: true,
-      flagged,
-      categories: [...categories],
-      checkedInputCount: input.length,
-      categoryScores: mergeCategoryScores(data.results),
-      categoryAppliedInputTypes: mergeCategoryAppliedInputTypes(data.results),
-      batchIndex
-    };
+    return { ok: true, flagged, categories: [...categories], checkedInputCount: input.length };
   } catch (error) {
     return {
       ok: false,
       flagged: false,
-      errorCode: error?.name === 'AbortError' ? 'timeout' : 'network_error',
-      batchIndex
+      errorCode: error?.name === 'AbortError' ? 'timeout' : 'network_error'
     };
   } finally {
     clearTimeout(timeout);
@@ -168,7 +124,7 @@ async function runBatchesWithConcurrencyLimit(batches, apiKey, timeoutMs, limit)
     while (nextIndex < batches.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      results[currentIndex] = await runSingleModerationRequest(batches[currentIndex], apiKey, timeoutMs, currentIndex);
+      results[currentIndex] = await runSingleModerationRequest(batches[currentIndex], apiKey, timeoutMs);
     }
   }
 
@@ -214,11 +170,7 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     checkedInputCount += result.checkedInputCount || 0;
   }
 
-  // `batches` carries the per-request detail (categoryScores,
-  // categoryAppliedInputTypes, batchIndex) for callers that want to log or
-  // reason about individual batches. It never includes the prompt text or
-  // image URLs that were sent — only OpenAI's own category/score output.
-  return { ok: true, flagged, categories: [...categories], checkedInputCount, batches: results };
+  return { ok: true, flagged, categories: [...categories], checkedInputCount };
 }
 
 module.exports = {
