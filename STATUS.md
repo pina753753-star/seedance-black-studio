@@ -1,6 +1,19 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-07-21)
+# FlowVid Studio 完成までの全体像(最終更新: 2026-07-22)
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
+
+## 2026-07-22 追加分: 完了・本番適用済み
+
+- **サイトブランドの「FlowVid Studio」→「Pina Studio」変更完了(PR #109)**: `index.html`、`generate-prod.html`、`login.html`、`pricing.html`、`help.html`、`profile.html`、`legal.html`、`privacy.html`、`terms.html`、`content-policy.html`、`credits-info.html`等の画面表示文言、favicon、OGP設定、見出し配色をPina Studio向けに統一。先行して導入済みだったヘッダーロゴ・ブランド画像とあわせて、本番mainへのブランド変更を完了した。関連commitは`9f66a9b`。
+- **サブスクリプション解約機能の実装・本番反映(PR #109)**: `cancel-subscription.html`と`api/cancel-subscription.js`を追加し、利用者がサブスクリプション解約手続きを行える導線を実装。本番mainへ反映済み。Stripeの料金・credits計算・既存決済処理そのものは今回変更していない。
+- **ヘルプ・法務ページ6ページの配色調整**: ヘルプ、利用規約等の対象6ページで、水色リンクを白文字＋下線へ変更し、グラデーションボタンをグレー(`#3a3a3f`)＋白文字へ変更。Pina Studioの黒基調デザインへ統一した。表示上の配色変更のみで、本番mainへ反映済み。関連commitは`8f00c12`。
+- **watermark-serverのブランド表記変更**: `watermark-server/server.js`の無料プラン向けウォーターマーク文字を旧「FlowVid」から「Pina Studio」へ変更し、ヘルスチェック応答のブランド表記もPina Studioへ変更。本番mainへ反映。関連commitは`20d45fa`。
+- **「Pina Studio」の空白によるwatermark-server本番障害の修正**: fluent-ffmpegの`outputOptions()`へ配列形式でオプションを渡していたため、スペースを含む`Pina Studio`の`-vf`値が内部で分割され、無料プランの動画生成がウォーターマーク処理で失敗する障害が発生。`watermark-server/server.js`で`outputOptions()`を配列渡しから複数引数渡しへ変更し、`-vf`値を1つの引数として保持するよう修正した。`-c:a copy`、`-movflags +faststart`等の既存設定は維持。関連commitは`81162c8`。
+- **Railway反映・無料プランの本番実機確認完了**: commit`81162c8`をmainへpush後、Railwayの本番サービスでGitHub連携によるデプロイが`Deployment successful`、サービス状態が`Active`、port 8080での起動を確認。無料プランで新規動画生成テストを1回だけ実施し、生成・再生に成功。動画右下に`Pina Studio`のウォーターマークが正常表示され、旧`FlowVid`表記、文字切れ、空白での分割がないことを実機確認した。今回の緊急障害は解消済み。
+
+### 作業中・確認待ち
+
+- **独自ドメイン`pinastudio.jp`の接続**: Vercelへ`pinastudio.jp`と`www.pinastudio.jp`を追加済み。お名前.comで、ルートドメインのAレコードを`216.150.1.1`、`www`のCNAMEを`08d3d2e87c62fe01.vercel-dns-017.com`へ設定済み。現在はDNS反映待ちで、`https://pinastudio.jp`および`https://www.pinastudio.jp`の正常表示・SSL有効化はまだ完了確認していない。
 
 ## 2026-07-20〜21 追加分: 完了・本番適用済み
 
