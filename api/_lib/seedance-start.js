@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { moderateContent } = require('./openai-moderation.js');
+const { resolveModerationDecision } = require('./moderation-decision.js');
 const { requireConfirmedAuth } = require('./confirmed-auth.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
@@ -474,8 +475,13 @@ module.exports = async function handler(req, res) {
     // Authentication has already succeeded above. Fail closed before any task,
     // credit, or OpenRouter work if moderation blocks or cannot complete.
     const moderation = await moderateContent(prompt, collectModerationImageUrls(body));
-    if (!moderation.ok) {
-      console.error('[seedance-start] moderation unavailable:', moderation.errorCode, 'httpStatus:', moderation.httpStatus || null);
+    const moderationDecision = await resolveModerationDecision(prompt, moderation);
+    if (!moderationDecision.ok) {
+      console.error(
+        '[seedance-start] content safety decision unavailable:',
+        moderationDecision.reason,
+        moderationDecision.errorCode || null
+      );
       return res.status(503).json({
         ok: false,
         error: 'content_safety_check_unavailable',
@@ -483,8 +489,14 @@ module.exports = async function handler(req, res) {
         message: '現在コンテンツの安全確認を行えないため、生成を開始できません。しばらくしてからもう一度お試しください。'
       });
     }
-    if (moderation.flagged) {
-      console.warn('[seedance-start] moderation blocked request; categories:', moderation.categories || []);
+    if (!moderationDecision.allow) {
+      console.warn(
+        '[seedance-start] content safety blocked request;',
+        'categories:',
+        moderation.categories || [],
+        'reason:',
+        moderationDecision.reason
+      );
       return res.status(422).json({
         ok: false,
         error: 'content_policy_violation',
