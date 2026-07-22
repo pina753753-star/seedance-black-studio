@@ -115,6 +115,72 @@ function extractOutputText(data) {
   return '';
 }
 
+function allSafetyConditionsSatisfied(value) {
+  return value.fictional_setting === true
+    && value.adult_or_nonhuman_only === true
+    && value.real_person_target === false
+    && value.minor_harm === false
+    && value.graphic_injury === false
+    && value.lethal_or_maiming_action === false
+    && value.torture_or_execution === false
+    && value.sexual_violence === false
+    && value.weapon_instruction === false
+    && value.effects_hide_serious_harm === false
+    && value.non_graphic_action === true;
+}
+
+function detectClassificationContradictions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+
+  const contradictions = [];
+
+  // 登場対象が成人または非人間だけなのに、未成年への危害がある。
+  if (
+    value.adult_or_nonhuman_only === true
+    && value.minor_harm === true
+  ) {
+    contradictions.push('adult_only_with_minor_harm');
+  }
+
+  // 非グラフィックなアクションなのに、残虐な負傷がある。
+  if (
+    value.non_graphic_action === true
+    && value.graphic_injury === true
+  ) {
+    contradictions.push('non_graphic_with_graphic_injury');
+  }
+
+  // 非グラフィックなアクションなのに、
+  // 重大な危害をエフェクトで隠している。
+  if (
+    value.non_graphic_action === true
+    && value.effects_hide_serious_harm === true
+  ) {
+    contradictions.push('non_graphic_with_hidden_serious_harm');
+  }
+
+  const allSafe = allSafetyConditionsSatisfied(value);
+
+  // allowなのに、1項目以上が安全条件を満たしていない。
+  if (value.decision === 'allow' && !allSafe) {
+    contradictions.push('allow_with_unsafe_fields');
+  }
+
+  // 全安全条件を満たしているのにblock。
+  if (value.decision === 'block' && allSafe) {
+    contradictions.push('block_with_all_safe_fields');
+  }
+
+  // 全安全条件を満たしているのにuncertain。
+  if (value.decision === 'uncertain' && allSafe) {
+    contradictions.push('uncertain_with_all_safe_fields');
+  }
+
+  return [...new Set(contradictions)];
+}
+
 function validateClassification(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, reason: 'invalid_object' };
@@ -130,19 +196,8 @@ function validateClassification(value) {
     return { ok: false, reason: 'invalid_decision' };
   }
 
-  const safe =
-    value.decision === 'allow'
-    && value.fictional_setting === true
-    && value.adult_or_nonhuman_only === true
-    && value.real_person_target === false
-    && value.minor_harm === false
-    && value.graphic_injury === false
-    && value.lethal_or_maiming_action === false
-    && value.torture_or_execution === false
-    && value.sexual_violence === false
-    && value.weapon_instruction === false
-    && value.effects_hide_serious_harm === false
-    && value.non_graphic_action === true;
+  const safe = allSafetyConditionsSatisfied(value)
+    && value.decision === 'allow';
 
   return {
     ok: true,
@@ -152,32 +207,39 @@ function validateClassification(value) {
   };
 }
 
-function buildClassifierPrompt(prompt) {
-  return [
+function buildClassifierPrompt(prompt, contradictions = []) {
+  const lines = [
     'Classify the requested video scene for a narrow safety exception.',
     'Allow only clearly fictional anime/cartoon action involving adults or non-human characters.',
     'Weapons may appear, but only non-graphic action is allowed.',
     'Block real-person targeting, minors being harmed, sexual violence, graphic injury,',
     'killing, maiming, torture, execution, weapon-use instruction, or effects used merely',
     'to conceal an otherwise serious stabbing, shooting, dismemberment, or killing.',
-    'When context is missing or ambiguous, use decision "uncertain".',
+    'When context is missing or ambiguous, use decision "uncertain".'
+  ];
+
+  if (contradictions.length > 0) {
+    lines.push(
+      '',
+      'Your previous structured result was internally inconsistent.',
+      `Detected contradictions: ${contradictions.join(', ')}`,
+      'Re-evaluate the original request and return a logically consistent classification.',
+      'Do not relax any safety rule.',
+      'Do not assume that an ambiguous person is an adult.',
+      'If age, identity, harm, or safety context remains ambiguous, use decision "uncertain".'
+    );
+  }
+
+  lines.push(
     '',
     'User prompt:',
     String(prompt || '').trim()
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
-async function classifyFictionalAction(prompt, options = {}) {
-  const apiKey = options.apiKey || process.env.OPENAI_API_KEY || '';
-  if (!apiKey) {
-    return { ok: false, allow: false, errorCode: 'missing_api_key' };
-  }
-
-  const text = String(prompt || '').trim();
-  if (!text) {
-    return { ok: false, allow: false, errorCode: 'empty_prompt' };
-  }
-
+async function requestStructuredClassification(prompt, contradictions, options) {
   const timeoutMs = Number.isFinite(Number(options.timeoutMs))
     ? Math.max(1000, Number(options.timeoutMs))
     : DEFAULT_TIMEOUT_MS;
@@ -189,7 +251,7 @@ async function classifyFictionalAction(prompt, options = {}) {
     const response = await fetchImpl(OPENAI_RESPONSES_ENDPOINT, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${options.apiKey}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -211,7 +273,7 @@ async function classifyFictionalAction(prompt, options = {}) {
             content: [
               {
                 type: 'input_text',
-                text: buildClassifierPrompt(text)
+                text: buildClassifierPrompt(prompt, contradictions)
               }
             ]
           }
@@ -270,9 +332,8 @@ async function classifyFictionalAction(prompt, options = {}) {
 
     return {
       ok: true,
-      allow: validation.allow,
-      reason: validation.reason,
-      classification: validation.classification
+      parsed,
+      validation
     };
   } catch (error) {
     return {
@@ -285,9 +346,99 @@ async function classifyFictionalAction(prompt, options = {}) {
   }
 }
 
+async function classifyFictionalAction(prompt, options = {}) {
+  const apiKey = options.apiKey || process.env.OPENAI_API_KEY || '';
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      allow: false,
+      errorCode: 'missing_api_key'
+    };
+  }
+
+  const text = String(prompt || '').trim();
+
+  if (!text) {
+    return {
+      ok: false,
+      allow: false,
+      errorCode: 'empty_prompt'
+    };
+  }
+
+  const logger = options.logger || console;
+  let retryContradictions = [];
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const response = await requestStructuredClassification(
+      text,
+      retryContradictions,
+      {
+        ...options,
+        apiKey
+      }
+    );
+
+    if (!response.ok) {
+      return response;
+    }
+
+    const contradictions = detectClassificationContradictions(
+      response.parsed
+    );
+
+    if (contradictions.length === 0) {
+      return {
+        ok: true,
+        allow: response.validation.allow,
+        reason: response.validation.reason,
+        classification: response.validation.classification
+      };
+    }
+
+    const finalAction = attempt === 1
+      ? 'retry'
+      : 'fail_closed';
+
+    try {
+      logger.warn?.(
+        '[fictional-action-classifier] inconsistent classification',
+        {
+          contradictions,
+          attempt,
+          finalAction
+        }
+      );
+    } catch (_) {
+      // Diagnostic logging must never change the safety decision.
+    }
+
+    if (attempt === 1) {
+      retryContradictions = contradictions;
+      continue;
+    }
+
+    return {
+      ok: false,
+      allow: false,
+      errorCode: 'secondary_classifier_inconsistent',
+      contradictions
+    };
+  }
+
+  return {
+    ok: false,
+    allow: false,
+    errorCode: 'secondary_classifier_inconsistent'
+  };
+}
+
 module.exports = {
   CLASSIFICATION_SCHEMA,
+  allSafetyConditionsSatisfied,
   classifyFictionalAction,
+  detectClassificationContradictions,
   extractOutputText,
   isViolenceOnly,
   normalizeAppliedInputTypes,

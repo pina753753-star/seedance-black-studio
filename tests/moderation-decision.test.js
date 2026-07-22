@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const { resolveModerationDecision } = require('../api/_lib/moderation-decision.js');
 
-function safeAllow() {
+function safeAllow(overrides = {}) {
   return {
     fictional_setting: true,
     adult_or_nonhuman_only: true,
@@ -18,7 +18,8 @@ function safeAllow() {
     weapon_instruction: false,
     effects_hide_serious_harm: false,
     non_graphic_action: true,
-    decision: 'allow'
+    decision: 'allow',
+    ...overrides
   };
 }
 
@@ -252,4 +253,75 @@ test('二次判定で許可された場合は診断警告ログを出さない',
   assert.equal(result.status, 200);
   assert.equal(result.allow, true);
   assert.equal(logs.length, 0);
+});
+
+test('二次判定AIが2回ともハード矛盾を返す場合は503かつ専用reasonで安全側停止', async () => {
+  let callCount = 0;
+
+  const contradictory = () => safeAllow({
+    adult_or_nonhuman_only: true,
+    minor_harm: true,
+    decision: 'uncertain'
+  });
+
+  const result = await resolveModerationDecision(
+    '成人剣士同士のアニメ戦闘',
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text'] }
+    },
+    {
+      apiKey: 'test',
+      fetchImpl: async () => {
+        callCount += 1;
+        return mockResponse(200, {
+          output_text: JSON.stringify(contradictory())
+        });
+      }
+    }
+  );
+
+  assert.equal(callCount, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.allow, false);
+  assert.equal(result.status, 503);
+  assert.equal(result.reason, 'secondary_classifier_inconsistent');
+  assert.equal(result.errorCode, 'secondary_classifier_inconsistent');
+  assert.notEqual(result.status, 422);
+});
+
+test('二次判定AIが全安全条件を満たしていてもblockを返し続ける場合は誤って許可しない', async () => {
+  let callCount = 0;
+
+  const result = await resolveModerationDecision(
+    '成人剣士同士のアニメ戦闘',
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text'] }
+    },
+    {
+      apiKey: 'test',
+      fetchImpl: async () => {
+        callCount += 1;
+        return mockResponse(200, {
+          output_text: JSON.stringify(safeAllow({ decision: 'block' }))
+        });
+      }
+    }
+  );
+
+  assert.equal(callCount, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.allow, false);
+  assert.equal(result.status, 503);
+  assert.equal(result.reason, 'secondary_classifier_inconsistent');
+
+  assert.notEqual(result.allow, true);
+  assert.notEqual(result.status, 200);
+  assert.notEqual(result.reason, 'fictional_action_allowed');
+  assert.notEqual(result.reason, 'safe_fictional_non_graphic_action');
 });

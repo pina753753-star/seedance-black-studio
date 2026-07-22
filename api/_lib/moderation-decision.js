@@ -60,11 +60,16 @@ async function resolveModerationDecision(prompt, moderation, options = {}) {
   const classification = await classifyFictionalAction(prompt, options);
 
   if (!classification.ok) {
+    const inconsistent =
+      classification.errorCode === 'secondary_classifier_inconsistent';
+
     return {
       ok: false,
       allow: false,
       status: 503,
-      reason: 'secondary_classifier_unavailable',
+      reason: inconsistent
+        ? 'secondary_classifier_inconsistent'
+        : 'secondary_classifier_unavailable',
       errorCode: classification.errorCode || 'unknown'
     };
   }

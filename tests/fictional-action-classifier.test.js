@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   classifyFictionalAction,
+  detectClassificationContradictions,
   extractOutputText,
   isViolenceOnly,
   shouldRunFictionalActionClassifier,
@@ -169,22 +170,37 @@ test('モックAPIで安全な架空戦闘を許可', async () => {
 });
 
 test('モックAPIで刺傷をエフェクトで隠す内容を拒否', async () => {
+  const responses = [
+    safeAllow({
+      lethal_or_maiming_action: true,
+      effects_hide_serious_harm: true,
+      decision: 'block'
+    }),
+    safeAllow({
+      lethal_or_maiming_action: true,
+      effects_hide_serious_harm: true,
+      non_graphic_action: false,
+      decision: 'block'
+    })
+  ];
+
+  let callIndex = 0;
+
   const result = await classifyFictionalAction(
     'アニメ。剣で胸を刺す瞬間を白い閃光で隠す。',
     {
       apiKey: 'test-key',
+      logger: { warn: () => {} },
       fetchImpl: async () => mockResponse(200, {
-        output_text: JSON.stringify(safeAllow({
-          lethal_or_maiming_action: true,
-          effects_hide_serious_harm: true,
-          decision: 'block'
-        }))
+        output_text: JSON.stringify(responses[callIndex++])
       })
     }
   );
 
+  assert.equal(callIndex, 2);
   assert.equal(result.ok, true);
   assert.equal(result.allow, false);
+  assert.equal(result.reason, 'classification_blocked');
 });
 
 test('API障害は許可せずエラーにする', async () => {
@@ -211,4 +227,191 @@ test('形式不正は許可しない', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.allow, false);
   assert.equal(result.errorCode, 'invalid_classification');
+});
+
+test('矛盾ルールと非矛盾ルールを検知する', () => {
+  assert.deepEqual(
+    detectClassificationContradictions(
+      safeAllow({ minor_harm: true, decision: 'uncertain' })
+    ),
+    ['adult_only_with_minor_harm']
+  );
+
+  assert.deepEqual(
+    detectClassificationContradictions(
+      safeAllow({
+        graphic_injury: true,
+        decision: 'block'
+      })
+    ),
+    ['non_graphic_with_graphic_injury']
+  );
+
+  assert.deepEqual(
+    detectClassificationContradictions(
+      safeAllow({
+        effects_hide_serious_harm: true,
+        decision: 'block'
+      })
+    ),
+    ['non_graphic_with_hidden_serious_harm']
+  );
+
+  assert.deepEqual(
+    detectClassificationContradictions(
+      safeAllow({
+        real_person_target: true,
+        decision: 'block'
+      })
+    ),
+    []
+  );
+});
+
+test('ハード矛盾は1回だけ再判定し、整合すれば許可', async (t) => {
+  let callCount = 0;
+  const receivedPrompts = [];
+  const previousWarn = console.warn;
+  const logs = [];
+
+  const queued = [
+    safeAllow({
+      adult_or_nonhuman_only: true,
+      minor_harm: true,
+      decision: 'uncertain'
+    }),
+    safeAllow()
+  ];
+
+  t.after(() => {
+    console.warn = previousWarn;
+  });
+
+  const result = await classifyFictionalAction(
+    '成人剣士同士のアニメ戦闘',
+    {
+      apiKey: 'test-key',
+      logger: { warn: (...args) => logs.push(args) },
+      fetchImpl: async (_url, options) => {
+        callCount += 1;
+        const body = JSON.parse(options.body);
+        receivedPrompts.push(body.input[1].content[0].text);
+        return mockResponse(200, {
+          output_text: JSON.stringify(queued.shift())
+        });
+      }
+    }
+  );
+
+  assert.equal(callCount, 2);
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+
+  assert.equal(receivedPrompts[1].includes('Do not relax any safety rule.'), true);
+  assert.equal(
+    receivedPrompts[1].includes('Do not assume that an ambiguous person is an adult.'),
+    true
+  );
+  assert.equal(receivedPrompts[1].includes('adult_only_with_minor_harm'), true);
+
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][1].attempt, 1);
+  assert.equal(logs[0][1].finalAction, 'retry');
+});
+
+test('ハード矛盾は1回だけ再判定し、整合すれば通常拒否も許可しない', async () => {
+  let callCount = 0;
+
+  const queued = [
+    safeAllow({
+      adult_or_nonhuman_only: true,
+      minor_harm: true,
+      decision: 'uncertain'
+    }),
+    safeAllow({
+      adult_or_nonhuman_only: false,
+      minor_harm: false,
+      decision: 'block'
+    })
+  ];
+
+  const result = await classifyFictionalAction(
+    '成人剣士同士のアニメ戦闘',
+    {
+      apiKey: 'test-key',
+      fetchImpl: async () => {
+        callCount += 1;
+        return mockResponse(200, {
+          output_text: JSON.stringify(queued.shift())
+        });
+      }
+    }
+  );
+
+  assert.equal(callCount, 2);
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, false);
+  assert.equal(result.reason, 'classification_blocked');
+});
+
+test('2回とも矛盾すれば503相当のerrorCodeで安全側停止', async () => {
+  let callCount = 0;
+  const logs = [];
+  const prompt = '秘密のプロンプト文字列';
+
+  const contradictory = () => safeAllow({
+    adult_or_nonhuman_only: true,
+    minor_harm: true,
+    decision: 'uncertain'
+  });
+
+  const result = await classifyFictionalAction(prompt, {
+    apiKey: 'test-key',
+    logger: { warn: (...args) => logs.push(args) },
+    fetchImpl: async () => {
+      callCount += 1;
+      return mockResponse(200, {
+        output_text: JSON.stringify(contradictory())
+      });
+    }
+  });
+
+  assert.equal(callCount, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.allow, false);
+  assert.equal(result.errorCode, 'secondary_classifier_inconsistent');
+
+  assert.equal(logs.length, 2);
+  assert.equal(logs[0][1].attempt, 1);
+  assert.equal(logs[0][1].finalAction, 'retry');
+  assert.equal(logs[1][1].attempt, 2);
+  assert.equal(logs[1][1].finalAction, 'fail_closed');
+
+  const serializedLog = JSON.stringify(logs);
+  assert.equal(serializedLog.includes(prompt), false);
+  assert.equal(serializedLog.includes('test-key'), false);
+  assert.equal(serializedLog.includes('https://'), false);
+  assert.equal(serializedLog.includes('image_url'), false);
+});
+
+test('架空設定と実在人物の組み合わせは矛盾扱いせず通常拒否', async () => {
+  let callCount = 0;
+
+  const result = await classifyFictionalAction('架空世界に実在人物が登場', {
+    apiKey: 'test-key',
+    fetchImpl: async () => {
+      callCount += 1;
+      return mockResponse(200, {
+        output_text: JSON.stringify(safeAllow({
+          real_person_target: true,
+          decision: 'block'
+        }))
+      });
+    }
+  });
+
+  assert.equal(callCount, 1);
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, false);
+  assert.equal(result.reason, 'classification_blocked');
 });
