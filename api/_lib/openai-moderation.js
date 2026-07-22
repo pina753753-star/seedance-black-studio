@@ -3,10 +3,6 @@
 const OPENAI_MODERATION_ENDPOINT = 'https://api.openai.com/v1/moderations';
 const OPENAI_MODERATION_MODEL = 'omni-moderation-latest';
 const DEFAULT_TIMEOUT_MS = 10000;
-// OpenAI's moderation endpoint accepts at most 1 image per request, so
-// multi-image input is split into one request per image. This caps how many
-// of those requests run at once, to reduce burst concurrency and lower the
-// risk of rate-limit errors.
 const MAX_CONCURRENT_MODERATION_REQUESTS = 3;
 
 function normalizeImageUrls(imageUrls) {
@@ -23,6 +19,35 @@ function flaggedCategories(result) {
     .map(([category]) => category);
 }
 
+function mergeMaxScores(target, source) {
+  if (!source || typeof source !== 'object') return;
+  for (const [category, rawScore] of Object.entries(source)) {
+    const score = Number(rawScore);
+    if (!Number.isFinite(score)) continue;
+    target[category] = Math.max(Number(target[category] || 0), score);
+  }
+}
+
+function mergeAppliedInputTypes(target, source) {
+  if (!source || typeof source !== 'object') return;
+  for (const [category, rawTypes] of Object.entries(source)) {
+    const types = Array.isArray(rawTypes) ? rawTypes : [];
+    if (!target[category]) target[category] = new Set();
+    for (const type of types) {
+      const normalized = String(type || '').trim();
+      if (normalized) target[category].add(normalized);
+    }
+  }
+}
+
+function serializeAppliedInputTypes(value) {
+  const result = {};
+  for (const [category, types] of Object.entries(value || {})) {
+    result[category] = [...types];
+  }
+  return result;
+}
+
 function safeErrorDetail(response, data) {
   const error = data?.error && typeof data.error === 'object' ? data.error : {};
   return {
@@ -34,10 +59,6 @@ function safeErrorDetail(response, data) {
   };
 }
 
-// Splits text + image URLs into per-request input batches: OpenAI's
-// moderation endpoint rejects more than 1 image per call, so each image gets
-// its own request. The prompt text (if any) rides along with the first batch
-// (or its own batch, if there are no images) so it's still checked exactly once.
 function buildInputBatches(text, urls) {
   if (urls.length === 0) {
     return text ? [[{ type: 'text', text }]] : [];
@@ -93,16 +114,28 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs) {
     }
 
     const categories = new Set();
+    const categoryScores = {};
+    const categoryAppliedInputTypes = {};
     let flagged = false;
+
     for (const result of data.results) {
       if (!result || typeof result.flagged !== 'boolean') {
         return { ok: false, flagged: false, errorCode: 'invalid_response' };
       }
       if (result.flagged) flagged = true;
       for (const category of flaggedCategories(result)) categories.add(category);
+      mergeMaxScores(categoryScores, result.category_scores);
+      mergeAppliedInputTypes(categoryAppliedInputTypes, result.category_applied_input_types);
     }
 
-    return { ok: true, flagged, categories: [...categories], checkedInputCount: input.length };
+    return {
+      ok: true,
+      flagged,
+      categories: [...categories],
+      categoryScores,
+      categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
+      checkedInputCount: input.length
+    };
   } catch (error) {
     return {
       ok: false,
@@ -114,8 +147,6 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs) {
   }
 }
 
-// Runs the given batches with bounded concurrency, so a 9-image request
-// doesn't fire 9 simultaneous OpenAI requests and risk hitting rate limits.
 async function runBatchesWithConcurrencyLimit(batches, apiKey, timeoutMs, limit) {
   const results = new Array(batches.length);
   let nextIndex = 0;
@@ -124,7 +155,11 @@ async function runBatchesWithConcurrencyLimit(batches, apiKey, timeoutMs, limit)
     while (nextIndex < batches.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      results[currentIndex] = await runSingleModerationRequest(batches[currentIndex], apiKey, timeoutMs);
+      results[currentIndex] = await runSingleModerationRequest(
+        batches[currentIndex],
+        apiKey,
+        timeoutMs
+      );
     }
   }
 
@@ -154,23 +189,41 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     ? Math.max(1, Math.floor(Number(options.maxConcurrentRequests)))
     : MAX_CONCURRENT_MODERATION_REQUESTS;
 
-  const results = await runBatchesWithConcurrencyLimit(batches, apiKey, timeoutMs, concurrency);
+  const results = await runBatchesWithConcurrencyLimit(
+    batches,
+    apiKey,
+    timeoutMs,
+    concurrency
+  );
 
   const failed = results.find((result) => !result.ok);
-  if (failed) {
-    return failed;
-  }
+  if (failed) return failed;
 
   const categories = new Set();
+  const categoryScores = {};
+  const categoryAppliedInputTypes = {};
   let flagged = false;
   let checkedInputCount = 0;
+
   for (const result of results) {
     if (result.flagged) flagged = true;
     for (const category of result.categories || []) categories.add(category);
+    mergeMaxScores(categoryScores, result.categoryScores);
+    mergeAppliedInputTypes(
+      categoryAppliedInputTypes,
+      result.categoryAppliedInputTypes
+    );
     checkedInputCount += result.checkedInputCount || 0;
   }
 
-  return { ok: true, flagged, categories: [...categories], checkedInputCount };
+  return {
+    ok: true,
+    flagged,
+    categories: [...categories],
+    categoryScores,
+    categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
+    checkedInputCount
+  };
 }
 
 module.exports = {
