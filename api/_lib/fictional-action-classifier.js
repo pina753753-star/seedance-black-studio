@@ -211,11 +211,22 @@ function buildClassifierPrompt(prompt, contradictions = []) {
   const lines = [
     'Classify the requested video scene for a narrow safety exception.',
     'Allow only clearly fictional anime/cartoon action involving adults or non-human characters.',
+    '',
+    'Age and non-human classification rules:',
+    '- Prioritize minor protection for both human and non-human characters.',
+    '- Treat a character as a minor when the prompt clearly identifies them as a baby, infant, toddler, child, minor, or underage person, gives an age below adulthood, or gives a grade or school-age status that clearly establishes minor status.',
+    '- Explicit child roles or clearly stated child status override a non-human label. A god, spirit, fairy, robot, or other non-human character explicitly described as a child or minor is not covered by the adult-or-non-human exception.',
+    '- Do not infer that a character is a minor solely from stylized anime features such as short stature, chibi proportions, a small body, a youthful-looking face, large eyes, or a generally cute or youthful design.',
+    '- When the prompt explicitly identifies a character as non-human, such as a god, spirit, fairy, robot, demon, or other fictional non-human being, adult_or_nonhuman_only may be true even if the visual design appears youthful, provided there is no explicit minor or child status.',
+    '- A non-human label never relaxes rules for sexual content, sexual violence, child exploitation, or clearly established minor characters.',
+    '- If the prompt contains conflicting age information, or there is a concrete reason to believe a character is a minor, use adult_or_nonhuman_only false and decision "uncertain" or "block" as appropriate.',
+    '',
     'Weapons may appear, but only non-graphic action is allowed.',
+    'The mere presence or use of a sword, staff, bow, or fictional weapon in an action scene is not weapon-use instruction.',
     'Block real-person targeting, minors being harmed, sexual violence, graphic injury,',
-    'killing, maiming, torture, execution, weapon-use instruction, or effects used merely',
+    'killing, maiming, torture, execution, practical weapon-use instruction, or effects used merely',
     'to conceal an otherwise serious stabbing, shooting, dismemberment, or killing.',
-    'When context is missing or ambiguous, use decision "uncertain".'
+    'When context is missing or genuinely ambiguous, use decision "uncertain".'
   ];
 
   if (contradictions.length > 0) {
@@ -225,8 +236,9 @@ function buildClassifierPrompt(prompt, contradictions = []) {
       `Detected contradictions: ${contradictions.join(', ')}`,
       'Re-evaluate the original request and return a logically consistent classification.',
       'Do not relax any safety rule.',
-      'Do not assume that an ambiguous person is an adult.',
-      'If age, identity, harm, or safety context remains ambiguous, use decision "uncertain".'
+      'Do not assume that an ambiguous human person is an adult.',
+      'Apply the age and non-human classification rules above exactly.',
+      'If age, identity, harm, or safety context remains genuinely ambiguous, use decision "uncertain".'
     );
   }
 

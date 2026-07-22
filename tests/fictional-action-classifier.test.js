@@ -40,6 +40,28 @@ function mockResponse(status, body) {
   };
 }
 
+async function captureClassifierPrompt(userPrompt) {
+  let sentPrompt = '';
+
+  const result = await classifyFictionalAction(
+    userPrompt,
+    {
+      apiKey: 'test-key',
+      fetchImpl: async (_url, options) => {
+        const body = JSON.parse(options.body);
+        sentPrompt = body.input[1].content[0].text;
+
+        return mockResponse(200, {
+          output_text: JSON.stringify(safeAllow())
+        });
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  return sentPrompt;
+}
+
 test('violenceだけの場合のみ対象になる', () => {
   assert.equal(isViolenceOnly(['violence']), true);
   assert.equal(isViolenceOnly(['violence', 'violence/graphic']), false);
@@ -309,10 +331,16 @@ test('ハード矛盾は1回だけ再判定し、整合すれば許可', async (
 
   assert.equal(receivedPrompts[1].includes('Do not relax any safety rule.'), true);
   assert.equal(
-    receivedPrompts[1].includes('Do not assume that an ambiguous person is an adult.'),
+    receivedPrompts[1].includes('Do not assume that an ambiguous human person is an adult.'),
     true
   );
   assert.equal(receivedPrompts[1].includes('adult_only_with_minor_harm'), true);
+  assert.equal(
+    receivedPrompts[1].includes(
+      'Apply the age and non-human classification rules above exactly.'
+    ),
+    true
+  );
 
   assert.equal(logs.length, 1);
   assert.equal(logs[0][1].attempt, 1);
@@ -414,4 +442,126 @@ test('架空設定と実在人物の組み合わせは矛盾扱いせず通常�
   assert.equal(result.ok, true);
   assert.equal(result.allow, false);
   assert.equal(result.reason, 'classification_blocked');
+});
+
+test('二次判定指示文は人間・非人間を問わず明確な未成年設定を優先する', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '架空の精霊キャラクターが杖で戦う'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Prioritize minor protection for both human and non-human characters.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'A god, spirit, fairy, robot, or other non-human character explicitly described as a child or minor is not covered by the adult-or-non-human exception.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'gives an age below adulthood'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'grade or school-age status that clearly establishes minor status'
+    ),
+    true
+  );
+});
+
+test('二次判定指示文はアニメ的な外見だけで未成年と断定しない', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '小柄で大きな瞳の精霊が魔法の杖を構える'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Do not infer that a character is a minor solely from stylized anime features'
+    ),
+    true
+  );
+
+  for (const phrase of [
+    'short stature',
+    'chibi proportions',
+    'a small body',
+    'a youthful-looking face',
+    'large eyes',
+    'a generally cute or youthful design'
+  ]) {
+    assert.equal(sentPrompt.includes(phrase), true);
+  }
+});
+
+test('二次判定指示文は明示された非人間を外見だけで未成年扱いしない', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '幼く見えるが人間ではない古代の精霊が剣で戦う'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'adult_or_nonhuman_only may be true even if the visual design appears youthful'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'provided there is no explicit minor or child status'
+    ),
+    true
+  );
+
+  for (const nonHumanType of [
+    'god',
+    'spirit',
+    'fairy',
+    'robot',
+    'demon'
+  ]) {
+    assert.equal(sentPrompt.includes(nonHumanType), true);
+  }
+});
+
+test('二次判定指示文は非人間設定でも性的内容と児童保護を緩めない', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '架空の非人間キャラクターの場面'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'A non-human label never relaxes rules for sexual content, sexual violence, child exploitation, or clearly established minor characters.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Explicit child roles or clearly stated child status override a non-human label.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'If the prompt contains conflicting age information'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'use adult_or_nonhuman_only false and decision "uncertain" or "block" as appropriate.'
+    ),
+    true
+  );
 });
