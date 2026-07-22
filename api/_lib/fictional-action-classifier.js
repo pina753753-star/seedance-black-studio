@@ -21,7 +21,7 @@ const REQUIRED_BOOLEAN_FIELDS = [
 const CLASSIFICATION_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: [...REQUIRED_BOOLEAN_FIELDS, 'decision'],
+  required: [...REQUIRED_BOOLEAN_FIELDS],
   properties: {
     fictional_setting: { type: 'boolean' },
     adult_or_nonhuman_only: { type: 'boolean' },
@@ -33,8 +33,7 @@ const CLASSIFICATION_SCHEMA = {
     sexual_violence: { type: 'boolean' },
     weapon_instruction: { type: 'boolean' },
     effects_hide_serious_harm: { type: 'boolean' },
-    non_graphic_action: { type: 'boolean' },
-    decision: { type: 'string', enum: ['allow', 'block', 'uncertain'] }
+    non_graphic_action: { type: 'boolean' }
   }
 };
 
@@ -161,23 +160,6 @@ function detectClassificationContradictions(value) {
     contradictions.push('non_graphic_with_hidden_serious_harm');
   }
 
-  const allSafe = allSafetyConditionsSatisfied(value);
-
-  // allowなのに、1項目以上が安全条件を満たしていない。
-  if (value.decision === 'allow' && !allSafe) {
-    contradictions.push('allow_with_unsafe_fields');
-  }
-
-  // 全安全条件を満たしているのにblock。
-  if (value.decision === 'block' && allSafe) {
-    contradictions.push('block_with_all_safe_fields');
-  }
-
-  // 全安全条件を満たしているのにuncertain。
-  if (value.decision === 'uncertain' && allSafe) {
-    contradictions.push('uncertain_with_all_safe_fields');
-  }
-
   return [...new Set(contradictions)];
 }
 
@@ -192,17 +174,23 @@ function validateClassification(value) {
     }
   }
 
-  if (!['allow', 'block', 'uncertain'].includes(value.decision)) {
-    return { ok: false, reason: 'invalid_decision' };
+  const keys = Object.keys(value);
+
+  if (
+    keys.length !== REQUIRED_BOOLEAN_FIELDS.length
+    || keys.some((key) => !REQUIRED_BOOLEAN_FIELDS.includes(key))
+  ) {
+    return { ok: false, reason: 'unexpected_classification_field' };
   }
 
-  const safe = allSafetyConditionsSatisfied(value)
-    && value.decision === 'allow';
+  const allow = allSafetyConditionsSatisfied(value);
 
   return {
     ok: true,
-    allow: safe,
-    reason: safe ? 'safe_fictional_non_graphic_action' : 'classification_blocked',
+    allow,
+    reason: allow
+      ? 'safe_fictional_non_graphic_action'
+      : 'classification_blocked',
     classification: value
   };
 }
@@ -212,6 +200,10 @@ function buildClassifierPrompt(prompt, contradictions = []) {
     'Classify the requested video scene for a narrow safety exception.',
     'Allow only clearly fictional anime/cartoon action involving adults or non-human characters.',
     '',
+    'Return only the eleven boolean fields defined by the schema.',
+    'Do not return an overall decision, allow, block, or uncertain field.',
+    'The application computes the final result from the individual boolean fields.',
+    '',
     'Age and non-human classification rules:',
     '- Prioritize minor protection for both human and non-human characters.',
     '- Treat a character as a minor when the prompt clearly identifies them as a baby, infant, toddler, child, minor, or underage person, gives an age below adulthood, or gives a grade or school-age status that clearly establishes minor status.',
@@ -219,14 +211,27 @@ function buildClassifierPrompt(prompt, contradictions = []) {
     '- Do not infer that a character is a minor solely from stylized anime features such as short stature, chibi proportions, a small body, a youthful-looking face, large eyes, or a generally cute or youthful design.',
     '- When the prompt explicitly identifies a character as non-human, such as a god, spirit, fairy, robot, demon, or other fictional non-human being, adult_or_nonhuman_only may be true even if the visual design appears youthful, provided there is no explicit minor or child status.',
     '- A non-human label never relaxes rules for sexual content, sexual violence, child exploitation, or clearly established minor characters.',
-    '- If the prompt contains conflicting age information, or there is a concrete reason to believe a character is a minor, use adult_or_nonhuman_only false and decision "uncertain" or "block" as appropriate.',
+    '- If age information conflicts, or there is a concrete reason to believe a relevant character may be a minor, use adult_or_nonhuman_only false.',
     '',
     'Weapons may appear, but only non-graphic action is allowed.',
     'The mere presence or use of a sword, staff, bow, or fictional weapon in an action scene is not weapon-use instruction.',
     'Block real-person targeting, minors being harmed, sexual violence, graphic injury,',
     'killing, maiming, torture, execution, practical weapon-use instruction, or effects used merely',
     'to conceal an otherwise serious stabbing, shooting, dismemberment, or killing.',
-    'When context is missing or genuinely ambiguous, use decision "uncertain".'
+    '',
+    'Classification example:',
+    'A clearly adult human or an explicitly non-human fictional character comically swats at, chases, or battles a mosquito or ordinary pest with exaggerated anime effects, without graphic injury, torture, realistic suffering, sexual content, harm to a minor, harm to a real person, or practical weapon instruction, is ordinarily non-graphic action.',
+    'The mere attempt to repel or defeat an insect does not by itself constitute lethal_or_maiming_action, torture_or_execution, or weapon_instruction.',
+    'This example does not apply when the prompt depicts graphic crushing, dismemberment, prolonged suffering, torture, sexual content, harm to a minor, harm to a real person, or practical instructions for injuring living beings.',
+    '',
+    'For each field, classify only facts that are clearly stated or necessarily implied by the prompt.',
+    'When a fact required for the safety exception is genuinely unclear, use the safer value for the required safety field:',
+    '- use fictional_setting false unless the setting is clearly fictional;',
+    '- use adult_or_nonhuman_only false unless every relevant character is clearly adult or explicitly non-human;',
+    '- use non_graphic_action false unless the action is clearly non-graphic.',
+    'Set a hazard field to true when that hazard is clearly present or necessarily implied.',
+    'Do not mark every hazard field true merely because some unrelated detail is ambiguous.',
+    'Do not relax any safety rule.'
   ];
 
   if (contradictions.length > 0) {
@@ -237,8 +242,7 @@ function buildClassifierPrompt(prompt, contradictions = []) {
       'Re-evaluate the original request and return a logically consistent classification.',
       'Do not relax any safety rule.',
       'Do not assume that an ambiguous human person is an adult.',
-      'Apply the age and non-human classification rules above exactly.',
-      'If age, identity, harm, or safety context remains genuinely ambiguous, use decision "uncertain".'
+      'Apply the age and non-human classification rules above exactly.'
     );
   }
 

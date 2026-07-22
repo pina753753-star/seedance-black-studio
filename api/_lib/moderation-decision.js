@@ -21,10 +21,7 @@ function buildSecondaryClassifierDiagnostic(classification) {
     sexual_violence: value.sexual_violence === true,
     weapon_instruction: value.weapon_instruction === true,
     effects_hide_serious_harm: value.effects_hide_serious_harm === true,
-    non_graphic_action: value.non_graphic_action === true,
-    decision: ['allow', 'block', 'uncertain'].includes(value.decision)
-      ? value.decision
-      : 'unknown'
+    non_graphic_action: value.non_graphic_action === true
   };
 }
 
