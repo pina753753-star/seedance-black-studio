@@ -93,26 +93,33 @@ test('画像由来のviolenceは二次APIなしで拒否', async () => {
 });
 
 
-test('画像入力ありなら文章由来violenceでも二次APIなしで拒否', async () => {
+test('安全な参照画像がありviolenceが文章由来だけなら二次判定し許可', async () => {
   let called = false;
-  const result = await resolveModerationDecision('成人剣士のアニメ戦闘', {
-    ok: true,
-    flagged: true,
-    categories: ['violence'],
-    categoryAppliedInputTypes: { violence: ['text'] },
-    checkedImageCount: 1
-  }, {
-    apiKey: 'test',
-    fetchImpl: async () => {
-      called = true;
-      throw new Error('should not run');
-    }
-  });
 
-  assert.equal(result.status, 422);
-  assert.equal(result.allow, false);
-  assert.equal(result.reason, 'secondary_classifier_disabled_for_image_input');
-  assert.equal(called, false);
+  const result = await resolveModerationDecision(
+    '劇場版アニメ。成人キャラクターが蚊を電撃ハエ叩きで追う。流血、負傷、殺害なし。',
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text'] },
+      checkedImageCount: 9
+    },
+    {
+      apiKey: 'test',
+      fetchImpl: async () => {
+        called = true;
+        return mockResponse(200, {
+          output_text: JSON.stringify(safeAllow())
+        });
+      }
+    }
+  );
+
+  assert.equal(called, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.allow, true);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
 });
 
 test('文章由来のviolenceだけなら二次判定し、安全なら許可', async () => {

@@ -77,10 +77,6 @@ function shouldRunFictionalActionClassifier(moderation) {
     return { run: false, reason: 'not_violence_only' };
   }
 
-  if (Number(moderation.checkedImageCount || 0) > 0) {
-    return { run: false, reason: 'secondary_classifier_disabled_for_image_input' };
-  }
-
   if (!violenceComesFromTextOnly(moderation.categoryAppliedInputTypes)) {
     return { run: false, reason: 'violence_not_confirmed_text_only' };
   }
