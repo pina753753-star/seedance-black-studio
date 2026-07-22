@@ -60,15 +60,22 @@ function safeErrorDetail(response, data) {
 }
 
 function buildInputBatches(text, urls) {
-  if (urls.length === 0) {
-    return text ? [[{ type: 'text', text }]] : [];
+  const batches = [];
+
+  if (text) {
+    batches.push([{ type: 'text', text }]);
   }
-  return urls.map((url, index) => {
-    const items = [];
-    if (index === 0 && text) items.push({ type: 'text', text });
-    items.push({ type: 'image_url', image_url: { url } });
-    return items;
-  });
+
+  for (const url of urls) {
+    batches.push([
+      {
+        type: 'image_url',
+        image_url: { url }
+      }
+    ]);
+  }
+
+  return batches;
 }
 
 async function runSingleModerationRequest(input, apiKey, timeoutMs) {
