@@ -11,6 +11,8 @@
 - **一般的なオリジナルアニメキャラクターの年齢誤判定を改善**: `api/_lib/fictional-action-classifier.js`の判定基準を明確化し、明示的な成人・非人間キャラクターを正しく評価するとともに、一般的なオリジナルのアニメ・漫画・ゲーム風キャラクターを、具体的な未成年の根拠なしに未成年扱いしないよう調整した。「女の子」「男の子」「かわいい」「小柄」「若く見える」「chibi」「大きな目」等の曖昧な表現だけでは未成年と断定しない。一方、具体的な年齢、児童・未成年の明記、学校区分等の明確な情報がある場合は従来どおり慎重に扱う。児童の性的描写、児童搾取、実在人物へのなりすまし、性的暴力、拷問、処刑、切断、重大な残虐表現等の禁止基準は緩和していない。関連commitは`3190417`。
 - **回帰テスト・本番反映完了**: 最終修正後、`tests/fictional-action-classifier.test.js`を含む全62テストが成功。commit`3190417cbd80e5b200d1dbd41ba0da7d333ee27a`を`origin/main`へ通常pushし、Vercel Production Deployment `dpl_Asqb5qqJy7YERxLgHncbKohKsSoy`が`READY`、build errorなし、本番トップページがHTTP 200であることを確認した。
 - **本番での動画生成確認完了**: 以前拒否されていたものと同系統のプロンプトをユーザー本人が本番環境で再試行し、15秒・910×512・30fpsの動画生成に成功した。内容は夏の夜の室内でアニメキャラクターが蚊とコミカルに格闘する非グラフィックな場面で、流血、残虐表現、性的表現は確認されなかった。これにより、児童搾取や悪意ある重大表現への防止基準を維持しつつ、一般的な非グラフィックのアニメーションを過剰に拒否しないことを本番環境で確認した。
+- **生成中の画面復帰時に既存タスクへ再接続する処理を本番反映**: スマートフォンの画面ロック、別アプリへの移動、ブラウザのバックグラウンド化などから生成画面へ戻った際、生成中タスクが存在する場合だけページを安全に再読み込みし、既存タスクへ再接続する`installGenerationResumeRecovery()`を`flowvid-open-inline.js`へ追加した。新規生成APIの再送、クレジットの再消費、定期ポーリングの追加は行っていない。動画編集・絵コンテ中は再読み込みしない。関連commitは`08a06d5`。Vercel Production Deployment `dpl_D6HKoqva7544JWd2e9EW7CMa2M54`が`READY`、build errorなしで本番反映済み。
+- **独自ドメイン`pinastudio.jp`の接続完了**: Vercelへ`pinastudio.jp`と`www.pinastudio.jp`を追加し、お名前.comでルートドメインのAレコードを`216.150.1.1`、`www`のCNAMEを`08d3d2e87c62fe01.vercel-dns-017.com`へ設定。ネームサーバーを`01.dnsv.jp`〜`04.dnsv.jp`へ変更後、両ドメインがVercelで`Valid Configuration`になったことを確認した。スマートフォンから`https://pinastudio.jp`へSSL警告なしでアクセスでき、トップページ、ロゴ、生成開始ボタン、サンプル動画、フッターが正常表示されることを実機確認済み。
 
 ## 2026-07-22 追加分: 完了・本番適用済み
 
@@ -20,10 +22,6 @@
 - **watermark-serverのブランド表記変更**: `watermark-server/server.js`の無料プラン向けウォーターマーク文字を旧「FlowVid」から「Pina Studio」へ変更し、ヘルスチェック応答のブランド表記もPina Studioへ変更。本番mainへ反映。関連commitは`20d45fa`。
 - **「Pina Studio」の空白によるwatermark-server本番障害の修正**: fluent-ffmpegの`outputOptions()`へ配列形式でオプションを渡していたため、スペースを含む`Pina Studio`の`-vf`値が内部で分割され、無料プランの動画生成がウォーターマーク処理で失敗する障害が発生。`watermark-server/server.js`で`outputOptions()`を配列渡しから複数引数渡しへ変更し、`-vf`値を1つの引数として保持するよう修正した。`-c:a copy`、`-movflags +faststart`等の既存設定は維持。関連commitは`81162c8`。
 - **Railway反映・無料プランの本番実機確認完了**: commit`81162c8`をmainへpush後、Railwayの本番サービスでGitHub連携によるデプロイが`Deployment successful`、サービス状態が`Active`、port 8080での起動を確認。無料プランで新規動画生成テストを1回だけ実施し、生成・再生に成功。動画右下に`Pina Studio`のウォーターマークが正常表示され、旧`FlowVid`表記、文字切れ、空白での分割がないことを実機確認した。今回の緊急障害は解消済み。
-
-### 作業中・確認待ち
-
-- **独自ドメイン`pinastudio.jp`の接続**: Vercelへ`pinastudio.jp`と`www.pinastudio.jp`を追加済み。お名前.comで、ルートドメインのAレコードを`216.150.1.1`、`www`のCNAMEを`08d3d2e87c62fe01.vercel-dns-017.com`へ設定済み。現在はDNS反映待ちで、`https://pinastudio.jp`および`https://www.pinastudio.jp`の正常表示・SSL有効化はまだ完了確認していない。
 
 ## 2026-07-20〜21 追加分: 完了・本番適用済み
 
