@@ -346,7 +346,79 @@
     document.head.appendChild(script);
   }
 
-  function boot(){applyFastModelPricing();ensureGenerateHistory();loadVlloEditor()}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
-  window.addEventListener('pageshow',()=>{applyFastModelPricing();loadVlloEditor()});
+  function installGenerationResumeRecovery(){
+    if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
+    if(window.__flowvidGenerationResumeRecoveryInstalled)return;
+    window.__flowvidGenerationResumeRecoveryInstalled=true;
+
+    const RELOAD_THROTTLE_MS=5000;
+    const HIDDEN_MIN_MS=1500;
+    let hiddenAt=document.hidden?Date.now():0;
+    let reloadScheduled=false;
+    let lastReloadAttempt=0;
+
+    function hasPendingGeneration(){
+      return Boolean(
+        document.querySelector('#pendingList [data-ptask-id]')||
+        document.getElementById('now')?.classList.contains('show')
+      );
+    }
+
+    function showReconnecting(){
+      document.querySelectorAll('#pendingList [data-pt-label]').forEach(label=>{
+        label.textContent='生成状況を再確認しています…';
+      });
+    }
+
+    function reloadForRecovery(){
+      const activeMode=document.querySelector('.tabs button.on')?.dataset?.mode||'';
+      if(activeMode==='video_edit'||activeMode==='storyboard')return;
+      if(document.hidden||reloadScheduled||!hasPendingGeneration())return;
+
+      const now=Date.now();
+      if(now-lastReloadAttempt<RELOAD_THROTTLE_MS)return;
+
+      lastReloadAttempt=now;
+      reloadScheduled=true;
+      showReconnecting();
+
+      setTimeout(()=>location.reload(),250);
+    }
+
+    document.addEventListener('visibilitychange',()=>{
+      if(document.hidden){
+        hiddenAt=Date.now();
+        return;
+      }
+
+      const hiddenMs=hiddenAt?Date.now()-hiddenAt:0;
+      hiddenAt=0;
+
+      if(hiddenMs>=HIDDEN_MIN_MS)reloadForRecovery();
+    });
+
+    window.addEventListener('pageshow',event=>{
+      if(event.persisted)reloadForRecovery();
+    });
+
+    window.addEventListener('online',reloadForRecovery);
+  }
+
+  function boot(){
+    applyFastModelPricing();
+    ensureGenerateHistory();
+    loadVlloEditor();
+    installGenerationResumeRecovery();
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',boot);
+  }else{
+    boot();
+  }
+
+  window.addEventListener('pageshow',()=>{
+    applyFastModelPricing();
+    loadVlloEditor();
+  });
 })();
