@@ -111,10 +111,12 @@
       let isSeedanceStart=false;
       let submittedMode=null;
       let submittedUrls=[];
+      let submittedThumbSrcs=[];
       try{
         const url=typeof input==='string'?input:(input&&input.url)||'';
         if(String(url).includes('/api/seedance-start')){
           isSeedanceStart=true;
+          submittedThumbSrcs=[...document.querySelectorAll('#assets .thumb img')].map(el=>el.currentSrc||el.src);
           const bodyStr=typeof init?.body==='string'?init.body:'';
           if(bodyStr){
             const body=JSON.parse(bodyStr);
@@ -146,8 +148,8 @@
         if(submittedMode!=='image_to_video'&&submittedMode!=='reference_to_video')return response;
         if(!submittedUrls.length)return response;
         setTimeout(()=>{
-          const curSrcs=[...document.querySelectorAll('#assets .thumb img')].map(el=>el.src);
-          const same=submittedUrls.length===curSrcs.length&&submittedUrls.every((u,i)=>curSrcs[i]===u);
+          const curSrcs=[...document.querySelectorAll('#assets .thumb img')].map(el=>el.currentSrc||el.src);
+          const same=submittedThumbSrcs.length===curSrcs.length&&submittedThumbSrcs.every((u,i)=>curSrcs[i]===u);
           if(same)clearUploadedImages();
         },0);
       }catch(_){}
