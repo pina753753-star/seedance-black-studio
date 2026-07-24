@@ -46,15 +46,19 @@ async function resolveModerationDecision(prompt, moderation, options = {}) {
 
   const eligibility = shouldRunFictionalActionClassifier(moderation);
   if (!eligibility.run) {
+    const unavailable = eligibility.reason === 'image_violence_missing_review_inputs';
     return {
-      ok: true,
+      ok: !unavailable,
       allow: false,
-      status: 422,
+      status: unavailable ? 503 : 422,
       reason: eligibility.reason
     };
   }
 
-  const classification = await classifyFictionalAction(prompt, options);
+  const classification = await classifyFictionalAction(prompt, {
+    ...options,
+    imageUrls: moderation.flaggedImageUrls || []
+  });
 
   if (!classification.ok) {
     const inconsistent =
@@ -74,7 +78,6 @@ async function resolveModerationDecision(prompt, moderation, options = {}) {
   if (classification.allow !== true) {
     try {
       const logger = options.logger || console;
-
       logger.warn?.(
         '[moderation-decision] secondary classifier blocked request',
         buildSecondaryClassifierDiagnostic(classification.classification)

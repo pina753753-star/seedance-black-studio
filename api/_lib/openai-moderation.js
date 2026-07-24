@@ -13,15 +13,10 @@ function normalizeImageUrls(imageUrls) {
 
 function inferAppliedInputTypesFromRequest(input) {
   const types = new Set();
-
   for (const item of Array.isArray(input) ? input : []) {
-    if (item?.type === 'text') {
-      types.add('text');
-    } else if (item?.type === 'image_url') {
-      types.add('image');
-    }
+    if (item?.type === 'text') types.add('text');
+    if (item?.type === 'image_url') types.add('image');
   }
-
   return [...types];
 }
 
@@ -45,9 +40,8 @@ function mergeMaxScores(target, source) {
 function mergeAppliedInputTypes(target, source) {
   if (!source || typeof source !== 'object') return;
   for (const [category, rawTypes] of Object.entries(source)) {
-    const types = Array.isArray(rawTypes) ? rawTypes : [];
     if (!target[category]) target[category] = new Set();
-    for (const type of types) {
+    for (const type of Array.isArray(rawTypes) ? rawTypes : []) {
       const normalized = String(type || '').trim();
       if (normalized) target[category].add(normalized);
     }
@@ -75,24 +69,25 @@ function safeErrorDetail(response, data) {
 
 function buildInputBatches(text, urls) {
   const batches = [];
-
   if (text) {
-    batches.push([{ type: 'text', text }]);
+    batches.push({
+      input: [{ type: 'text', text }],
+      imageUrl: null,
+      imageIndex: null
+    });
   }
-
-  for (const url of urls) {
-    batches.push([
-      {
-        type: 'image_url',
-        image_url: { url }
-      }
-    ]);
-  }
-
+  urls.forEach((url, imageIndex) => {
+    batches.push({
+      input: [{ type: 'image_url', image_url: { url } }],
+      imageUrl: url,
+      imageIndex
+    });
+  });
   return batches;
 }
 
-async function runSingleModerationRequest(input, apiKey, timeoutMs) {
+async function runSingleModerationRequest(batch, apiKey, timeoutMs) {
+  const input = batch.input;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -103,10 +98,7 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs) {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model: OPENAI_MODERATION_MODEL,
-        input
-      }),
+      body: JSON.stringify({ model: OPENAI_MODERATION_MODEL, input }),
       signal: controller.signal
     });
 
@@ -144,36 +136,29 @@ async function runSingleModerationRequest(input, apiKey, timeoutMs) {
       if (!result || typeof result.flagged !== 'boolean') {
         return { ok: false, flagged: false, errorCode: 'invalid_response' };
       }
-
-      if (result.flagged) {
-        flagged = true;
-      }
-
-      const resultFlaggedCategories = flaggedCategories(result);
-
-      for (const category of resultFlaggedCategories) {
+      if (result.flagged) flagged = true;
+      for (const category of flaggedCategories(result)) {
         categories.add(category);
-
         mergeAppliedInputTypes(categoryAppliedInputTypes, {
           [category]: inferredInputTypes
         });
       }
-
       mergeMaxScores(categoryScores, result.category_scores);
     }
 
+    const violenceFlagged = categories.has('violence');
     return {
       ok: true,
       flagged,
       categories: [...categories],
       categoryScores,
-      categoryAppliedInputTypes: serializeAppliedInputTypes(
-        categoryAppliedInputTypes
-      ),
+      categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
       checkedInputCount: input.length,
-      checkedImageCount: input.filter(
-        (item) => item?.type === 'image_url'
-      ).length
+      checkedImageCount: batch.imageUrl ? 1 : 0,
+      flaggedImageUrls: violenceFlagged && batch.imageUrl ? [batch.imageUrl] : [],
+      flaggedImageIndexes: violenceFlagged && Number.isInteger(batch.imageIndex)
+        ? [batch.imageIndex]
+        : []
     };
   } catch (error) {
     return {
@@ -209,14 +194,11 @@ async function runBatchesWithConcurrencyLimit(batches, apiKey, timeoutMs, limit)
 
 async function moderateContent(prompt, imageUrls, options = {}) {
   const apiKey = process.env.OPENAI_API_KEY || '';
-  if (!apiKey) {
-    return { ok: false, flagged: false, errorCode: 'missing_api_key' };
-  }
+  if (!apiKey) return { ok: false, flagged: false, errorCode: 'missing_api_key' };
 
   const text = String(prompt || '').trim();
   const urls = normalizeImageUrls(imageUrls);
   const batches = buildInputBatches(text, urls);
-
   if (batches.length === 0) {
     return { ok: false, flagged: false, errorCode: 'empty_input' };
   }
@@ -234,13 +216,14 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     timeoutMs,
     concurrency
   );
-
   const failed = results.find((result) => !result.ok);
   if (failed) return failed;
 
   const categories = new Set();
   const categoryScores = {};
   const categoryAppliedInputTypes = {};
+  const flaggedImageUrls = new Set();
+  const flaggedImageIndexes = new Set();
   let flagged = false;
   let checkedInputCount = 0;
   let checkedImageCount = 0;
@@ -249,10 +232,9 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     if (result.flagged) flagged = true;
     for (const category of result.categories || []) categories.add(category);
     mergeMaxScores(categoryScores, result.categoryScores);
-    mergeAppliedInputTypes(
-      categoryAppliedInputTypes,
-      result.categoryAppliedInputTypes
-    );
+    mergeAppliedInputTypes(categoryAppliedInputTypes, result.categoryAppliedInputTypes);
+    for (const url of result.flaggedImageUrls || []) flaggedImageUrls.add(url);
+    for (const index of result.flaggedImageIndexes || []) flaggedImageIndexes.add(index);
     checkedInputCount += result.checkedInputCount || 0;
     checkedImageCount += result.checkedImageCount || 0;
   }
@@ -264,7 +246,9 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     categoryScores,
     categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
     checkedInputCount,
-    checkedImageCount
+    checkedImageCount,
+    flaggedImageUrls: [...flaggedImageUrls],
+    flaggedImageIndexes: [...flaggedImageIndexes].sort((a, b) => a - b)
   };
 }
 

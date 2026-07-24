@@ -87,7 +87,7 @@ test('画像由来のviolenceは二次APIなしで拒否', async () => {
     }
   });
 
-  assert.equal(result.status, 422);
+  assert.equal(result.status, 503);
   assert.equal(result.allow, false);
   assert.equal(called, false);
 });
