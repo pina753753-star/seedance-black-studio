@@ -1,6 +1,11 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-07-23)
+# FlowVid Studio 完成までの全体像(最終更新: 2026-07-24)
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
+
+## 2026-07-24 追加分: 完了・本番適用済み
+
+- **動画生成入口APIの古い重複クレジット計算を削除**: `api/seedance-start-priced.js`に残っていた、リファレンス15秒・720p・通常モデルを250クレジットと誤計算する古い料金式、10クレジット単位の丸め、`client estimate mismatch: 285 server: 250`警告、`estimated_credits`を250へ上書きする処理を削除した。実際の残高確認・クレジット控除は従来から`api/_lib/seedance-start.js`が正しい式で再計算しており、画面表示・実消費とも285クレジットの正常動作は変更していない。料金計算の実行元を本体APIへ一本化し、入口APIはモデル確認、参照画像一時停止条件、認証、本体への委譲だけを担当する構造に整理した。
+- **セルフレビュー・本番反映完了**: 最初の修正後に不要な正規化関数と呼び出しが残っていることをセルフレビューで検出し、同じ`api/seedance-start-priced.js`内だけで追加整理した。関連commitは`3e3bd43`と`7d2e1f5`。変更対象は同ファイルのみで、`api/_lib/seedance-start.js`、画面側料金表示、モデレーション、クレジット控除・返金、DB、OpenRouter、Stripe、環境変数には触れていない。Vercel Production Deployment `dpl_TN1yVkbC6nTwXZPa6y9RHtZRqXGh`が`READY`で本番反映済み。実動画生成、OpenRouter実API呼び出し、クレジット消費テスト、本番DB書き込みは行っていない。
 
 ## 2026-07-23 追加分: 完了・本番適用済み
 
