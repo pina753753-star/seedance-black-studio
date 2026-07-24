@@ -3,6 +3,7 @@
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 const DEFAULT_MODEL = 'gpt-5-nano-2025-08-07';
 const DEFAULT_TIMEOUT_MS = 10000;
+const MAX_REVIEW_IMAGES = 9;
 
 const REQUIRED_BOOLEAN_FIELDS = [
   'fictional_setting',
@@ -22,19 +23,9 @@ const CLASSIFICATION_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: [...REQUIRED_BOOLEAN_FIELDS],
-  properties: {
-    fictional_setting: { type: 'boolean' },
-    adult_or_nonhuman_only: { type: 'boolean' },
-    real_person_target: { type: 'boolean' },
-    minor_harm: { type: 'boolean' },
-    graphic_injury: { type: 'boolean' },
-    lethal_or_maiming_action: { type: 'boolean' },
-    torture_or_execution: { type: 'boolean' },
-    sexual_violence: { type: 'boolean' },
-    weapon_instruction: { type: 'boolean' },
-    effects_hide_serious_harm: { type: 'boolean' },
-    non_graphic_action: { type: 'boolean' }
-  }
+  properties: Object.fromEntries(
+    REQUIRED_BOOLEAN_FIELDS.map((field) => [field, { type: 'boolean' }])
+  )
 };
 
 function normalizeCategories(categories) {
@@ -54,6 +45,12 @@ function normalizeAppliedInputTypes(value) {
   return normalized;
 }
 
+function normalizeImageUrls(imageUrls) {
+  return [...new Set((Array.isArray(imageUrls) ? imageUrls : [])
+    .map((url) => String(url || '').trim())
+    .filter((url) => /^https:\/\//i.test(url)))].slice(0, MAX_REVIEW_IMAGES);
+}
+
 function isViolenceOnly(categories) {
   const normalized = normalizeCategories(categories);
   return normalized.length === 1 && normalized[0] === 'violence';
@@ -71,13 +68,24 @@ function shouldRunFictionalActionClassifier(moderation) {
   if (!moderation || moderation.ok !== true || moderation.flagged !== true) {
     return { run: false, reason: 'not_flagged' };
   }
-
   if (!isViolenceOnly(moderation.categories)) {
     return { run: false, reason: 'not_violence_only' };
   }
 
-  if (!violenceComesFromTextOnly(moderation.categoryAppliedInputTypes)) {
-    return { run: false, reason: 'violence_not_confirmed_text_only' };
+  const normalized = normalizeAppliedInputTypes(
+    moderation.categoryAppliedInputTypes
+  );
+  const types = normalized.violence || [];
+  if (types.length === 0 || types.some((type) => !['text', 'image'].includes(type))) {
+    return { run: false, reason: 'violence_input_source_unknown' };
+  }
+
+  if (types.includes('image')) {
+    const imageUrls = normalizeImageUrls(moderation.flaggedImageUrls);
+    if (imageUrls.length === 0) {
+      return { run: false, reason: 'image_violence_missing_review_inputs' };
+    }
+    return { run: true, reason: 'image_violence_reviewable' };
   }
 
   return { run: true, reason: 'text_violence_only' };
@@ -99,9 +107,7 @@ function extractOutputText(data) {
   if (typeof data?.output_text === 'string' && data.output_text.trim()) {
     return data.output_text.trim();
   }
-
   if (!Array.isArray(data?.output)) return '';
-
   for (const item of data.output) {
     if (!Array.isArray(item?.content)) continue;
     for (const content of item.content) {
@@ -110,7 +116,6 @@ function extractOutputText(data) {
       }
     }
   }
-
   return '';
 }
 
@@ -129,37 +134,17 @@ function allSafetyConditionsSatisfied(value) {
 }
 
 function detectClassificationContradictions(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return [];
-  }
-
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   const contradictions = [];
-
-  // 登場対象が成人または非人間だけなのに、未成年への危害がある。
-  if (
-    value.adult_or_nonhuman_only === true
-    && value.minor_harm === true
-  ) {
+  if (value.adult_or_nonhuman_only === true && value.minor_harm === true) {
     contradictions.push('adult_only_with_minor_harm');
   }
-
-  // 非グラフィックなアクションなのに、残虐な負傷がある。
-  if (
-    value.non_graphic_action === true
-    && value.graphic_injury === true
-  ) {
+  if (value.non_graphic_action === true && value.graphic_injury === true) {
     contradictions.push('non_graphic_with_graphic_injury');
   }
-
-  // 非グラフィックなアクションなのに、
-  // 重大な危害をエフェクトで隠している。
-  if (
-    value.non_graphic_action === true
-    && value.effects_hide_serious_harm === true
-  ) {
+  if (value.non_graphic_action === true && value.effects_hide_serious_harm === true) {
     contradictions.push('non_graphic_with_hidden_serious_harm');
   }
-
   return [...new Set(contradictions)];
 }
 
@@ -167,15 +152,12 @@ function validateClassification(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, reason: 'invalid_object' };
   }
-
   for (const field of REQUIRED_BOOLEAN_FIELDS) {
     if (typeof value[field] !== 'boolean') {
       return { ok: false, reason: `invalid_${field}` };
     }
   }
-
   const keys = Object.keys(value);
-
   if (
     keys.length !== REQUIRED_BOOLEAN_FIELDS.length
     || keys.some((key) => !REQUIRED_BOOLEAN_FIELDS.includes(key))
@@ -184,7 +166,6 @@ function validateClassification(value) {
   }
 
   const allow = allSafetyConditionsSatisfied(value);
-
   return {
     ok: true,
     allow,
@@ -195,57 +176,33 @@ function validateClassification(value) {
   };
 }
 
-function buildClassifierPrompt(prompt, contradictions = []) {
+function buildClassifierPrompt(prompt, contradictions = [], hasImages = false) {
   const lines = [
     'Classify the requested video scene for a narrow safety exception.',
     'Allow only clearly fictional anime/cartoon action involving adults, non-human characters, or ordinary original fictional characters with no concrete minor indicator.',
+    hasImages
+      ? 'Inspect the user prompt and every supplied reference image together. Do not ignore visible blood, wounds, victims, real people, minors, or weapon instruction in an image.'
+      : 'Classify the user prompt only.',
     '',
     'Return only the eleven boolean fields defined by the schema.',
-    'Do not return an overall decision, allow, block, or uncertain field.',
     'The application computes the final result from the individual boolean fields.',
     '',
-    'Age and non-human classification rules:',
-    '- Prioritize minor protection for both human and non-human characters.',
-    '- Treat a character as a minor when the prompt clearly identifies them as a baby, infant, toddler, child, minor, or underage person, gives an age below adulthood, or gives a grade or school-age status that clearly establishes minor status.',
-    '- Explicit child roles or clearly stated child status override an adult-sounding, fictional, or non-human label. A god, spirit, fairy, robot, demon, or other non-human character explicitly described as a child or minor is not covered by the adult-or-non-human exception.',
-    '- Trust explicit adult or non-human descriptions in the user prompt. If a relevant character is explicitly described as an adult woman, adult man, grown adult, god, spirit, fairy, robot, demon, or another fictional non-human being, adult_or_nonhuman_only should be true unless the prompt also contains a clear and conflicting minor or child status.',
-    '- A clearly fictional original anime, manga, cartoon, game, or illustrated character may satisfy adult_or_nonhuman_only when there is no explicit minor age, child role, grade, school-age status, or other concrete minor indicator.',
-    '- Do not require an exact numeric adult age for an ordinary original fictional anime character when no concrete minor indicator is present.',
-    '- Do not infer that a character is a minor solely from stylized anime features or ambiguous youthful wording such as short stature, chibi proportions, a small body, a youthful-looking face, large eyes, cute, girl, boy, 女の子, or 男の子.',
-    '- When an explicit adult description and an ambiguous youthful expression appear together, follow the explicit adult description unless there is a concrete contradictory minor indicator.',
-    '- For scenes with multiple relevant characters, adult_or_nonhuman_only may be true only when every relevant character is explicitly adult, explicitly non-human, or a clearly fictional original character with no concrete minor indicator.',
-    '- If any relevant character has a concrete minor indicator, adult_or_nonhuman_only must be false for the whole scene.',
-    '- A non-human or original-fictional label never relaxes rules for sexual content, sexual violence, child exploitation, or clearly established minor characters.',
-    '- If age information conflicts, or there is a concrete reason to believe a relevant character may be a minor, use adult_or_nonhuman_only false.',
+    'Safety rules:',
+    '- fictional_setting is true only when the scene is clearly fictional, animated, illustrated, game-like, or otherwise not a real-world depiction.',
+    '- adult_or_nonhuman_only is false if any relevant person is explicitly a child, minor, underage, school-age, or has another concrete minor indicator.',
+    '- Do not infer minor status solely from anime style, large eyes, short stature, cute appearance, girl, boy, 女の子, or 男の子.',
+    '- real_person_target is true when a real identifiable person is targeted, impersonated, attacked, or depicted without a clearly fictional-original context.',
+    '- minor_harm is true for any violence, injury, threat, or sexual content involving a minor.',
+    '- graphic_injury is true for heavy or extensive blood, open wounds, visible organs, gore, dismemberment, severed limbs, exposed bone, or emphasized corpses.',
+    '- lethal_or_maiming_action is true for killing, execution, dismemberment, amputation, deliberate crippling, or a clearly lethal shooting or stabbing.',
+    '- torture_or_execution is true for torture, execution, prolonged suffering, or sadistic harm.',
+    '- sexual_violence is true for any sexual assault, coercion, or sexualized violence.',
+    '- weapon_instruction is true for practical real-world instructions to build, modify, aim, operate, or use a weapon to injure someone. Mere fictional weapon presence or ordinary non-instructional action is not enough.',
+    '- effects_hide_serious_harm is true when flashes, smoke, silhouettes, or camera cuts merely conceal an otherwise serious stabbing, shooting, killing, or dismemberment.',
+    '- non_graphic_action is true only for general-audience action such as pursuit, evasion, vehicle action, fantasy combat, sparks, smoke, energy effects, or non-graphic impacts without serious visible injury.',
     '',
-    'Age classification examples:',
-    '- Example: "An adult woman from the reference character sheet comically battles a mosquito in a fictional anime scene." Set adult_or_nonhuman_only true because the character is explicitly described as an adult woman, provided there is no conflicting minor or child information.',
-    '- Example: "An original fictional spirit with a youthful anime design raises a magical staff." Set adult_or_nonhuman_only true because the character is explicitly non-human and no minor or child status is stated.',
-    '- Example: "An original anime character comically chases a mosquito around a fictional living room." When there is no stated minor age, child role, grade, school status, or other concrete minor indicator, adult_or_nonhuman_only may be true. Do not infer minor status from anime style alone.',
-    '- Counterexample: "A 12-year-old fairy child battles a monster." adult_or_nonhuman_only must be false because the explicit minor age and child status override the non-human label.',
-    '- Counterexample: "A middle-school student fights a mosquito with a sword." adult_or_nonhuman_only must be false because the school status clearly establishes a minor.',
-    '- Counterexample: "An adult woman and a 12-year-old fairy fight together." adult_or_nonhuman_only must be false because one relevant character has an explicit minor indicator.',
-    '',
-    'Weapons may appear, but only non-graphic action is allowed.',
-    'The mere presence or use of a sword, staff, bow, or fictional weapon in an action scene is not weapon-use instruction.',
-    'Block real-person targeting, minors being harmed, sexual violence, graphic injury,',
-    'killing, maiming, torture, execution, practical weapon-use instruction, or effects used merely',
-    'to conceal an otherwise serious stabbing, shooting, dismemberment, or killing.',
-    '',
-    'Classification example:',
-    'A clearly adult human, an explicitly non-human fictional character, or an ordinary original fictional anime character with no concrete minor indicator may comically swat at, chase, or battle a mosquito or ordinary pest with exaggerated anime effects. Without graphic injury, torture, realistic suffering, sexual content, harm to a minor, harm to a real person, or practical weapon instruction, this is ordinarily non-graphic action.',
-    'The mere attempt to repel or defeat an insect does not by itself constitute lethal_or_maiming_action, torture_or_execution, or weapon_instruction.',
-    'This example does not apply when the prompt depicts graphic crushing, dismemberment, prolonged suffering, torture, sexual content, harm to a minor, harm to a real person, or practical instructions for injuring living beings.',
-    '',
-    'For each field, classify only facts that are clearly stated or necessarily implied by the prompt.',
-    'When a fact required for the safety exception is genuinely unclear, use the safer value for the required safety field:',
-    '- use fictional_setting false unless the setting is clearly fictional;',
-    '- use adult_or_nonhuman_only false when any relevant character has a concrete minor indicator, or when the scene is not clearly fictional and adult, non-human, or ordinary original-fictional status cannot be established;',
-    '- use non_graphic_action false unless the action is clearly non-graphic.',
-    'Do not set adult_or_nonhuman_only false merely because an ordinary original fictional anime character has no exact age.',
-    'Set a hazard field to true when that hazard is clearly present or necessarily implied.',
-    'Do not mark every hazard field true merely because some unrelated detail is ambiguous.',
-    'Do not relax any safety rule.'
+    'Weapons may appear in a fictional action scene, but heavy blood, gore, open wounds, killing, maiming, torture, execution, sexual violence, harm to minors, real-person targeting, and practical weapon instruction must remain blocked.',
+    'When required safety facts are genuinely unclear, use the safer value. Do not relax any safety rule.'
   ];
 
   if (contradictions.length > 0) {
@@ -253,21 +210,11 @@ function buildClassifierPrompt(prompt, contradictions = []) {
       '',
       'Your previous structured result was internally inconsistent.',
       `Detected contradictions: ${contradictions.join(', ')}`,
-      'Re-evaluate the original request and return a logically consistent classification.',
-      'Do not relax any safety rule.',
-      'Do not assume that a human person with a concrete minor indicator is an adult.',
-      'Trust explicit adult descriptions unless there is a concrete contradictory minor indicator.',
-      'Do not classify an ordinary original fictional anime character as a minor merely because no exact age is stated.',
-      'Apply the age and non-human classification rules above exactly.'
+      'Re-evaluate the same prompt and images and return a logically consistent classification.'
     );
   }
 
-  lines.push(
-    '',
-    'User prompt:',
-    String(prompt || '').trim()
-  );
-
+  lines.push('', 'User prompt:', String(prompt || '').trim());
   return lines.join('\n');
 }
 
@@ -276,8 +223,17 @@ async function requestStructuredClassification(prompt, contradictions, options) 
     ? Math.max(1000, Number(options.timeoutMs))
     : DEFAULT_TIMEOUT_MS;
   const fetchImpl = options.fetchImpl || fetch;
+  const imageUrls = normalizeImageUrls(options.imageUrls);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const userContent = [{
+    type: 'input_text',
+    text: buildClassifierPrompt(prompt, contradictions, imageUrls.length > 0)
+  }];
+  for (const imageUrl of imageUrls) {
+    userContent.push({ type: 'input_image', image_url: imageUrl });
+  }
 
   try {
     const response = await fetchImpl(OPENAI_RESPONSES_ENDPOINT, {
@@ -293,22 +249,12 @@ async function requestStructuredClassification(prompt, contradictions, options) 
         input: [
           {
             role: 'system',
-            content: [
-              {
-                type: 'input_text',
-                text: 'Return only the requested structured classification. Be conservative.'
-              }
-            ]
+            content: [{
+              type: 'input_text',
+              text: 'Return only the requested structured classification. Be conservative.'
+            }]
           },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: buildClassifierPrompt(prompt, contradictions)
-              }
-            ]
-          }
+          { role: 'user', content: userContent }
         ],
         text: {
           format: {
@@ -329,7 +275,6 @@ async function requestStructuredClassification(prompt, contradictions, options) 
     } catch (_) {
       return { ok: false, allow: false, errorCode: 'invalid_json', httpStatus: response.status };
     }
-
     if (!response.ok) {
       return {
         ok: false,
@@ -341,9 +286,7 @@ async function requestStructuredClassification(prompt, contradictions, options) 
     }
 
     const outputText = extractOutputText(data);
-    if (!outputText) {
-      return { ok: false, allow: false, errorCode: 'missing_output_text' };
-    }
+    if (!outputText) return { ok: false, allow: false, errorCode: 'missing_output_text' };
 
     let parsed;
     try {
@@ -361,12 +304,7 @@ async function requestStructuredClassification(prompt, contradictions, options) 
         validationReason: validation.reason
       };
     }
-
-    return {
-      ok: true,
-      parsed,
-      validation
-    };
+    return { ok: true, parsed, validation };
   } catch (error) {
     return {
       ok: false,
@@ -380,24 +318,10 @@ async function requestStructuredClassification(prompt, contradictions, options) 
 
 async function classifyFictionalAction(prompt, options = {}) {
   const apiKey = options.apiKey || process.env.OPENAI_API_KEY || '';
-
-  if (!apiKey) {
-    return {
-      ok: false,
-      allow: false,
-      errorCode: 'missing_api_key'
-    };
-  }
+  if (!apiKey) return { ok: false, allow: false, errorCode: 'missing_api_key' };
 
   const text = String(prompt || '').trim();
-
-  if (!text) {
-    return {
-      ok: false,
-      allow: false,
-      errorCode: 'empty_prompt'
-    };
-  }
+  if (!text) return { ok: false, allow: false, errorCode: 'empty_prompt' };
 
   const logger = options.logger || console;
   let retryContradictions = [];
@@ -406,20 +330,11 @@ async function classifyFictionalAction(prompt, options = {}) {
     const response = await requestStructuredClassification(
       text,
       retryContradictions,
-      {
-        ...options,
-        apiKey
-      }
+      { ...options, apiKey }
     );
+    if (!response.ok) return response;
 
-    if (!response.ok) {
-      return response;
-    }
-
-    const contradictions = detectClassificationContradictions(
-      response.parsed
-    );
-
+    const contradictions = detectClassificationContradictions(response.parsed);
     if (contradictions.length === 0) {
       return {
         ok: true,
@@ -429,28 +344,18 @@ async function classifyFictionalAction(prompt, options = {}) {
       };
     }
 
-    const finalAction = attempt === 1
-      ? 'retry'
-      : 'fail_closed';
-
+    const finalAction = attempt === 1 ? 'retry' : 'fail_closed';
     try {
       logger.warn?.(
         '[fictional-action-classifier] inconsistent classification',
-        {
-          contradictions,
-          attempt,
-          finalAction
-        }
+        { contradictions, attempt, finalAction }
       );
-    } catch (_) {
-      // Diagnostic logging must never change the safety decision.
-    }
+    } catch (_) {}
 
     if (attempt === 1) {
       retryContradictions = contradictions;
       continue;
     }
-
     return {
       ok: false,
       allow: false,
