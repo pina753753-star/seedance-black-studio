@@ -158,7 +158,8 @@ for (const [name, blockedField] of [
   test(`${name}は二次判定でも422で拒否する`, async () => {
     const classification = safeClassification({
       [blockedField]: true,
-      non_graphic_action: blockedField === 'graphic_injury' ? false : true
+      non_graphic_action: blockedField === 'graphic_injury' ? false : true,
+      ...(blockedField === 'minor_harm' ? { adult_or_nonhuman_only: false } : {})
     });
 
     const result = await resolveModerationDecision(
