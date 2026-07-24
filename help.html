@@ -18,137 +18,74 @@
 <meta name="theme-color" content="#050506" />
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#050506;--line:rgba(255,255,255,.12);--muted:rgba(255,255,255,.58);--gold:#d7b86a;--cyan:#6ee7f9;--violet:#7c3aed;--pink:#f0abfc}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:'Noto Sans JP',system-ui,-apple-system,sans-serif}body{background:#000}.wrap{position:relative;max-width:980px;margin:0 auto;padding:18px 14px 46px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.brand{display:flex;gap:12px;align-items:center;color:#fff;text-decoration:none}.logo{width:44px;height:44px;border-radius:17px;background:conic-gradient(from 180deg,var(--cyan),var(--violet),var(--pink),var(--cyan));display:grid;place-items:center;font-weight:900}.brand small{display:block;color:rgba(255,255,255,.38);letter-spacing:.24em;font-size:10px}.brand b{font-size:21px}.nav{display:flex;gap:8px;align-items:center}.nav a,.menuBtn{color:#fff;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.05);border-radius:999px;padding:10px 12px;font-size:13px}.menuBtn{width:42px;height:42px;display:grid;place-items:center;padding:0;font-size:21px}.hero{margin-bottom:24px}.hero p{margin:0;color:rgba(255,255,255,.45);font-size:13px;letter-spacing:.18em}.hero h1{font-size:36px;line-height:1.1;margin:9px 0 10px;color:#ffffff;letter-spacing:-.05em}.hero .lead{color:var(--muted);line-height:1.8;max-width:780px;font-size:14px}.section{border:1px solid var(--line);border-radius:26px;background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.025));padding:22px 20px;margin-bottom:14px}.section h2{margin:0 0 12px;font-size:20px;letter-spacing:-.03em}.section h2 span{display:inline-block;margin-right:8px;color:var(--gold);font-size:15px}.section p{color:rgba(255,255,255,.66);line-height:1.8;font-size:14px;margin:0 0 10px}.section p:last-child{margin-bottom:0}.section a{color:#ffffff;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}.faq details{border-top:1px solid var(--line);padding:14px 0}.faq details:first-child{border-top:0}.faq summary{cursor:pointer;font-weight:700;color:#fff;font-size:14px;list-style:none;display:flex;justify-content:space-between;align-items:center}.faq summary::after{content:"＋";color:rgba(255,255,255,.4);font-size:18px;font-weight:400}.faq details[open] summary::after{content:"－"}.faq div{margin-top:10px;color:rgba(255,255,255,.62);line-height:1.75;font-size:14px}.doc-links{display:grid;gap:8px;margin-top:4px}.doc-link{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:16px;padding:14px 16px;color:#fff;text-decoration:none;background:rgba(255,255,255,.03);font-size:14px;transition:background .15s}.doc-link:hover{background:rgba(255,255,255,.07)}.doc-link span{color:rgba(255,255,255,.38);font-size:18px}.form-group{margin-bottom:14px}.form-group label{display:block;font-size:13px;color:rgba(255,255,255,.55);margin-bottom:6px;font-weight:600}.form-group input,.form-group select,.form-group textarea{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:14px;padding:12px 14px;color:#fff;font-size:14px;font-family:inherit;outline:none;transition:border-color .15s}.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:rgba(110,231,249,.45)}.form-group select option{background:#151821;color:#fff}.form-group textarea{resize:vertical;min-height:120px}.submit-btn{width:100%;border:1px solid rgba(255,255,255,.16);border-radius:16px;padding:14px;font-weight:850;font-size:15px;background:#3a3a3f;color:#ffffff;cursor:pointer;margin-top:4px;transition:opacity .15s}.submit-btn:hover{opacity:.88}.submit-btn:disabled{opacity:.5;cursor:not-allowed}.success-msg{display:none;border:1px solid rgba(110,231,249,.3);background:rgba(110,231,249,.08);border-radius:16px;padding:16px 18px;color:#ffffff;font-size:14px;text-align:center;margin-top:12px}.drawer{position:fixed;inset:0;z-index:20;display:none}.drawer.open{display:block}.shade{position:absolute;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(8px)}.menu{position:absolute;right:12px;top:12px;width:min(340px,calc(100vw - 24px));border:1px solid var(--line);border-radius:28px;background:#000;padding:18px;box-shadow:0 28px 110px rgba(0,0,0,.75)}.menuHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.menuHead b{font-size:18px}.close{border:0;background:rgba(255,255,255,.08);color:#fff;border-radius:50%;width:38px;height:38px;font-size:24px}.menu a{display:flex;justify-content:space-between;color:#fff;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:18px;padding:15px;margin-top:8px;font-weight:500;font-size:14px}.menu .logout{border-color:rgba(251,113,133,.28)!important;background:rgba(251,113,133,.08)!important}.note{color:rgba(255,255,255,.36);font-size:12px;line-height:1.7;text-align:center;margin-top:14px}@media(min-width:820px){.hero h1{font-size:48px}.doc-links{grid-template-columns:repeat(2,1fr)}}@media(max-width:430px){.wrap{padding:16px 12px 38px}.brand b{font-size:21px}.hero h1{font-size:32px}.nav a{display:none}}
+:root{--bg:#050506;--line:rgba(255,255,255,.12);--muted:rgba(255,255,255,.58);--gold:#d7b86a;--cyan:#6ee7f9;--pink:#f0abfc;--danger:#fb7185}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:'Noto Sans JP',system-ui,-apple-system,sans-serif}body{background:#000}.wrap{position:relative;max-width:980px;margin:0 auto;padding:18px 14px 46px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.brand{display:flex;gap:12px;align-items:center;color:#fff;text-decoration:none}.nav{display:flex;gap:8px;align-items:center}.menuBtn{color:#fff;border:1px solid var(--line);background:rgba(255,255,255,.05);border-radius:999px;width:42px;height:42px;display:grid;place-items:center;padding:0;font-size:21px}.hero{margin-bottom:24px}.hero p{margin:0;color:rgba(255,255,255,.45);font-size:13px;letter-spacing:.18em}.hero h1{font-size:36px;line-height:1.1;margin:9px 0 10px;letter-spacing:-.05em}.hero .lead{color:var(--muted);line-height:1.8;max-width:780px;font-size:14px}.section{border:1px solid var(--line);border-radius:26px;background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.025));padding:22px 20px;margin-bottom:14px}.section h2{margin:0 0 12px;font-size:20px;letter-spacing:-.03em}.section h2 span{display:inline-block;margin-right:8px;color:var(--gold);font-size:15px}.section p{color:rgba(255,255,255,.66);line-height:1.8;font-size:14px;margin:0 0 10px}.section a{color:#fff;text-decoration:underline;text-underline-offset:3px}.faq details{border-top:1px solid var(--line);padding:14px 0}.faq details:first-child{border-top:0}.faq summary{cursor:pointer;font-weight:700;font-size:14px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}.faq summary::after{content:"＋";color:rgba(255,255,255,.4);font-size:18px;font-weight:400}.faq details[open] summary::after{content:"－"}.faq div{margin-top:10px;color:rgba(255,255,255,.62);line-height:1.75;font-size:14px}.doc-links{display:grid;gap:8px;margin-top:4px}.doc-link{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:16px;padding:14px 16px;color:#fff!important;text-decoration:none!important;background:rgba(255,255,255,.03);font-size:14px}.doc-link:hover{background:rgba(255,255,255,.07)}.doc-link span{color:rgba(255,255,255,.38);font-size:18px}.issue-grid{display:grid;gap:10px;margin-top:14px}.issue-btn{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:left;border:1px solid var(--line);border-radius:16px;padding:15px 16px;background:rgba(255,255,255,.035);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}.issue-btn:hover,.issue-btn:focus-visible{background:rgba(255,255,255,.075);outline:none}.issue-btn.report{border-color:rgba(251,113,133,.34);background:rgba(251,113,133,.08)}.issue-btn span{color:rgba(255,255,255,.4);font-size:18px}.solution{display:none;margin-top:16px;border:1px solid rgba(110,231,249,.25);background:rgba(110,231,249,.06);border-radius:18px;padding:17px}.solution.show{display:block}.solution h3{font-size:16px;margin:0 0 8px}.solution-text{color:rgba(255,255,255,.72);font-size:14px;line-height:1.8}.solution-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px}.action-btn{border:1px solid var(--line);border-radius:14px;padding:12px 10px;background:rgba(255,255,255,.06);color:#fff;font:inherit;font-size:13px;font-weight:700;cursor:pointer}.action-btn.primary{background:#fff;color:#08080a}.contact-form{display:none;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}.contact-form.show{display:block}.form-group{margin-bottom:14px}.form-group label{display:block;font-size:13px;color:rgba(255,255,255,.6);margin-bottom:6px;font-weight:600}.required{color:#fda4af;margin-left:4px}.optional{color:rgba(255,255,255,.35);font-weight:400;margin-left:4px}.form-group input,.form-group select,.form-group textarea{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:14px;padding:12px 14px;color:#fff;font-size:16px;font-family:inherit;outline:none}.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:rgba(110,231,249,.5)}.form-group select option{background:#151821;color:#fff}.form-group textarea{resize:vertical;min-height:130px}.helper{margin-top:6px!important;color:rgba(255,255,255,.38)!important;font-size:12px!important;line-height:1.6!important}.submit-btn{width:100%;border:1px solid rgba(255,255,255,.16);border-radius:16px;padding:14px;font-weight:850;font-size:15px;background:#fff;color:#08080a;cursor:pointer;margin-top:4px}.submit-btn:disabled{opacity:.5;cursor:not-allowed}.status-msg{display:none;border-radius:16px;padding:15px 17px;font-size:14px;text-align:center;margin-top:12px}.status-msg.show{display:block}.status-msg.success{border:1px solid rgba(110,231,249,.3);background:rgba(110,231,249,.08)}.status-msg.error{border:1px solid rgba(251,113,133,.35);background:rgba(251,113,133,.09)}.hp-field{position:absolute!important;left:-9999px!important;width:1px!important;height:1px!important;overflow:hidden!important}.drawer{position:fixed;inset:0;z-index:20;display:none}.drawer.open{display:block}.shade{position:absolute;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(8px)}.menu{position:absolute;right:12px;top:12px;width:min(340px,calc(100vw - 24px));border:1px solid var(--line);border-radius:28px;background:#000;padding:18px;box-shadow:0 28px 110px rgba(0,0,0,.75)}.menuHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.menuHead b{font-size:18px}.close{border:0;background:rgba(255,255,255,.08);color:#fff;border-radius:50%;width:38px;height:38px;font-size:24px}.menu a{display:flex;justify-content:space-between;color:#fff;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:18px;padding:15px;margin-top:8px;font-weight:500;font-size:14px}.menu .logout{border-color:rgba(251,113,133,.28)!important;background:rgba(251,113,133,.08)!important}.note{color:rgba(255,255,255,.36);font-size:12px;line-height:1.7;text-align:center;margin-top:14px}@media(min-width:820px){.hero h1{font-size:48px}.doc-links{grid-template-columns:repeat(2,1fr)}.issue-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.wrap{padding:16px 12px 38px}.hero h1{font-size:32px}.section{padding:20px 16px;border-radius:22px}.solution-actions{grid-template-columns:1fr}.issue-btn{min-height:58px}}
 </style>
 </head>
 <body>
 <main class="wrap">
-<header class="top"><a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a><button class="menuBtn" id="menuBtn">☰</button></header>
-
-<section class="hero"><p>HELP CENTER</p><h1>ヘルプセンター</h1><div class="lead">Pina Studioのご利用に関するよくある質問や各種ドキュメント、お問い合わせフォームをまとめています。</div></section>
-
+<header class="top"><a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a><button class="menuBtn" id="menuBtn" type="button" aria-label="メニューを開く">☰</button></header>
+<section class="hero"><p>HELP CENTER</p><h1>ヘルプセンター</h1><div class="lead">よくある質問や解決方法をご案内します。解決しない場合は、そのままお問い合わせいただけます。</div></section>
 <div class="section faq">
-  <h2><span>1.</span>よくある質問</h2>
-  <details open>
-    <summary>クレジットが足りない場合はどうすればいいですか？</summary>
-    <div>マイページの「クレジット購入」から追加クレジットパックを購入できます（サブスクリプション会員限定）。Freeプランの方はまずサブスクリプションへの加入をご検討ください。料金・プランの詳細は<a href="./pricing.html">料金ページ</a>および<a href="./credits-info.html">クレジット・料金について</a>をご確認ください。</div>
-  </details>
-  <details>
-    <summary>生成に失敗した場合、クレジットは返還されますか？</summary>
-    <div>はい、APIエラー・タイムアウト等によって動画生成に失敗した場合は、消費されたクレジットを自動的に返還します。返還には最大数分かかる場合があります。残高はマイページのクレジット残高セクションでご確認ください。</div>
-  </details>
-  <details>
-    <summary>サブスクリプションの解約方法を教えてください。</summary>
-    <div>サブスクリプションは、マイページの「サブスクリプションを解約」または<a href="./cancel-subscription.html">解約手続きページ</a>からいつでも解約できます。解約手続き後も、現在の契約期間終了日までは引き続きサービスをご利用いただけます。次回以降の自動更新は行われません。支払い方法の変更や請求履歴の確認は、マイページの「支払い方法・請求履歴」から行えます。</div>
-  </details>
-  <details>
-    <summary>対応しているブラウザを教えてください。</summary>
-    <div>Google Chrome・Safari・Mozilla Firefoxの最新版を推奨しています。古いバージョンのブラウザや一部のモバイル環境では、動画生成・再生などの機能が正常に動作しない場合があります。</div>
-  </details>
-  <details>
-    <summary>生成した動画を商用利用できますか？</summary>
-    <div>生成に使用するAIモデルおよびAPIサービス（OpenRouter経由の各モデル）の利用規約に従います。商用利用の可否はご利用のモデルの規約をご確認ください。Pina Studio自体は商用利用を制限しませんが、APIサービス側の規約が優先されます。</div>
-  </details>
+<h2><span>1.</span>よくある質問</h2>
+<details open><summary>クレジットが足りない場合はどうすればいいですか？</summary><div>マイページの「クレジット購入」から追加クレジットパックを購入できます（サブスクリプション会員限定）。Freeプランの方はまずサブスクリプションへの加入をご検討ください。料金・プランの詳細は<a href="./pricing.html">料金ページ</a>および<a href="./credits-info.html">クレジット・料金について</a>をご確認ください。</div></details>
+<details><summary>生成に失敗した場合、クレジットは返還されますか？</summary><div>APIエラー・タイムアウト等によって動画生成に失敗した場合は、消費されたクレジットを自動的に返還します。返還には最大数分かかる場合があります。残高はマイページでご確認ください。</div></details>
+<details><summary>サブスクリプションの解約方法を教えてください。</summary><div>マイページの「サブスクリプションを解約」または<a href="./cancel-subscription.html">解約手続きページ</a>からお手続きできます。解約後も現在の契約期間終了日まではご利用いただけます。</div></details>
+<details><summary>対応しているブラウザを教えてください。</summary><div>Google Chrome・Safari・Mozilla Firefoxの最新版を推奨しています。古いブラウザや一部の端末では、動画生成・再生が正常に動作しない場合があります。</div></details>
+<details><summary>生成した動画を商用利用できますか？</summary><div>生成に使用するAIモデルおよびAPIサービスの利用規約に従います。Pina Studio自体は商用利用を制限しませんが、利用モデル側の規約が優先されます。</div></details>
 </div>
-
 <div class="section">
-  <h2><span>2.</span>各種ドキュメント</h2>
-  <p>サービスに関する各種規約・ポリシーは以下からご確認いただけます。</p>
-  <div class="doc-links">
-    <a class="doc-link" href="./terms.html">利用規約 <span>›</span></a>
-    <a class="doc-link" href="./privacy.html">プライバシーポリシー <span>›</span></a>
-    <a class="doc-link" href="./legal.html">特定商取引法に基づく表記 <span>›</span></a>
-    <a class="doc-link" href="./credits-info.html">クレジット・料金について <span>›</span></a>
-    <a class="doc-link" href="./content-policy.html">コンテンツポリシー <span>›</span></a>
-  </div>
+<h2><span>2.</span>各種ドキュメント</h2>
+<p>サービスに関する規約・ポリシーはこちらから確認できます。</p>
+<div class="doc-links"><a class="doc-link" href="./terms.html">利用規約 <span>›</span></a><a class="doc-link" href="./privacy.html">プライバシーポリシー <span>›</span></a><a class="doc-link" href="./legal.html">特定商取引法に基づく表記 <span>›</span></a><a class="doc-link" href="./credits-info.html">クレジット・料金について <span>›</span></a><a class="doc-link" href="./content-policy.html">コンテンツポリシー <span>›</span></a></div>
 </div>
-
-<div class="section">
-  <h2><span>3.</span>お問い合わせ</h2>
-  <p>ご不明な点やバグの報告・課金に関するご相談は、以下のフォームよりお送りください。内容を確認の上、ご登録のメールアドレスへご返信いたします。</p>
-  <div class="form-group">
-    <label for="f-name">アカウント名</label>
-    <input type="text" id="f-name" placeholder="例：flowvid_user123" />
-  </div>
-  <div class="form-group">
-    <label for="f-type">お問い合わせ種別</label>
-    <select id="f-type">
-      <option value="">選択してください</option>
-      <option value="bug">バグ報告</option>
-      <option value="content_report">コンテンツ通報(著作権侵害・不適切コンテンツ・児童安全に関する懸念)</option>
-      <option value="billing">課金・クレジット</option>
-      <option value="usage">機能の使い方</option>
-      <option value="other">その他</option>
-    </select>
-  </div>
-  <div class="form-group" id="f-target-group" style="display:none">
-    <label for="f-target">対象の動画URL・ユーザー名など、分かる範囲で構いません</label>
-    <input type="text" id="f-target" />
-  </div>
-  <div class="form-group">
-    <label for="f-body">お問い合わせ内容</label>
-    <textarea id="f-body" placeholder="お困りの内容をできるだけ詳しくご記入ください。"></textarea>
-  </div>
-  <button class="submit-btn" id="submitBtn" onclick="sendForm()">送信する</button>
-  <div class="success-msg" id="successMsg">送信が完了しました。内容を確認の上、折り返しご連絡いたします。</div>
+<div class="section" id="contact-section">
+<h2><span>3.</span>困っていることを選択</h2>
+<p>該当する項目を選ぶと、まず確認していただきたい解決方法を表示します。</p>
+<div class="issue-grid" id="issueGrid">
+<button class="issue-btn" type="button" data-issue="generation">動画が生成されない <span>›</span></button>
+<button class="issue-btn" type="button" data-issue="credits">クレジットが足りない・戻らない <span>›</span></button>
+<button class="issue-btn" type="button" data-issue="login">ログイン・登録できない <span>›</span></button>
+<button class="issue-btn" type="button" data-issue="billing">支払い・解約について <span>›</span></button>
+<button class="issue-btn" type="button" data-issue="playback">動画を保存・再生できない <span>›</span></button>
+<button class="issue-btn report" type="button" data-issue="content_report">不適切コンテンツを通報する <span>›</span></button>
+<button class="issue-btn" type="button" data-issue="other">その他 <span>›</span></button>
 </div>
-
-<p class="note">お問い合わせへの返信にはお時間をいただく場合があります。あらかじめご了承ください。</p>
+<div class="solution" id="solutionBox" aria-live="polite"><h3 id="solutionTitle"></h3><div class="solution-text" id="solutionText"></div><div class="solution-actions"><button class="action-btn primary" type="button" id="resolvedBtn">解決しました</button><button class="action-btn" type="button" id="openFormBtn">解決しなかったので問い合わせる</button></div></div>
+<div class="contact-form" id="contactForm">
+<h3 id="formTitle" style="margin:0 0 8px;font-size:17px">お問い合わせフォーム</h3>
+<p id="formLead">内容を確認のうえ、入力したメールアドレスへ返信します。</p>
+<div class="form-group"><label for="f-name">アカウント名<span class="optional">任意</span></label><input type="text" id="f-name" autocomplete="username" placeholder="例：pina_user123"></div>
+<div class="form-group"><label for="f-email">返信先メールアドレス<span class="required">必須</span></label><input type="email" id="f-email" autocomplete="email" inputmode="email" placeholder="example@email.com" required></div>
+<div class="form-group"><label for="f-type">お問い合わせ種別<span class="required">必須</span></label><select id="f-type" required><option value="">選択してください</option><option value="bug">バグ報告</option><option value="content_report">コンテンツ通報（著作権侵害・不適切コンテンツ・児童安全に関する懸念）</option><option value="billing">課金・クレジット</option><option value="usage">機能の使い方</option><option value="login">ログイン・登録</option><option value="other">その他</option></select></div>
+<div class="form-group" id="f-target-group" style="display:none"><label for="f-target">対象の動画URL・ユーザー名など<span class="optional">分かる範囲で構いません</span></label><input type="text" id="f-target" autocomplete="off"></div>
+<div class="form-group"><label for="f-body">お問い合わせ内容<span class="required">必須</span></label><textarea id="f-body" placeholder="発生したこと、表示されたメッセージ、行った操作などをご記入ください。"></textarea><p class="helper" id="bodyHelp">できるだけ詳しくご記入ください（通常のお問い合わせは10文字以上）。</p></div>
+<div class="hp-field" aria-hidden="true"><label for="f-website">Webサイト</label><input type="text" id="f-website" tabindex="-1" autocomplete="off"></div>
+<button class="submit-btn" id="submitBtn" type="button">送信する</button>
+<div class="status-msg success" id="successMsg" role="status">送信が完了しました。内容を確認のうえ、折り返しご連絡します。</div>
+<div class="status-msg error" id="errorMsg" role="alert"></div>
+</div>
+</div>
+<p class="note">お問い合わせへの返信にはお時間をいただく場合があります。緊急の危険がある場合は、地域の警察・緊急機関へ連絡してください。</p>
 </main>
-
-<div class="drawer" id="drawer"><div class="shade" id="shade"></div><div class="menu"><div class="menuHead"><b>メニュー</b><button class="close" id="close">×</button></div><a href="./index.html">ホーム <span>›</span></a><a href="./generate-prod.html">生成 <span>›</span></a><a href="./login.html">ログイン / 新規登録 <span>›</span></a><a href="./profile.html">マイページ <span>›</span></a><a href="./pricing.html">サブスクリプション <span>›</span></a><a href="./pricing.html#credit">クレジット購入 <span>›</span></a><a href="./help.html">ヘルプセンター <span>›</span></a><a class="logout" href="./logout.html">ログアウト <span>›</span></a></div></div>
-
+<div class="drawer" id="drawer"><div class="shade" id="shade"></div><div class="menu"><div class="menuHead"><b>メニュー</b><button class="close" id="close" type="button" aria-label="メニューを閉じる">×</button></div><a href="./index.html">ホーム <span>›</span></a><a href="./generate-prod.html">生成 <span>›</span></a><a href="./login.html">ログイン / 新規登録 <span>›</span></a><a href="./profile.html">マイページ <span>›</span></a><a href="./pricing.html">サブスクリプション <span>›</span></a><a href="./pricing.html#credit">クレジット購入 <span>›</span></a><a href="./help.html">ヘルプセンター <span>›</span></a><a class="logout" href="./logout.html">ログアウト <span>›</span></a></div></div>
 <script>
-const d=document.getElementById('drawer');
-document.getElementById('menuBtn').onclick=()=>d.classList.add('open');
-document.getElementById('shade').onclick=()=>d.classList.remove('open');
-document.getElementById('close').onclick=()=>d.classList.remove('open');
-
-document.getElementById('f-type').onchange=function() {
-  document.getElementById('f-target-group').style.display = this.value === 'content_report' ? 'block' : 'none';
-};
-
-async function sendForm() {
-  const name = document.getElementById('f-name').value.trim();
-  const type = document.getElementById('f-type').value;
-  const body = document.getElementById('f-body').value.trim();
-  const target = document.getElementById('f-target').value.trim();
-  if (!type) { alert('お問い合わせ種別と内容をご入力ください。'); return; }
-  if (type === 'content_report') {
-    if (!target && !body) { alert('通報内容または対象情報のいずれかを入力してください'); return; }
-  } else if (!body) {
-    alert('お問い合わせ種別と内容をご入力ください。'); return;
-  }
-  const btn = document.getElementById('submitBtn');
-  btn.disabled = true;
-  btn.textContent = '送信中...';
-  try {
-    const payload = { name, type, message: body, category: type === 'content_report' ? 'urgent_content_report' : 'normal' };
-    if (type === 'content_report') { payload.target = target; }
-    const res = await fetch('https://formspree.io/f/xnjynobp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      document.getElementById('successMsg').style.display = 'block';
-      btn.style.display = 'none';
-      document.getElementById('f-name').value = '';
-      document.getElementById('f-type').value = '';
-      document.getElementById('f-body').value = '';
-      document.getElementById('f-target').value = '';
-      document.getElementById('f-target-group').style.display = 'none';
-    } else {
-      alert('送信に失敗しました。しばらく経ってから再度お試しください。');
-      btn.disabled = false;
-      btn.textContent = '送信する';
-    }
-  } catch(e) {
-    alert('送信に失敗しました。ネットワーク接続をご確認ください。');
-    btn.disabled = false;
-    btn.textContent = '送信する';
-  }
-}
+const drawer=document.getElementById('drawer');
+document.getElementById('menuBtn').addEventListener('click',()=>drawer.classList.add('open'));
+document.getElementById('shade').addEventListener('click',()=>drawer.classList.remove('open'));
+document.getElementById('close').addEventListener('click',()=>drawer.classList.remove('open'));
+const solutions={generation:{title:'動画が生成されない場合',type:'bug',text:'生成状況を開き、処理中・失敗・完了のどれになっているか確認してください。失敗表示の場合は、数分待ってクレジット残高も確認してください。同じ操作を連続して行うと重複生成になる場合があるため、何度も生成ボタンを押さないでください。'},credits:{title:'クレジットについて',type:'billing',text:'マイページで現在の残高を確認してください。生成失敗時の返還には数分かかる場合があります。追加購入やプランについては「クレジット・料金について」もご確認ください。'},login:{title:'ログイン・登録できない場合',type:'login',text:'入力したメールアドレスに誤りがないか、確認メールが迷惑メールフォルダに入っていないか確認してください。ブラウザを閉じて再度開く、最新版のChromeまたはSafariを使う方法もお試しください。'},billing:{title:'支払い・解約について',type:'billing',text:'解約はマイページまたは解約手続きページから行えます。支払い方法や請求履歴はマイページの案内をご確認ください。二重決済など金額に関する問題は、決済日時と内容を添えてお問い合わせください。'},playback:{title:'動画を保存・再生できない場合',type:'bug',text:'通信環境を確認し、ページを再読み込みしてください。別のブラウザで開く方法もお試しください。保存できない場合は、動画を一度再生してから再度ダウンロードしてください。'},other:{title:'その他のお困りごと',type:'other',text:'よくある質問と各種ドキュメントをご確認ください。解決しない場合は、下の問い合わせフォームから状況をお知らせください。'}};
+let selectedIssue='';let shownSolution='';let isSending=false;
+const solutionBox=document.getElementById('solutionBox');const contactForm=document.getElementById('contactForm');const typeSelect=document.getElementById('f-type');
+function setType(value){typeSelect.value=value;updateTargetVisibility();}
+function updateTargetVisibility(){const report=typeSelect.value==='content_report';document.getElementById('f-target-group').style.display=report?'block':'none';document.getElementById('bodyHelp').textContent=report?'通報内容または対象情報のどちらかを入力してください。':'できるだけ詳しくご記入ください（通常のお問い合わせは10文字以上）。';}
+function openContactForm(issue){selectedIssue=issue;const report=issue==='content_report';contactForm.classList.add('show');document.getElementById('formTitle').textContent=report?'コンテンツ通報フォーム':'お問い合わせフォーム';document.getElementById('formLead').textContent=report?'対象情報と状況を、分かる範囲でお知らせください。通報だけで自動削除・自動停止は行いません。':'内容を確認のうえ、入力したメールアドレスへ返信します。';if(report){setType('content_report')}else if(solutions[issue]){setType(solutions[issue].type)}contactForm.scrollIntoView({behavior:'smooth',block:'start'});}
+document.querySelectorAll('[data-issue]').forEach(btn=>btn.addEventListener('click',()=>{const issue=btn.dataset.issue;selectedIssue=issue;document.getElementById('successMsg').classList.remove('show');document.getElementById('errorMsg').classList.remove('show');if(issue==='content_report'){solutionBox.classList.remove('show');shownSolution='';openContactForm(issue);return;}const data=solutions[issue];shownSolution=data.text;document.getElementById('solutionTitle').textContent=data.title;document.getElementById('solutionText').textContent=data.text;solutionBox.classList.add('show');contactForm.classList.remove('show');solutionBox.scrollIntoView({behavior:'smooth',block:'center'});}));
+document.getElementById('resolvedBtn').addEventListener('click',()=>{solutionBox.classList.remove('show');contactForm.classList.remove('show');document.getElementById('contact-section').scrollIntoView({behavior:'smooth',block:'start'});});
+document.getElementById('openFormBtn').addEventListener('click',()=>openContactForm(selectedIssue));
+typeSelect.addEventListener('change',updateTargetVisibility);
+function showError(message){const el=document.getElementById('errorMsg');el.textContent=message;el.classList.add('show');document.getElementById('successMsg').classList.remove('show');el.scrollIntoView({behavior:'smooth',block:'center'});}
+async function sendForm(){if(isSending)return;const name=document.getElementById('f-name').value.trim();const email=document.getElementById('f-email').value.trim();const type=typeSelect.value;const body=document.getElementById('f-body').value.trim();const target=document.getElementById('f-target').value.trim();const honeypot=document.getElementById('f-website').value.trim();const emailOk=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);document.getElementById('errorMsg').classList.remove('show');if(honeypot){document.getElementById('successMsg').classList.add('show');return;}if(!email||!emailOk){showError('返信先メールアドレスを正しく入力してください。');return;}if(!type){showError('お問い合わせ種別を選択してください。');return;}if(type==='content_report'){if(!target&&!body){showError('通報内容または対象情報のどちらかを入力してください。');return;}}else if(body.length<10){showError('お問い合わせ内容を10文字以上で入力してください。');return;}const btn=document.getElementById('submitBtn');isSending=true;btn.disabled=true;btn.textContent='送信中...';const payload={name,email,_replyto:email,type,message:body,category:type==='content_report'?'urgent_content_report':'normal',target,support_path:selectedIssue||'direct',shown_solution:shownSolution,page_url:location.href,user_agent:navigator.userAgent,submitted_at:new Date().toISOString()};try{const res=await fetch('https://formspree.io/f/xnjynobp',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});if(!res.ok)throw new Error('formspree_error');document.getElementById('successMsg').classList.add('show');document.getElementById('errorMsg').classList.remove('show');btn.style.display='none';document.querySelectorAll('#contactForm input,#contactForm select,#contactForm textarea').forEach(el=>{if(el.id!=='f-website')el.disabled=true;});}catch(error){showError('送信に失敗しました。通信環境を確認し、時間をおいてもう一度お試しください。');isSending=false;btn.disabled=false;btn.textContent='送信する';}}
+document.getElementById('submitBtn').addEventListener('click',sendForm);
 </script>
 </body>
 </html>
