@@ -13,24 +13,6 @@ function jsonBody(req) {
   return req.body || {};
 }
 
-function normalizeDuration(value) {
-  const duration = Number(value || 5);
-  if (!Number.isFinite(duration)) return 5;
-  return Math.max(1, Math.min(15, Math.round(duration)));
-}
-
-function normalizeResolution(value) {
-  const resolution = String(value || '720p').trim();
-  return ['480p', '720p', '1080p'].includes(resolution) ? resolution : '720p';
-}
-
-function normalizeMode(value) {
-  const mode = String(value || '').trim();
-  return ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'].includes(mode)
-    ? mode
-    : 'reference_to_video';
-}
-
 function normalizeModel(value) {
   const requested = String(value || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
   const migrated = requested === LEGACY_LITE_MODEL ? FAST_MODEL : requested;
@@ -67,10 +49,6 @@ module.exports = async function handler(req, res) {
       allowedModels: Array.from(ALLOWED_MODELS)
     });
   }
-
-  const mode = normalizeMode(body.mode);
-  normalizeDuration(body.duration || body.duration_seconds);
-  normalizeResolution(body.resolution);
 
   // Temporary safety stop: block any request containing reference-image input
   // before the core handler can run moderation, create a task, deduct credits,
