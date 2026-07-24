@@ -5,13 +5,6 @@ const DEFAULT_MODEL = 'bytedance/seedance-2.0';
 const FAST_MODEL = 'bytedance/seedance-2.0-fast';
 const LEGACY_LITE_MODEL = 'bytedance/seedance-2.0-lite';
 const ALLOWED_MODELS = new Set([DEFAULT_MODEL, FAST_MODEL]);
-const MIN_CREDITS = 50;
-const MAX_CREDITS = 500;
-
-const MODEL_CREDIT_MULTIPLIERS = {
-  [DEFAULT_MODEL]: 1,
-  [FAST_MODEL]: 0.8
-};
 
 function jsonBody(req) {
   if (typeof req.body === 'string') {
@@ -61,28 +54,6 @@ function hasReferenceImageInput(body) {
   ].some(hasReferenceImageValue);
 }
 
-function roundUpToTen(value) {
-  const bounded = Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, value));
-  return Math.min(MAX_CREDITS, Math.ceil(bounded / 10) * 10);
-}
-
-function calculateCreditCost({ model, mode, duration, resolution }) {
-  let credits;
-
-  if (mode === 'storyboard') {
-    credits = Math.max(MIN_CREDITS, duration * 12);
-  } else {
-    credits = 80;
-    credits += Math.max(0, duration - 5) * 15;
-    if (resolution === '1080p') credits += 100;
-    if (resolution === '480p') credits -= 20;
-    credits += 15;
-  }
-
-  const multiplier = MODEL_CREDIT_MULTIPLIERS[model] || 1;
-  return roundUpToTen(credits * multiplier);
-}
-
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return coreHandler(req, res);
 
@@ -98,8 +69,8 @@ module.exports = async function handler(req, res) {
   }
 
   const mode = normalizeMode(body.mode);
-  const duration = normalizeDuration(body.duration || body.duration_seconds);
-  const resolution = normalizeResolution(body.resolution);
+  normalizeDuration(body.duration || body.duration_seconds);
+  normalizeResolution(body.resolution);
 
   // Temporary safety stop: block any request containing reference-image input
   // before the core handler can run moderation, create a task, deduct credits,
@@ -128,29 +99,9 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  const creditCost = calculateCreditCost({
-    model,
-    mode,
-    duration,
-    resolution
-  });
-
-  const clientEstimate = Math.round(Number(body.estimated_credits) || 0);
-  if (clientEstimate && clientEstimate !== creditCost) {
-    console.warn(
-      '[seedance-start-priced] client estimate mismatch:',
-      clientEstimate,
-      'server:',
-      creditCost,
-      'model:',
-      model
-    );
-  }
-
   req.body = {
     ...body,
-    model,
-    estimated_credits: creditCost
+    model
   };
 
   return coreHandler(req, res);
