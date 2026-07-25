@@ -230,3 +230,7 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - **続きのシーンで最終フレームが厳密固定されていない問題**: 今回のセッションでは調査・確認していません。確認できません。次回、該当機能のコードを直接確認のうえ状況を追記する必要があります。
 - **`pinastudio.jp`の反映確認**: 本ファイル2026-07-23の記載では実機確認済み(SSL警告なし・トップページ正常表示)となっているが、今回のセッションでは最新の反映状況を再確認していません。
 - **作業ブランチ`codex/image-violence-secondary-review`の削除待ち**: PR #114マージ後、`git push origin --delete codex/image-violence-secondary-review`を試みたがプロキシ経由でHTTP 403エラーとなり削除できず、GitHub MCPツールにもブランチ削除専用の機能がなかったため未削除のまま。手動削除、または削除方法の確認が必要。
+
+### 参照画像モードの現状再確認(2026-07-25)
+
+2026-07-25、参照画像モードの現状を再確認した。一時停止処理(PR #85、`api/seedance-start-priced.js`)は現在も有効で、一般利用者は引き続き503でブロックされる。実在人物なりすまし対策(Amazon Rekognition等)・CSAM専用検知(PhotoDNA、Thorn Safer等)は、コード上確認した結果、依然として未実装。2026-07-23〜25に本番DBで確認された`reference_to_video`モードの完了タスクは、すべて`TEST_BYPASS_USER_ID`(PR #99)による運営者本人のテストアカウント(`hinaran53@gmail.com`、`user_id: 0e9708d6-3c74-41e0-9cc8-944a6f6c939b`)経由のものであり、一般利用者向けの再開ではない。上記2つの検知機能が実装され本番稼働するまで、この状態を維持する。
