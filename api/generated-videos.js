@@ -134,8 +134,9 @@ async function normalizeHistoryRow(row) {
 async function readGeneratedVideos(db, limit) {
   const { data, error } = await db
     .from('generated_videos')
-    .select('*')
+    .select('id, provider, model, operation_name, prompt, aspect_ratio, duration_seconds, video_uri, status, created_at, watermarked_url')
     .eq('status', 'completed')
+    .eq('is_public_sample', true)
     .not('video_uri', 'is', null)
     .order('created_at', { ascending: false })
     .limit(limit);
