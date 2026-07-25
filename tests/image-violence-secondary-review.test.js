@@ -179,3 +179,94 @@ for (const [name, blockedField] of [
     assert.equal(result.reason, 'classification_blocked');
   });
 }
+
+for (const [name, prompt] of [
+  ['成人主人公+年齢未記載の敵兵士', '成人女性の主人公と、年齢の記載がない敵兵士との架空アニメ戦闘シーン'],
+  ['成人主人公+ヘルメット姿の敵兵士', '成人女性の主人公と、ヘルメットで顔を隠した敵兵士との架空アニメ戦闘シーン'],
+  ['成人主人公+覆面の背景人物', '成人女性の主人公と、覆面をした背景の群衆との架空アニメシーン']
+]) {
+  test(`${name}は脇役の年齢未記載を理由に拒否しない`, async () => {
+    const result = await resolveModerationDecision(
+      prompt,
+      moderationResult(),
+      {
+        apiKey: 'test-key',
+        fetchImpl: async () => response({
+          output_text: JSON.stringify(safeClassification())
+        })
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.allow, true);
+    assert.equal(result.status, 200);
+  });
+}
+
+for (const [name, prompt] of [
+  ['成人主人公+「16歳の敵兵士」', '成人女性の主人公と、16歳の敵兵士との架空アニメ戦闘シーン'],
+  ['成人主人公+「少年兵」', '成人女性の主人公と、少年兵との架空アニメ戦闘シーン']
+]) {
+  test(`${name}は未成年指標により拒否する`, async () => {
+    const result = await resolveModerationDecision(
+      prompt,
+      moderationResult(),
+      {
+        apiKey: 'test-key',
+        fetchImpl: async () => response({
+          output_text: JSON.stringify(safeClassification({
+            adult_or_nonhuman_only: false
+          }))
+        })
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.allow, false);
+    assert.equal(result.status, 422);
+    assert.equal(result.reason, 'classification_blocked');
+  });
+}
+
+test('実写・実在人物らしき画像には脇役ルールを適用せず従来通り拒否する', async () => {
+  const result = await resolveModerationDecision(
+    '実在の人物らしき画像に基づく戦闘シーン',
+    moderationResult(),
+    {
+      apiKey: 'test-key',
+      fetchImpl: async () => response({
+        output_text: JSON.stringify(safeClassification({
+          fictional_setting: false,
+          real_person_target: true
+        }))
+      })
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, false);
+  assert.equal(result.status, 422);
+  assert.equal(result.reason, 'classification_blocked');
+});
+
+test('年齢不詳の兵士でも大量流血・切断を含む場合は年齢判定に関係なく拒否する', async () => {
+  const result = await resolveModerationDecision(
+    '年齢不詳の敵兵士が大量出血し四肢が切断される架空アニメ戦闘シーン',
+    moderationResult(),
+    {
+      apiKey: 'test-key',
+      fetchImpl: async () => response({
+        output_text: JSON.stringify(safeClassification({
+          graphic_injury: true,
+          lethal_or_maiming_action: true,
+          non_graphic_action: false
+        }))
+      })
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, false);
+  assert.equal(result.status, 422);
+  assert.equal(result.reason, 'classification_blocked');
+});
