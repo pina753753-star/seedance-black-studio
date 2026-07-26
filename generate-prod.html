@@ -159,6 +159,13 @@ const DRAFT_KEY='flowvidGenerateDraft';
 function readDraft(){try{return JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')}catch(_){return {}}}
 function writeDraft(patch){const d={...readDraft(),...patch,updatedAt:new Date().toISOString()};localStorage.setItem(DRAFT_KEY,JSON.stringify(d));return d}
 
+// 絵コンテ確定内容(prompt/imageUrl/model/aspect/duration/resolution/prepared)専用の下書き。
+// 通常タブが使うDRAFT_KEY(referenceUrls/prompt_<mode>)とは完全に分離し、絵コンテ内容が
+// 通常のリファレンスタブ下書きへ混入しないようにする。
+const SB_DRAFT_KEY='flowvidStoryboardDraft';
+function sbReadDraft(){try{return JSON.parse(localStorage.getItem(SB_DRAFT_KEY)||'{}')}catch(_){return {}}}
+function sbWriteDraft(patch){const d={...sbReadDraft(),...patch,updatedAt:new Date().toISOString()};localStorage.setItem(SB_DRAFT_KEY,JSON.stringify(d));return d}
+
 let draft=readDraft();
 let mode=draft.mode||'reference_to_video',urls=Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):[],files=[],_activePtId='';
 let uploadInProgress=false,uploadCompleted=0,uploadTotal=0;
@@ -172,7 +179,23 @@ function notice(t,b=false){}
 function log(x,b=false){}
 function getPlan(){return localStorage.getItem('flowvidPlan')||localStorage.getItem('plan')||'free'}
 function isPaid(){return /^(paid|pro|premium|business|creator)$/i.test(getPlan())}
-function persistDraft(){const d=readDraft();d.mode=mode;d.model=$('model')?.value||'bytedance/seedance-2.0';d.aspect=$('aspect')?.value||'9:16';d.duration=$('duration')?.value||'5';d.resolution=$('resolution')?.value||'720p';d.referenceUrls=urls;d['prompt_'+mode]=$('prompt')?.value||'';writeDraft(d)}
+// 絵コンテ確定プレビュー中(sbLocked)は、内部modeが一時的にreference_to_videoになっていても
+// 通常タブの下書き(referenceUrls/prompt_<mode>)へは一切書き込まない。絵コンテタブ選択中
+// (mode==='storyboard')も同様に、タブ選択状態(d.mode)だけは記録しつつ画像・プロンプトは
+// 専用のsbWriteDraft()側で管理し、通常タブの下書きに混入させない。
+function persistDraft(){
+  if(sbLocked)return;
+  const d=readDraft();
+  d.mode=mode;
+  if(mode==='storyboard'){writeDraft(d);return}
+  d.model=$('model')?.value||'bytedance/seedance-2.0';
+  d.aspect=$('aspect')?.value||'9:16';
+  d.duration=$('duration')?.value||'5';
+  d.resolution=$('resolution')?.value||'720p';
+  d.referenceUrls=urls;
+  d['prompt_'+mode]=$('prompt')?.value||'';
+  writeDraft(d);
+}
 function roundUpToFive(v){return Math.ceil(Math.max(50,Math.min(400,v))/5)*5;}
 const PRICING_SAFETY_MULTIPLIER=1.15;
 function creditEstimate(){const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const model=$('model')?.value||'bytedance/seedance-2.0-fast';const refs=mode==='text_to_video'?0:Math.max(1,urls.length||files.length||1);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const multiplier=model==='bytedance/seedance-2.0-fast'||model==='bytedance/seedance-2.0-lite'?0.8:1;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier);}
@@ -181,6 +204,7 @@ function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?
 function syncComboWarning(){const mo=$('model')?.value||'';const isFastLite=mo==='bytedance/seedance-2.0-fast'||mo==='bytedance/seedance-2.0-lite';const isRefMode=mode==='reference_to_video';const resEl=$('resolution');if(resEl){const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=isFastLite&&isRefMode;}const el=$('comboWarning');if(!el)return;const blocked=isComboBlocked();if(blocked){el.textContent='このモデルとリファレンスモードでは1080pを利用できません。';el.style.display='block';}else el.style.display='none';}
 
 function setMode(m){
+  const wasSbLocked=sbLocked;
   mode=m;
   window.flowvidGenerationMode=m;
   if(typeof sbApplyLock==='function')sbApplyLock(false);
@@ -193,6 +217,10 @@ function setMode(m){
     $('pendingSection').style.display='none';
   }
   if(!isSb){
+    // 絵コンテ確定プレビュー(sbLocked)中に他タブへ切り替えた場合、urls/filesに
+    // 残っている絵コンテ画像を通常タブへ引き継がない(リファレンスタブ等に
+    // 絵コンテ画像が出てしまうのを防ぐ)。
+    if(wasSbLocked){urls=[];files=[];}
     const modeLabelEl=$('modeLabel');if(modeLabelEl)modeLabelEl.textContent=modeName(m);
     $('assets').style.display=m==='text_to_video'?'none':'grid';
     $('file').multiple=m==='reference_to_video';
@@ -553,12 +581,16 @@ $('file').onchange=e=>upload(e.target.files);
 $('create').onclick=start;window.flowvidCreateHandler=start;
 
 restoreDraft();
-const q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
-// video_editはsetMode()の対象外(mainCard/sbSectionの表示切り替えしか行わず、videoEditSectionを
-// 表示しないため)。以前はvideo_editが許可リストに無く常にreference_to_videoへ強制されており、
-// リロード直後に一瞬「参照ページ」が見える原因になっていた。ここでonVideoEditTab()を直接呼び、
-// 最初からvideo_editへ復元する。
-if(q==='video_edit'){onVideoEditTab()}else{setMode(['reference_to_video','image_to_video','text_to_video','storyboard'].includes(q)?q:'reference_to_video')}
+// 絵コンテのプロンプト確定(prepared)済みの専用下書きがあれば、通常タブのdraft.modeや
+// flowvidGenerateModeより優先して絵コンテタブ選択+mainCard表示を復元する。
+if(!sbTryRestorePrepared()){
+  const q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
+  // video_editはsetMode()の対象外(mainCard/sbSectionの表示切り替えしか行わず、videoEditSectionを
+  // 表示しないため)。以前はvideo_editが許可リストに無く常にreference_to_videoへ強制されており、
+  // リロード直後に一瞬「参照ページ」が見える原因になっていた。ここでonVideoEditTab()を直接呼び、
+  // 最初からvideo_editへ復元する。
+  if(q==='video_edit'){onVideoEditTab()}else{setMode(['reference_to_video','image_to_video','text_to_video','storyboard'].includes(q)?q:'reference_to_video')}
+}
 renderAssets();updateCreditUi();syncComboWarning();
 
 // ---- pending tasks ----
@@ -591,6 +623,33 @@ document.addEventListener('click',function(e){const pt=e.target&&e.target.closes
 // 絵コンテ画像1枚→Claude(OpenRouter経由)が単一の統合プロンプトを生成→
 // 既存のreference_to_video生成フロー(mainCard / start())へそのまま引き継ぐ。
 // start() / creditEstimate() / updateCreditUi() / renderAssets() は無変更のまま再利用する。
+
+// リロード直後、絵コンテのプロンプト確定(SB_DRAFT_KEYのprepared===true)があれば、
+// 通常タブの下書き(draft.mode等)より優先して絵コンテタブ選択+mainCard表示を復元する。
+// urls/promptはsbDraftの内容のみを使い、通常のreferenceUrls/prompt_reference_to_videoは
+// 一切参照・書き換えしない。生成時の内部mode・API bodyはsbProceedToCreate()と同じく
+// reference_to_video固定。
+function sbTryRestorePrepared(){
+  const sd=sbReadDraft();
+  if(!sd.prepared||!sd.imageUrl)return false;
+  mode='reference_to_video';
+  window.flowvidGenerationMode='reference_to_video';
+  urls=[sd.imageUrl];
+  files=[];
+  if($('model')&&sd.model)$('model').value=sd.model;
+  if($('aspect')&&sd.aspect)$('aspect').value=sd.aspect;
+  if($('duration')&&sd.duration)$('duration').value=sd.duration;
+  if($('resolution')&&sd.resolution)$('resolution').value=sd.resolution;
+  if($('prompt'))$('prompt').value=sd.prompt||'';
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode==='storyboard'));
+  $('sbSection').style.display='none';
+  $('mainCard').style.display='block';
+  $('assets').style.display='grid';
+  if($('file'))$('file').multiple=true;
+  sbApplyLock(true);
+  localStorage.setItem('flowvidGenerateMode','storyboard');
+  return true;
+}
 
 // プロンプト作成前の料金目安表示。flowvid-open-inline.jsのwindow.flowvidComputeCredits()
 // (calculateCredits()と同じ共通の料金式)を、生成モードをreference_to_video固定で呼び出す。
@@ -727,7 +786,7 @@ function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution}){
   // 最優先で参照するため、ここでreference_to_videoへ設定する。タブの表示(.on)は
   // 絵コンテのまま維持し、内部的な生成モードのみreference_to_videoへ切り替える。
   window.flowvidGenerationMode='reference_to_video';
-  localStorage.setItem('flowvidGenerateMode','reference_to_video');
+  localStorage.setItem('flowvidGenerateMode','storyboard');
   urls=[imageUrl];
   files=[];
   if($('model'))$('model').value=model;
@@ -739,10 +798,15 @@ function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution}){
   $('mainCard').style.display='block';
   $('assets').style.display='grid';
   $('file').multiple=true;
+  // persistDraft()より先にロックする(sbLocked===trueの間、persistDraft()は通常タブの
+  // 下書き(referenceUrls/prompt_reference_to_video)へ書き込まないため、renderAssets()/
+  // syncComboWarning()内のupdateCreditUi()→persistDraft()が絵コンテ内容を混入させない)。
+  sbApplyLock(true);
+  // 絵コンテ確定内容は専用下書き(SB_DRAFT_KEY)にのみ保存する。通常タブの
+  // referenceUrls/prompt_reference_to_videoには一切書き込まない。
+  sbWriteDraft({prompt,imageUrl,model,aspect,duration,resolution,prepared:true});
   renderAssets();
   syncComboWarning();
-  persistDraft();
-  sbApplyLock(true);
 }
 
 // 「作り直す」: プロンプト・画像・ロックをすべてリセットし、絵コンテタブの
@@ -766,6 +830,8 @@ $('sbRedoBtn').onclick=()=>{
   $('mainCard').style.display='none';
   $('sbSection').style.display='block';
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode==='storyboard'));
+  // 絵コンテ専用下書きだけを削除する。通常タブの下書き(DRAFT_KEY)には触れない。
+  localStorage.removeItem(SB_DRAFT_KEY);
   renderAssets();
   persistDraft();
 };
