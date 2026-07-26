@@ -574,7 +574,17 @@ async function vePollStatus(taskId,token){const poll=async()=>{try{const res=awa
 $('veSubmit').onclick=veSubmit;
 $('veResultSave').addEventListener('click',veSaveEditedVideo);
 
-['duration','resolution','model','aspect'].forEach(id=>$(id)?.addEventListener('change',()=>{persistDraft();updateCreditUi();syncComboWarning()}));
+['duration','resolution','model','aspect'].forEach(id=>$(id)?.addEventListener('change',()=>{
+  persistDraft();
+  // 絵コンテ確定プレビュー中(sbLocked)は秒数・アスペクト比・画像はロックされているため
+  // 実際に変更されうるのはモデル・解像度のみ。専用下書き(SB_DRAFT_KEY)側もここで
+  // 同期しないと、リロード後に選択し直したモデル・解像度が失われてしまう。通常フォームの
+  // 下書き(persistDraft())にはsbLockedガードにより影響しない。
+  if(typeof sbLocked!=='undefined'&&sbLocked&&typeof sbWriteDraft==='function'){
+    sbWriteDraft({model:$('model')?.value,resolution:$('resolution')?.value});
+  }
+  updateCreditUi();syncComboWarning();
+}));
 $('prompt').addEventListener('input',persistDraft);
 $('assets').addEventListener('click',e=>{const btn=e.target.closest('.remove');if(!btn)return;e.preventDefault();e.stopPropagation();removeAsset(Number(btn.dataset.index))});
 $('file').onchange=e=>upload(e.target.files);
@@ -629,9 +639,27 @@ document.addEventListener('click',function(e){const pt=e.target&&e.target.closes
 // urls/promptはsbDraftの内容のみを使い、通常のreferenceUrls/prompt_reference_to_videoは
 // 一切参照・書き換えしない。生成時の内部mode・API bodyはsbProceedToCreate()と同じく
 // reference_to_video固定。
+// 過去バージョンのバグにより通常タブの共有下書き(DRAFT_KEY)へ絵コンテ内容が
+// 混入したまま残っている場合の移行処理。共有draftのreferenceUrlsが専用draftの
+// imageUrlと完全一致し、かつprompt_reference_to_videoが専用draftのpromptと
+// 完全一致する場合(=絵コンテ由来だと確実に判定できる場合)のみ、その2フィールドを
+// 削除する。通常のリファレンス下書き(内容が一致しないもの)は無条件に消さない。
+function sbCleanupLeakedSharedDraft(sd){
+  const shared=readDraft();
+  const sharedUrls=Array.isArray(shared.referenceUrls)?shared.referenceUrls:null;
+  const urlsMatch=sharedUrls&&sharedUrls.length===1&&sharedUrls[0]===sd.imageUrl;
+  const promptMatch=shared['prompt_reference_to_video']===sd.prompt;
+  if(!urlsMatch||!promptMatch)return;
+  delete shared.referenceUrls;
+  delete shared['prompt_reference_to_video'];
+  if(shared.mode==='reference_to_video')shared.mode='storyboard';
+  writeDraft(shared);
+}
+
 function sbTryRestorePrepared(){
   const sd=sbReadDraft();
   if(!sd.prepared||!sd.imageUrl)return false;
+  sbCleanupLeakedSharedDraft(sd);
   mode='reference_to_video';
   window.flowvidGenerationMode='reference_to_video';
   urls=[sd.imageUrl];
