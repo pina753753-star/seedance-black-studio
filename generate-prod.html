@@ -161,6 +161,9 @@ function writeDraft(patch){const d={...readDraft(),...patch,updatedAt:new Date()
 let draft=readDraft();
 let mode=draft.mode||'reference_to_video',urls=Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):[],files=[],_activePtId='';
 let uploadInProgress=false,uploadCompleted=0,uploadTotal=0;
+let sbFile=null;
+let sbResizedBase64='';
+let sbLocked=false;
 
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function modeName(m){return m==='text_to_video'?'テキストから動画':m==='image_to_video'?'画像から動画':m==='storyboard'?'絵コンテ':'リファレンス'}
@@ -586,9 +589,6 @@ document.addEventListener('click',function(e){const pt=e.target&&e.target.closes
 // 絵コンテ画像1枚→Claude(OpenRouter経由)が単一の統合プロンプトを生成→
 // 既存のreference_to_video生成フロー(mainCard / start())へそのまま引き継ぐ。
 // start() / creditEstimate() / updateCreditUi() / renderAssets() は無変更のまま再利用する。
-let sbFile=null;
-let sbResizedBase64='';
-let sbLocked=false;
 
 // プロンプト生成後、秒数・アスペクト比・画像をロックする(生成済みプロンプト本文が
 // これらの値を前提に書かれているため)。モデル・解像度はプロンプト本文に影響しないため
