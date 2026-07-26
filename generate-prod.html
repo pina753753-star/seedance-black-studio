@@ -181,6 +181,7 @@ function syncComboWarning(){const mo=$('model')?.value||'';const isFastLite=mo==
 
 function setMode(m){
   mode=m;
+  window.flowvidGenerationMode=m;
   if(typeof sbApplyLock==='function')sbApplyLock(false);
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
   const isSb=m==='storyboard';
@@ -690,13 +691,10 @@ $('sbAnalyzeBtn').onclick=async()=>{
 // updateCreditUi()・renderAssets()・モデレーション・料金計算には一切手を加えない。
 function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution}){
   mode='reference_to_video';
-  // flowvid-open-inline.jsのcalculateCredits()は内部変数modeではなく
-  // `.tabs button.on`とlocalStorageのflowvidGenerateModeを参照するため、
-  // ここで両方を明示的にreference_to_videoへ同期させる。これを怠ると、
-  // MutationObserver(installCreditSync())が絵コンテ料金の表示を
-  // 上書きし続け、モデル・解像度を変更してもクレジット表示が
-  // 更新されなくなる。
-  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode==='reference_to_video'));
+  // flowvid-open-inline.jsのcalculateCredits()はwindow.flowvidGenerationModeを
+  // 最優先で参照するため、ここでreference_to_videoへ設定する。タブの表示(.on)は
+  // 絵コンテのまま維持し、内部的な生成モードのみreference_to_videoへ切り替える。
+  window.flowvidGenerationMode='reference_to_video';
   localStorage.setItem('flowvidGenerateMode','reference_to_video');
   urls=[imageUrl];
   files=[];
@@ -732,6 +730,7 @@ $('sbRedoBtn').onclick=()=>{
   $('sbAnalyzeBtn').disabled=true;
   $('sbAnalyzeBtn').textContent='プロンプトを作る ✦';
   mode='storyboard';
+  window.flowvidGenerationMode='storyboard';
   $('mainCard').style.display='none';
   $('sbSection').style.display='block';
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode==='storyboard'));

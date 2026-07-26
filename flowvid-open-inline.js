@@ -13,7 +13,7 @@
     const duration=Number(document.getElementById('duration')?.value||5);
     const resolution=document.getElementById('resolution')?.value||'720p';
     const model=document.getElementById('model')?.value||FAST_MODEL;
-    const mode=document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
+    const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
     const refs=Math.max(1,document.querySelectorAll('#assets .thumb').length||1);
     if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));
     let credits=80;
