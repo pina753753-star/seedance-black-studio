@@ -9,12 +9,7 @@
     return Math.ceil(Math.max(50,Math.min(400,value))/5)*5;
   }
 
-  function calculateCredits(){
-    const duration=Number(document.getElementById('duration')?.value||5);
-    const resolution=document.getElementById('resolution')?.value||'720p';
-    const model=document.getElementById('model')?.value||FAST_MODEL;
-    const mode=document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
-    const refs=Math.max(1,document.querySelectorAll('#assets .thumb').length||1);
+  function computeCredits({duration,resolution,model,mode}){
     if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));
     let credits=80;
     credits+=Math.max(0,duration-5)*15;
@@ -25,6 +20,15 @@
     const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
     const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;
     return roundUpToFive(credits*multiplier*modeMultiplier);
+  }
+  window.flowvidComputeCredits=computeCredits;
+
+  function calculateCredits(){
+    const duration=Number(document.getElementById('duration')?.value||5);
+    const resolution=document.getElementById('resolution')?.value||'720p';
+    const model=document.getElementById('model')?.value||FAST_MODEL;
+    const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
+    return computeCredits({duration,resolution,model,mode});
   }
 
   function syncCreditButton(){
@@ -190,18 +194,34 @@
     }
   }
 
+  // 対象selectのFastオプションを保証する。既にvalue="bytedance/seedance-2.0-fast"の
+  // optionが存在する場合は表示ラベルだけ整え、重複した選択肢は作らない
+  // (旧Liteのoptionが残っていれば削除する)。Fastオプションがまだ無く、
+  // 旧Lite optionだけが存在する場合(古いキャッシュ由来のページ等)は、
+  // 後方互換のためLiteをFastへ移行する。
+  function ensureFastModelOption(select){
+    if(!select)return;
+    const options=Array.from(select.options);
+    const legacyOption=options.find(item=>item.value==='bytedance/seedance-2.0-lite');
+    const fastOption=options.find(item=>item.value===FAST_MODEL);
+    if(fastOption){
+      fastOption.textContent='Seedance 2.0 Fast';
+      if(legacyOption)legacyOption.remove();
+      return;
+    }
+    if(legacyOption){
+      legacyOption.value=FAST_MODEL;
+      legacyOption.textContent='Seedance 2.0 Fast';
+    }
+  }
+
   function applyFastModelPricing(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     const select=document.getElementById('model');
     if(!select)return;
 
-    const legacyOption=Array.from(select.options).find(item=>item.value==='bytedance/seedance-2.0-lite');
-    if(legacyOption){
-      legacyOption.value=FAST_MODEL;
-      legacyOption.textContent='Seedance 2.0 Fast';
-    }
-    const fastOption=Array.from(select.options).find(item=>item.value===FAST_MODEL);
-    if(fastOption)fastOption.textContent='Seedance 2.0 Fast';
+    ensureFastModelOption(select);
+    ensureFastModelOption(document.getElementById('sbModel'));
 
     const resolution=document.getElementById('resolution');
     const option720=Array.from(resolution?.options||[]).find(item=>item.value==='720p');

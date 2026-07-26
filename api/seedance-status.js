@@ -765,7 +765,13 @@ async function handleStoryboard(req, res) {
 }
 
 module.exports = async function handler(req, res) {
-  if (req.query._r === 'sb') return handleStoryboard(req, res);
+  if (req.query._r === 'sb') {
+    return res.status(410).json({
+      ok: false,
+      error: 'storyboard_endpoint_retired',
+      message: 'この絵コンテ解析機能は新しい方式へ移行しました。'
+    });
+  }
 
   const apiKey = process.env.OPENROUTER_API_KEY || '';
   if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
