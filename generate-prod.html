@@ -605,9 +605,22 @@ function sbUpdateCreditEstimate(){
   });
   el.textContent=String(credits);
 }
-$('sbModel').addEventListener('change',sbUpdateCreditEstimate);
+
+// Fastモデル選択時、reference_to_video生成では1080pが利用できない(既存の
+// isComboBlocked()/syncComboWarning()と同じ制約)ため、絵コンテ側でも
+// 生成前に同じ組み合わせを防ぐ。1080p固定でプロンプトを作成した後に
+// 生成側で弾かれる事態を避ける。
+function sbSyncResolutionLock(){
+  const isFastLite=$('sbModel').value==='bytedance/seedance-2.0-fast'||$('sbModel').value==='bytedance/seedance-2.0-lite';
+  const resEl=$('sbResolution');
+  const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');
+  if(opt1080)opt1080.disabled=isFastLite;
+  if(isFastLite&&resEl.value==='1080p')resEl.value='720p';
+}
+$('sbModel').addEventListener('change',()=>{sbSyncResolutionLock();sbUpdateCreditEstimate();});
 $('sbDuration').addEventListener('change',sbUpdateCreditEstimate);
 $('sbResolution').addEventListener('change',sbUpdateCreditEstimate);
+sbSyncResolutionLock();
 sbUpdateCreditEstimate();
 
 // プロンプト生成後、秒数・アスペクト比・画像をロックする(生成済みプロンプト本文が
