@@ -9,12 +9,7 @@
     return Math.ceil(Math.max(50,Math.min(400,value))/5)*5;
   }
 
-  function calculateCredits(){
-    const duration=Number(document.getElementById('duration')?.value||5);
-    const resolution=document.getElementById('resolution')?.value||'720p';
-    const model=document.getElementById('model')?.value||FAST_MODEL;
-    const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
-    const refs=Math.max(1,document.querySelectorAll('#assets .thumb').length||1);
+  function computeCredits({duration,resolution,model,mode}){
     if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));
     let credits=80;
     credits+=Math.max(0,duration-5)*15;
@@ -25,6 +20,15 @@
     const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
     const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;
     return roundUpToFive(credits*multiplier*modeMultiplier);
+  }
+  window.flowvidComputeCredits=computeCredits;
+
+  function calculateCredits(){
+    const duration=Number(document.getElementById('duration')?.value||5);
+    const resolution=document.getElementById('resolution')?.value||'720p';
+    const model=document.getElementById('model')?.value||FAST_MODEL;
+    const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
+    return computeCredits({duration,resolution,model,mode});
   }
 
   function syncCreditButton(){

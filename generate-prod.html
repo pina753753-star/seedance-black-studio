@@ -90,6 +90,7 @@
     <div class="field"><label>解像度</label><select id="sbResolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div>
   </div></details>
 
+  <div id="sbCreditEstimate" style="margin-top:12px;font-size:13px;color:#aaa">動画生成予定: <span id="sbCreditEstimateValue">-</span> credits<br><span style="font-size:11px;color:#666">※プロンプト作成時はクレジットを消費しません</span></div>
   <button class="create" id="sbAnalyzeBtn" style="margin-top:12px" disabled>プロンプトを作る ✦</button>
   <div id="sbNotice" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.6"></div>
 </section>
@@ -590,6 +591,24 @@ document.addEventListener('click',function(e){const pt=e.target&&e.target.closes
 // 絵コンテ画像1枚→Claude(OpenRouter経由)が単一の統合プロンプトを生成→
 // 既存のreference_to_video生成フロー(mainCard / start())へそのまま引き継ぐ。
 // start() / creditEstimate() / updateCreditUi() / renderAssets() は無変更のまま再利用する。
+
+// プロンプト作成前の料金目安表示。flowvid-open-inline.jsのwindow.flowvidComputeCredits()
+// (calculateCredits()と同じ共通の料金式)を、生成モードをreference_to_video固定で呼び出す。
+function sbUpdateCreditEstimate(){
+  const el=$('sbCreditEstimateValue');
+  if(!el||typeof window.flowvidComputeCredits!=='function')return;
+  const credits=window.flowvidComputeCredits({
+    duration:Number($('sbDuration').value||5),
+    resolution:$('sbResolution').value||'720p',
+    model:$('sbModel').value||'bytedance/seedance-2.0-fast',
+    mode:'reference_to_video'
+  });
+  el.textContent=String(credits);
+}
+$('sbModel').addEventListener('change',sbUpdateCreditEstimate);
+$('sbDuration').addEventListener('change',sbUpdateCreditEstimate);
+$('sbResolution').addEventListener('change',sbUpdateCreditEstimate);
+sbUpdateCreditEstimate();
 
 // プロンプト生成後、秒数・アスペクト比・画像をロックする(生成済みプロンプト本文が
 // これらの値を前提に書かれているため)。モデル・解像度はプロンプト本文に影響しないため
