@@ -455,9 +455,10 @@ function prepareImageForUpload(file){
 //   (reference_to_videoのassetsとは別のimgAssetで管理し、互いに影響しない)。
 function addAssets(fs){
   if(sbLocked)return;
+  const selectedFiles=Array.from(fs||[]);
   $('file').value='';
   if(mode==='image_to_video'){
-    const f=Array.from(fs||[])[0];
+    const f=selectedFiles[0];
     if(!f){renderAssets();return}
     if(imgAsset&&imgAsset.objectUrl){try{URL.revokeObjectURL(imgAsset.objectUrl)}catch(_){}}
     imgAsset={id:genAssetId(),status:'pending',url:'',objectUrl:URL.createObjectURL(f),file:f,error:''};
@@ -468,7 +469,7 @@ function addAssets(fs){
   const max=maxAssetsForMode();
   if(max<=0)return;
   const room=Math.max(0,max-assets.length);
-  const incoming=Array.from(fs||[]).slice(0,room);
+  const incoming=selectedFiles.slice(0,room);
   if(!incoming.length){renderAssets();return}
   const newItems=incoming.map(f=>({id:genAssetId(),status:'pending',url:'',objectUrl:URL.createObjectURL(f),file:f,error:''}));
   assets=assets.concat(newItems);
