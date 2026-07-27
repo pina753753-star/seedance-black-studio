@@ -183,6 +183,14 @@ function syncUrlsFromAssets(){urls=assets.filter(a=>a.status==='completed'&&a.ur
 function setAssetsFromUrls(list){assets=(Array.isArray(list)?list:[]).filter(Boolean).map(u=>({id:genAssetId(),status:'completed',url:u,objectUrl:'',file:null,error:''}));syncUrlsFromAssets()}
 if(Array.isArray(draft.referenceUrls))setAssetsFromUrls(draft.referenceUrls.filter(Boolean));
 let uploadQueueRunning=false;
+// image_to_video専用の単一画像状態。reference_to_videoのassets配列とは完全に分離し、
+// タブを移動しても互いに上書きしない(reference_to_videoの複数枚がimage_to_videoに
+// 混ざって表示されたり、逆に消えたりしないようにする)。
+let imgAsset=null;
+let imgUploadRunning=false;
+// mode(image_to_video/reference_to_video)に応じた「現在表示・判定対象の画像リスト」を返す。
+// updateCreditUi()/updateUploadProgressUi()/start()の状態チェックで共通利用する。
+function currentModeAssetList(){return mode==='image_to_video'?(imgAsset?[imgAsset]:[]):assets}
 let sbFile=null;
 let sbResizedBase64='';
 let sbLocked=false;
@@ -231,15 +239,16 @@ function updateCreditUi(){
     // 内部modeがreference_to_videoでも専用のsbGenerationImageUrlを使うため、
     // 通常assetsのpending/uploading/failedで生成を止めない。
     const imageMode=!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video');
-    if(imageMode&&assets.some(a=>a.status==='pending'||a.status==='uploading')){
-      const total=assets.length;
-      const doneCount=assets.filter(a=>a.status==='completed'||a.status==='failed').length;
+    const list=currentModeAssetList();
+    if(imageMode&&list.some(a=>a.status==='pending'||a.status==='uploading')){
+      const total=list.length;
+      const doneCount=list.filter(a=>a.status==='completed'||a.status==='failed').length;
       btn.disabled=true;
       btn.textContent='画像アップロード中… '+doneCount+'/'+total;
-    }else if(imageMode&&assets.some(a=>a.status==='failed')){
+    }else if(imageMode&&list.some(a=>a.status==='failed')){
       btn.disabled=true;
       btn.textContent='失敗した画像を再試行してください';
-    }else if(imageMode&&assets.filter(a=>a.status==='completed').length===0){
+    }else if(imageMode&&list.filter(a=>a.status==='completed').length===0){
       btn.disabled=true;
       btn.textContent='画像を追加してください';
     }else{
@@ -287,6 +296,15 @@ function readFile(f){return new Promise((ok,ng)=>{const r=new FileReader();r.onl
 
 function removeAsset(id){
   if(sbLocked)return;
+  if(mode==='image_to_video'){
+    if(!imgAsset||imgAsset.id!==id||imgAsset.status==='uploading')return;
+    if(imgAsset.objectUrl){try{URL.revokeObjectURL(imgAsset.objectUrl)}catch(_){}}
+    imgAsset=null;
+    $('file').value='';
+    persistDraft();
+    renderAssets();
+    return;
+  }
   const idx=assets.findIndex(a=>a.id===id);
   if(idx<0)return;
   const a=assets[idx];
@@ -297,6 +315,25 @@ function removeAsset(id){
   syncUrlsFromAssets();
   persistDraft();
   renderAssets();
+}
+
+// 1枚分のサムネイルDOMを生成する。reference_to_video(assets配列)と
+// image_to_video(imgAsset単体)の両方の描画で共有する。
+function buildThumbNode(a,index){
+  const d=document.createElement('div');
+  d.className='thumb';
+  const src=a.objectUrl||a.url||'';
+  let overlay='';
+  if(a.status==='pending'||a.status==='uploading'){
+    overlay='<div class="thumbOverlay"><div class="thumbSpin"></div></div>';
+  }else if(a.status==='completed'){
+    overlay='<div class="thumbCheck">✓</div>';
+  }else if(a.status==='failed'){
+    overlay='<div class="thumbOverlay thumbFail"><div class="thumbFailMark">!</div><button type="button" class="retry" data-asset-id="'+esc(a.id)+'">再試行</button></div>';
+  }
+  const removeBtnHtml=a.status==='uploading'?'':'<button class="remove" type="button" data-asset-id="'+esc(a.id)+'" aria-label="画像を削除">×</button>';
+  d.innerHTML='<img src="'+esc(src)+'">'+overlay+removeBtnHtml+'<small>図'+(index+1)+'</small>';
+  return d;
 }
 
 function renderAssets(){
@@ -319,21 +356,17 @@ function renderAssets(){
     updateCreditUi();
     return;
   }
+  if(mode==='image_to_video'){
+    // image_to_videoはimgAsset(1枚)だけを表示する。reference_to_videoのassets配列
+    // (最大9枚、バックグラウンドアップロード中の場合もある)には一切触れない。
+    if(imgAsset)box.insertBefore(buildThumbNode(imgAsset,0),add);
+    updateAddTileUi();
+    updateUploadProgressUi();
+    updateCreditUi();
+    return;
+  }
   assets.forEach((a,i)=>{
-    const d=document.createElement('div');
-    d.className='thumb';
-    const src=a.objectUrl||a.url||'';
-    let overlay='';
-    if(a.status==='pending'||a.status==='uploading'){
-      overlay='<div class="thumbOverlay"><div class="thumbSpin"></div></div>';
-    }else if(a.status==='completed'){
-      overlay='<div class="thumbCheck">✓</div>';
-    }else if(a.status==='failed'){
-      overlay='<div class="thumbOverlay thumbFail"><div class="thumbFailMark">!</div><button type="button" class="retry" data-asset-id="'+esc(a.id)+'">再試行</button></div>';
-    }
-    const removeBtnHtml=a.status==='uploading'?'':'<button class="remove" type="button" data-asset-id="'+esc(a.id)+'" aria-label="画像を削除">×</button>';
-    d.innerHTML='<img src="'+esc(src)+'">'+overlay+removeBtnHtml+'<small>図'+(i+1)+'</small>';
-    box.insertBefore(d,add);
+    box.insertBefore(buildThumbNode(a,i),add);
   });
   updateAddTileUi();
   updateUploadProgressUi();
@@ -345,7 +378,7 @@ function updateAddTileUi(){
   const fileInput=$('file');
   if(!add||!fileInput)return;
   const max=maxAssetsForMode();
-  const atMax=max>0&&assets.length>=max;
+  const atMax=max>0&&currentModeAssetList().length>=max;
   add.style.display=(mode==='text_to_video')?'none':(atMax?'none':'');
   if(!sbLocked)fileInput.disabled=atMax||mode==='text_to_video';
 }
@@ -355,12 +388,13 @@ function updateUploadProgressUi(){
   if(!el)return;
   // 絵コンテ確定プレビュー中(sbLocked)は、通常リファレンス画像の進捗表示を出さない。
   // 裏での通常アップロード自体は継続し、通常リファレンスタブへ戻れば再表示される。
-  if(sbLocked||mode==='storyboard'||mode==='video_edit'||mode==='text_to_video'||!assets.length){el.style.display='none';el.textContent='';return}
-  const total=assets.length;
-  const completed=assets.filter(a=>a.status==='completed').length;
-  const failedCount=assets.filter(a=>a.status==='failed').length;
+  const list=currentModeAssetList();
+  if(sbLocked||mode==='storyboard'||mode==='video_edit'||mode==='text_to_video'||!list.length){el.style.display='none';el.textContent='';return}
+  const total=list.length;
+  const completed=list.filter(a=>a.status==='completed').length;
+  const failedCount=list.filter(a=>a.status==='failed').length;
   const doneCount=completed+failedCount;
-  const busy=assets.some(a=>a.status==='pending'||a.status==='uploading');
+  const busy=list.some(a=>a.status==='pending'||a.status==='uploading');
   if(busy){
     el.innerHTML='画像をアップロードしています '+doneCount+' / '+total+'<br>この画面を閉じずにお待ちください';
     el.style.display='block';
@@ -412,11 +446,22 @@ function prepareImageForUpload(file){
   });
 }
 
-// 選択された画像を、現在表示中のassetsへ追加する(既存の成功済み画像は消さない)。
-// reference_to_videoは合計最大9枚、image_to_videoは合計最大1枚。上限を超える分は追加しない。
+// 選択された画像を追加する。
+// - reference_to_video: 現在表示中のassetsへ追加する(既存の成功済み画像は消さない、合計最大9枚)。
+// - image_to_video: 使用する画像は常に1枚だけ。新しく選ぶと既存の1枚を置き換える
+//   (reference_to_videoのassetsとは別のimgAssetで管理し、互いに影響しない)。
 function addAssets(fs){
   if(sbLocked)return;
   $('file').value='';
+  if(mode==='image_to_video'){
+    const f=Array.from(fs||[])[0];
+    if(!f){renderAssets();return}
+    if(imgAsset&&imgAsset.objectUrl){try{URL.revokeObjectURL(imgAsset.objectUrl)}catch(_){}}
+    imgAsset={id:genAssetId(),status:'pending',url:'',objectUrl:URL.createObjectURL(f),file:f,error:''};
+    renderAssets();
+    runImgAssetUpload();
+    return;
+  }
   const max=maxAssetsForMode();
   if(max<=0)return;
   const room=Math.max(0,max-assets.length);
@@ -429,7 +474,10 @@ function addAssets(fs){
 }
 
 // 1枚失敗しても即returnせず、残りの画像の直列アップロードを継続する。
-async function uploadOneAsset(asset,token){
+// syncReferenceState=falseのとき(image_to_video用)は、reference_to_video専用の
+// urls/draft.referenceUrls同期を行わない(image_to_videoの画像をリファレンス下書きへ
+// 混入させないため)。
+async function uploadOneAsset(asset,token,syncReferenceState=true){
   asset.status='uploading';asset.error='';
   renderAssets();
   try{
@@ -449,8 +497,10 @@ async function uploadOneAsset(asset,token){
     asset.status='completed';
     if(asset.objectUrl){try{URL.revokeObjectURL(asset.objectUrl)}catch(_){}asset.objectUrl=''}
     asset.file=null;
-    syncUrlsFromAssets();
-    writeDraft({referenceUrls:urls});
+    if(syncReferenceState){
+      syncUrlsFromAssets();
+      writeDraft({referenceUrls:urls});
+    }
   }catch(_){
     asset.status='failed';
     asset.error='通信エラーが発生しました';
@@ -459,8 +509,9 @@ async function uploadOneAsset(asset,token){
   }
 }
 
-// 1枚ずつ直列でキューを処理する。同時に複数のrunUploadQueue()が走らないようにガードする
-// (画像追加中に別の追加やretryが呼ばれても、既存ループがpending項目を拾って処理する)。
+// 1枚ずつ直列でキューを処理する(reference_to_video専用)。同時に複数のrunUploadQueue()が
+// 走らないようにガードする(画像追加中に別の追加やretryが呼ばれても、既存ループが
+// pending項目を拾って処理する)。
 async function runUploadQueue(){
   if(uploadQueueRunning)return;
   if(!assets.some(a=>a.status==='pending'))return;
@@ -478,8 +529,34 @@ async function runUploadQueue(){
   }
 }
 
+// image_to_video専用の単一画像アップロード。imgAssetが別の画像に置き換えられた場合、
+// この時点で保持しているtargetへの参照はそのまま古い画像のアップロードを完了させるだけで、
+// 現在のimgAsset(新しい画像)には影響しない。
+async function runImgAssetUpload(){
+  if(imgUploadRunning)return;
+  if(!imgAsset||imgAsset.status!=='pending')return;
+  const token=await getToken();
+  if(!token){location.href='./login.html';return}
+  imgUploadRunning=true;
+  const target=imgAsset;
+  try{
+    await uploadOneAsset(target,token,false);
+  }finally{
+    imgUploadRunning=false;
+    renderAssets();
+  }
+}
+
 // failed画像1枚だけを再送する。他のcompleted画像は変更しない。
 function retryAsset(id){
+  if(mode==='image_to_video'){
+    if(!imgAsset||imgAsset.id!==id||imgAsset.status!=='failed')return;
+    if(!imgAsset.file){imgAsset.error='再試行できません。画像を選び直してください。';renderAssets();return}
+    imgAsset.status='pending';imgAsset.error='';
+    renderAssets();
+    runImgAssetUpload();
+    return;
+  }
   const a=assets.find(x=>x.id===id);
   if(!a||a.status!=='failed')return;
   if(!a.file){a.error='再試行できません。画像を選び直してください。';renderAssets();return}
@@ -504,7 +581,7 @@ async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.sup
 function showCreditShortage(needed,balance){const el=$('creditStatus');if(!el)return;const shortage=needed-balance;el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="color:#fca5a5;font-weight:800;font-size:15px">クレジットが足りません</div><button type="button" onclick="hideCreditStatus()" aria-label="閉じる" style="background:none;border:none;color:#9ca3af;font-size:20px;line-height:1;cursor:pointer;padding:0 4px;flex-shrink:0">×</button></div><div style="color:#d1d5db;font-size:13px;line-height:1.9;margin-bottom:12px">必要: '+needed+' cr<br>現在: '+balance+' cr<br>不足: '+shortage+' cr</div><a href="./pricing.html#credit" style="display:inline-block;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:12px;padding:10px 18px;font-weight:800;text-decoration:none;font-size:14px">クレジットを購入 →</a>';el.style.display='block';setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50)}
 function hideCreditStatus(){const el=$('creditStatus');if(el)el.style.display='none'}
 
-async function start(){if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&assets.some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const prompt=$('prompt').value.trim();if(!prompt)return;if(mode!=='text_to_video'&&!(sbLocked?sbGenerationImageUrl:urls.length))return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(mode==='image_to_video')body.first_frame_url=urls[0];if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const _subMode=mode;const _subPrompt=prompt;try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});if($('prompt').value===_subPrompt)$('prompt').value='';const _d=readDraft();delete _d['prompt_'+_subMode];localStorage.setItem(DRAFT_KEY,JSON.stringify(_d));loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}}
+async function start(){if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&currentModeAssetList().some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const prompt=$('prompt').value.trim();if(!prompt)return;const hasRequiredImage=mode==='text_to_video'?true:(sbLocked?!!sbGenerationImageUrl:(mode==='image_to_video'?!!(imgAsset&&imgAsset.status==='completed'&&imgAsset.url):!!urls.length));if(!hasRequiredImage)return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const _subMode=mode;const _subPrompt=prompt;try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});if($('prompt').value===_subPrompt)$('prompt').value='';const _d=readDraft();delete _d['prompt_'+_subMode];localStorage.setItem(DRAFT_KEY,JSON.stringify(_d));loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}}
 
 
 function restoreDraft(){draft=readDraft();const p=draft['prompt_'+mode]||'';if(p)$('prompt').value=p;[['model',draft.model],['aspect',draft.aspect],['duration',draft.duration],['resolution',draft.resolution]].forEach(([id,val])=>{if($(id)&&val)$(id).value=val});setAssetsFromUrls(Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):urls)}
