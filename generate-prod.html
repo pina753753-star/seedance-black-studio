@@ -186,6 +186,9 @@ let uploadQueueRunning=false;
 let sbFile=null;
 let sbResizedBase64='';
 let sbLocked=false;
+// 絵コンテ確定(sbLocked中)専用の参照画像URL。通常のリファレンス/画像から動画タブが
+// バックグラウンドでアップロード中のassets/urlsとは完全に独立させ、互いに上書きしない。
+let sbGenerationImageUrl='';
 
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function modeName(m){return m==='text_to_video'?'テキストから動画':m==='image_to_video'?'画像から動画':m==='storyboard'?'絵コンテ':'リファレンス'}
@@ -219,8 +222,10 @@ function updateCreditUi(){
   if(btn){
     // 画像アップロードの状態チェックはimage_to_video/reference_to_videoのときだけ適用する。
     // text_to_video・storyboard・video_editは、裏で画像アップロードが継続中でも
-    // 画像不要のため通常どおり利用できる。
-    const imageMode=mode==='image_to_video'||mode==='reference_to_video';
+    // 画像不要のため通常どおり利用できる。sbLocked中(絵コンテ確定プレビュー)は、
+    // 内部modeがreference_to_videoでも専用のsbGenerationImageUrlを使うため、
+    // 通常assetsのpending/uploading/failedで生成を止めない。
+    const imageMode=!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video');
     if(imageMode&&assets.some(a=>a.status==='pending'||a.status==='uploading')){
       const total=assets.length;
       const doneCount=assets.filter(a=>a.status==='completed'||a.status==='failed').length;
@@ -257,10 +262,10 @@ function setMode(m){
     $('pendingSection').style.display='none';
   }
   if(!isSb){
-    // 絵コンテ確定プレビュー(sbLocked)中に他タブへ切り替えた場合、urls/filesに
-    // 残っている絵コンテ画像を通常タブへ引き継がない(リファレンスタブ等に
-    // 絵コンテ画像が出てしまうのを防ぐ)。
-    if(wasSbLocked){setAssetsFromUrls([]);files=[];}
+    // 絵コンテ確定プレビュー(sbLocked)中に他タブへ切り替えた場合、専用の
+    // sbGenerationImageUrlだけをクリアする。通常タブのassets/urlsは絵コンテとは
+    // 独立しており、バックグラウンドでアップロード中の場合もあるため一切触れない。
+    if(wasSbLocked){sbGenerationImageUrl='';files=[];}
     const modeLabelEl=$('modeLabel');if(modeLabelEl)modeLabelEl.textContent=modeName(m);
     $('assets').style.display=m==='text_to_video'?'none':'grid';
     $('file').multiple=m==='reference_to_video';
@@ -294,6 +299,21 @@ function renderAssets(){
   if(!box)return;
   const add=box.querySelector('.add');
   box.querySelectorAll('.thumb').forEach(el=>el.remove());
+  if(sbLocked){
+    // 絵コンテ確定プレビュー中は、専用のsbGenerationImageUrlだけを1枚表示する。
+    // 通常のリファレンス/画像から動画タブがバックグラウンドでアップロード中のassetsは
+    // ここでは描画しない(消しもしない)。
+    if(sbGenerationImageUrl){
+      const d=document.createElement('div');
+      d.className='thumb';
+      d.innerHTML='<img src="'+esc(sbGenerationImageUrl)+'"><small>図1</small>';
+      box.insertBefore(d,add);
+    }
+    updateAddTileUi();
+    updateUploadProgressUi();
+    updateCreditUi();
+    return;
+  }
   assets.forEach((a,i)=>{
     const d=document.createElement('div');
     d.className='thumb';
@@ -477,7 +497,7 @@ async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.sup
 function showCreditShortage(needed,balance){const el=$('creditStatus');if(!el)return;const shortage=needed-balance;el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="color:#fca5a5;font-weight:800;font-size:15px">クレジットが足りません</div><button type="button" onclick="hideCreditStatus()" aria-label="閉じる" style="background:none;border:none;color:#9ca3af;font-size:20px;line-height:1;cursor:pointer;padding:0 4px;flex-shrink:0">×</button></div><div style="color:#d1d5db;font-size:13px;line-height:1.9;margin-bottom:12px">必要: '+needed+' cr<br>現在: '+balance+' cr<br>不足: '+shortage+' cr</div><a href="./pricing.html#credit" style="display:inline-block;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:12px;padding:10px 18px;font-weight:800;text-decoration:none;font-size:14px">クレジットを購入 →</a>';el.style.display='block';setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50)}
 function hideCreditStatus(){const el=$('creditStatus');if(el)el.style.display='none'}
 
-async function start(){if((mode==='image_to_video'||mode==='reference_to_video')&&assets.some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const prompt=$('prompt').value.trim();if(!prompt)return;if(mode!=='text_to_video'&&!urls.length)return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(mode==='image_to_video')body.first_frame_url=urls[0];if(mode==='reference_to_video'){body.reference_url=urls[0];body.reference_urls=urls}const _subMode=mode;const _subPrompt=prompt;try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});if($('prompt').value===_subPrompt)$('prompt').value='';const _d=readDraft();delete _d['prompt_'+_subMode];localStorage.setItem(DRAFT_KEY,JSON.stringify(_d));loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}}
+async function start(){if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&assets.some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const prompt=$('prompt').value.trim();if(!prompt)return;if(mode!=='text_to_video'&&!(sbLocked?sbGenerationImageUrl:urls.length))return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(mode==='image_to_video')body.first_frame_url=urls[0];if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const _subMode=mode;const _subPrompt=prompt;try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});if($('prompt').value===_subPrompt)$('prompt').value='';const _d=readDraft();delete _d['prompt_'+_subMode];localStorage.setItem(DRAFT_KEY,JSON.stringify(_d));loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}}
 
 
 function restoreDraft(){draft=readDraft();const p=draft['prompt_'+mode]||'';if(p)$('prompt').value=p;[['model',draft.model],['aspect',draft.aspect],['duration',draft.duration],['resolution',draft.resolution]].forEach(([id,val])=>{if($(id)&&val)$(id).value=val});setAssetsFromUrls(Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):urls)}
@@ -884,7 +904,7 @@ function sbTryRestorePrepared(){
   sbCleanupLeakedSharedDraft(sd);
   mode='reference_to_video';
   window.flowvidGenerationMode='reference_to_video';
-  setAssetsFromUrls([sd.imageUrl]);
+  sbGenerationImageUrl=sd.imageUrl;
   files=[];
   if($('model')&&sd.model)$('model').value=sd.model;
   if($('aspect')&&sd.aspect)$('aspect').value=sd.aspect;
@@ -1037,7 +1057,7 @@ function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution}){
   // 絵コンテのまま維持し、内部的な生成モードのみreference_to_videoへ切り替える。
   window.flowvidGenerationMode='reference_to_video';
   localStorage.setItem('flowvidGenerateMode','storyboard');
-  setAssetsFromUrls([imageUrl]);
+  sbGenerationImageUrl=imageUrl;
   files=[];
   if($('model'))$('model').value=model;
   if($('aspect'))$('aspect').value=aspect;
@@ -1065,7 +1085,7 @@ $('sbRedoBtn').onclick=()=>{
   sbApplyLock(false);
   sbFile=null;
   sbResizedBase64='';
-  setAssetsFromUrls([]);
+  sbGenerationImageUrl='';
   files=[];
   $('prompt').value='';
   $('sbNotice').style.display='none';
