@@ -18,6 +18,12 @@
 
 - **実機確認・本番反映完了**: Vercel Previewで、絵コンテ画像からのプロンプト作成、プロンプト完成後の絵コンテタブ維持、予定クレジット表示、Fast＋1080p制限、リロード後の内容復元、通常リファレンスタブとの下書き分離をスマートフォンで確認した。PR #116をmainへマージし、マージコミットは`df3026124fbac007af076defff2344e848cc10ee`。Vercel Production Deployment `dpl_HLmXZWbh8hNqXQmbTQBHXfNeRPBS`が`READY`で、mainの同コミットに対応していることを確認済み。実際の動画生成、動画生成クレジット消費、本番DBへの書き込みを伴うテストは行っていない。
 
+- **サービス資産台帳の追加(PR #118)**: `docs/operations/SERVICE-ASSET-REGISTER.md`を新規追加。マージコミット`75b4d1a4a2348729c84c04219ec05172d6836e0f`。Vercel Production `dpl_9rtp6boAERBGrbHEeiHCjY6NjNS5`がREADYであることを確認済み。コード、API、DB、認証、決済、生成処理の変更はなし。
+
+- **外部サービスのアカウント保護確認**: GitHub、Vercel、Supabase、Stripe、OpenAI、Railway、お名前.comで多要素認証(MFA)または2段階認証(2FA)が有効であることを実画面で確認した。OpenRouterはGitHub連携ログインとGitHub側2FAによる保護を確認した。GitHubの復旧コードは保存済み。Railwayのセッション確認では、現在使用中のiPhone以外に有効な不審セッションはなかった。Supabaseの予備ログイン方法は未設定で、整備は後回しとした。
+
+- **運用通知・契約確認**: OpenRouterの残高不足アラートが有効(通知しきい値10ドル)、自動チャージは無効であることを確認した。Stripeのログイン用メールアドレスの変更を完了した(実際のメールアドレスはここには記載しない)。`pinastudio.jp`はお名前.com管理で、SMS方式の二段階認証が有効、自動更新は設定済み、更新期限日・登録期限日は2027-07-31であることを確認した。
+
 ## 2026-07-24 追加分: 完了・本番適用済み
 
 - **動画生成入口APIの古い重複クレジット計算を削除**: `api/seedance-start-priced.js`に残っていた、リファレンス15秒・720p・通常モデルを250クレジットと誤計算する古い料金式、10クレジット単位の丸め、`client estimate mismatch: 285 server: 250`警告、`estimated_credits`を250へ上書きする処理を削除した。実際の残高確認・クレジット控除は従来から`api/_lib/seedance-start.js`が正しい式で再計算しており、画面表示・実消費とも285クレジットの正常動作は変更していない。料金計算の実行元を本体APIへ一本化し、入口APIはモデル確認、参照画像一時停止条件、認証、本体への委譲だけを担当する構造に整理した。
