@@ -378,7 +378,10 @@ function updateAddTileUi(){
   const fileInput=$('file');
   if(!add||!fileInput)return;
   const max=maxAssetsForMode();
-  const atMax=max>0&&currentModeAssetList().length>=max;
+  // image_to_videoは画像が1枚(上限)あっても常に追加タイルを表示し、選び直しで
+  // 既存imgAssetを置き換えられるようにする。上限による非表示・無効化は
+  // reference_to_videoの最大9枚のときだけ適用する。
+  const atMax=mode==='reference_to_video'&&max>0&&currentModeAssetList().length>=max;
   add.style.display=(mode==='text_to_video')?'none':(atMax?'none':'');
   if(!sbLocked)fileInput.disabled=atMax||mode==='text_to_video';
 }
@@ -531,7 +534,11 @@ async function runUploadQueue(){
 
 // image_to_video専用の単一画像アップロード。imgAssetが別の画像に置き換えられた場合、
 // この時点で保持しているtargetへの参照はそのまま古い画像のアップロードを完了させるだけで、
-// 現在のimgAsset(新しい画像)には影響しない。
+// 結果(status/url)はtarget(古いオブジェクト)にしか書き込まれないため、現在のimgAsset
+// (新しい画像)へ古いアップロード結果が混入することはない。
+// 古いアップロードの完了後、現在のimgAssetがまだpendingのまま(置き換え後、旧アップロード中に
+// 待たされていた)であれば、続けて自動的にアップロードを開始する。imgUploadRunningによる
+// ガードで同時に複数のアップロードが走らないため、二重アップロードは起きない。
 async function runImgAssetUpload(){
   if(imgUploadRunning)return;
   if(!imgAsset||imgAsset.status!=='pending')return;
@@ -544,6 +551,7 @@ async function runImgAssetUpload(){
   }finally{
     imgUploadRunning=false;
     renderAssets();
+    if(imgAsset&&imgAsset.status==='pending')runImgAssetUpload();
   }
 }
 
