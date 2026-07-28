@@ -1,6 +1,6 @@
 # Pina Studio サービス資産台帳
 
-最終確認日：2026-07-27
+最終確認日：2026-07-28
 次回確認日：2026-08-27
 管理区分：公開用台帳
 
@@ -107,6 +107,11 @@ Pina Studioの運営に使用している外部サービス、役割、依存関
 - Pull RequestごとにPreviewを使用
 - 本番URL：`https://flowvid-studio.vercel.app`
 - 独自ドメイン：`https://pinastudio.jp`
+- 2026-07-28確認：Productionの最新デプロイがmainのcommit `1177672f66e5ef89d65b6d31be44e5750df42ea2`に対応し、READYであることを確認
+- 接続済みドメイン：
+  - `flowvid-studio.vercel.app`
+  - `pinastudio.jp`
+  - `[www.pinastudio.jp](https://www.pinastudio.jp)`
 
 ### 非公開台帳で確認する項目
 
