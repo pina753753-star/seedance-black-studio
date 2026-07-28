@@ -36,7 +36,10 @@
     <section class="layout">
       <div class="hero"><p>LOGIN</p><h1>生成するにはログインが必要です。</h1></div>
       <div class="card">
-        <div class="tabs"><button class="tab active" id="loginTab">ログイン</button><button class="tab" id="signupTab">新規登録</button></div>
+        <div class="tabs" style="grid-template-columns:1fr"><button class="tab active" id="loginTab">ログイン</button><button class="tab" id="signupTab" hidden>新規登録</button></div>
+        <div class="notice" style="margin-bottom:16px">
+          現在は限定ベータ版です。新規登録は運営者から案内を受けた方のみ利用できます。
+        </div>
         <form class="form" id="authForm">
           <div class="field"><label>メールアドレス</label><input id="email" type="email" placeholder="you@example.com" autocomplete="email" required></div>
           <div class="field"><label>パスワード</label><input id="password" type="password" placeholder="8文字以上" autocomplete="current-password" required></div>
