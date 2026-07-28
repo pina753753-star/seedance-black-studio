@@ -53,10 +53,11 @@ Pina Studioで取り扱うデータについて、現行リポジトリのコー
 |---|---|---|
 | 顧客ID、メールアドレス、契約、請求、支払い、返金情報 | 決済、サブスクリプション、請求対応 | カード番号等はStripeが管理し、Pina Studioのサーバーへ保存しない。法令・Stripeの保持方針により、アカウント削除後も取引記録が残る場合がある |
 
-## 5. OpenRouter・利用モデル提供者
+## 5. OpenAI・OpenRouter・利用モデル提供者
 
 | データ | 主な用途 | 注意点 |
 |---|---|---|
+| 生成プロンプト、参照画像URL等 | 生成前の安全確認・モデレーション | OpenAIのModeration APIへ送信する実装がある。判定内容によりOpenAIの追加分類処理へ送信される場合がある |
 | 動画生成プロンプト、生成設定、参照画像または参照画像URL | AI動画生成 | OpenRouterおよび利用モデル提供者へ処理に必要な範囲で送信される |
 | 絵コンテ画像、解析指示、生成された統合プロンプト | 絵コンテ解析 | OpenRouter経由でAnthropicのClaudeへ送信する実装がある |
 
@@ -85,7 +86,7 @@ Pina Studioで取り扱うデータについて、現行リポジトリのコー
 
 ## 9. ログ・ホスティング基盤
 
-Vercel、Supabase、Railway、Stripe、OpenRouter、Formspree等では、アクセスログ、エラーログ、監査ログ、IPアドレス、端末・ブラウザ情報等が各サービス側に記録される場合があります。
+Vercel、Supabase、Railway、Stripe、OpenAI、OpenRouter、Formspree等では、アクセスログ、エラーログ、監査ログ、IPアドレス、端末・ブラウザ情報等が各サービス側に記録される場合があります。
 
 現行リポジトリから、すべてのサービスについて統一された具体的な保存日数は確認できません。プライバシーポリシーでは「安全な運営、障害調査、問い合わせ対応、取引管理、法令上の義務等に必要な期間」とし、根拠のない固定日数は記載しません。
 
@@ -100,7 +101,7 @@ Vercel、Supabase、Railway、Stripe、OpenRouter、Formspree等では、アク�
 - Supabase Storageの参照画像、生成動画、編集動画
 - Stripeの顧客・契約・決済・返金記録
 - Formspreeの問い合わせ記録
-- Railway、Vercel、OpenRouter等のログ・一時ファイル
+- Railway、Vercel、OpenAI、OpenRouter等のログ・一時ファイル
 - バックアップや監査記録
 - 利用者端末のCookie・localStorageは、必要に応じて本人へ削除方法を案内
 
