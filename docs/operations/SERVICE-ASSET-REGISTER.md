@@ -80,7 +80,8 @@ Pina Studioの運営に使用している外部サービス、役割、依存関
 - [x] 復旧方法
 - [ ] GitHub App・連携サービス
 - [ ] Personal Access Tokenの有無
-- [ ] mainブランチ保護
+- [x] mainブランチ保護
+  - 2026-07-28確認：Ruleset `Protect main branch`をActiveで設定。対象は既定ブランチ`main`。ブランチ削除禁止、force push禁止、Pull Request経由必須、未解決会話の解消必須。必須承認数は0、必須ステータスチェックは未設定、Bypassなし。
 - [ ] 支払プラン
 - [ ] 不要ブランチの整理方針
 
@@ -111,7 +112,7 @@ Pina Studioの運営に使用している外部サービス、役割、依存関
 - 接続済みドメイン：
   - `flowvid-studio.vercel.app`
   - `pinastudio.jp`
-  - `[www.pinastudio.jp](https://www.pinastudio.jp)`
+  - `www.pinastudio.jp`
 
 ### 非公開台帳で確認する項目
 
