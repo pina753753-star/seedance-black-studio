@@ -101,8 +101,7 @@
   - 問い合わせ内容
   - モデレーション記録
   - IPアドレス・アクセスログ
-- [x] 外部サービスへ送信するデータを一覧化する
-  - 2026-07-29完了: OpenAI、OpenRouter、Anthropic、Railway、Formspree、Vercel等への送信内容を`DATA-INVENTORY.md`と`privacy.html`へ反映済み(PR #126)。
+- [ ] 外部サービスへ送信するデータを一覧化する
 - [ ] 保存期間と削除条件を決める
 - [x] ユーザーから削除依頼を受けた場合の手順を作る
   - 2026-07-29完了: `docs/operations/ACCOUNT-DELETION-PROCEDURE.md`を追加済み(PR #128)。
