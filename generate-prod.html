@@ -36,9 +36,9 @@
 <header class="top"><a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a><button class="home" id="menuBtn">☰</button></header>
 
 <div class="tabs">
-  <button class="on" data-mode="reference_to_video">リファレンス</button>
+  <button data-mode="reference_to_video" disabled>リファレンス（準備中）</button>
   <button data-mode="image_to_video">画像から動画</button>
-  <button data-mode="text_to_video">テキストから動画</button>
+  <button class="on" data-mode="text_to_video">テキストから動画</button>
   <button data-mode="storyboard">絵コンテ</button>
   <button data-mode="video_edit" id="videoEditTab">動画編集</button>
 </div>
@@ -168,7 +168,7 @@ function sbReadDraft(){try{return JSON.parse(localStorage.getItem(SB_DRAFT_KEY)|
 function sbWriteDraft(patch){const d={...sbReadDraft(),...patch,updatedAt:new Date().toISOString()};localStorage.setItem(SB_DRAFT_KEY,JSON.stringify(d));return d}
 
 let draft=readDraft();
-let mode=draft.mode||'reference_to_video',urls=[],files=[],_activePtId='';
+let mode=(draft.mode==='reference_to_video'?'text_to_video':draft.mode)||'text_to_video',urls=[],files=[],_activePtId='';
 // assets: リファレンス/画像から動画タブで表示中の各画像の状態管理。
 // {id, status:'pending'|'uploading'|'completed'|'failed', url, objectUrl, file, error}
 // urlsは常にassetsのcompleted項目から再構築される派生値であり、localStorageへ保存する
@@ -263,6 +263,7 @@ function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?
 function syncComboWarning(){const mo=$('model')?.value||'';const isFastLite=mo==='bytedance/seedance-2.0-fast'||mo==='bytedance/seedance-2.0-lite';const isRefMode=mode==='reference_to_video';const resEl=$('resolution');if(resEl){const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=isFastLite&&isRefMode;}const el=$('comboWarning');if(!el)return;const blocked=isComboBlocked();if(blocked){el.textContent='このモデルとリファレンスモードでは1080pを利用できません。';el.style.display='block';}else el.style.display='none';}
 
 function setMode(m){
+  if(m==='reference_to_video')m='text_to_video';
   const wasSbLocked=sbLocked;
   mode=m;
   window.flowvidGenerationMode=m;
@@ -929,12 +930,13 @@ restoreDraft();
 // 絵コンテのプロンプト確定(prepared)済みの専用下書きがあれば、通常タブのdraft.modeや
 // flowvidGenerateModeより優先して絵コンテタブ選択+mainCard表示を復元する。
 if(!sbTryRestorePrepared()){
-  const q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
+  const q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'text_to_video';
   // video_editはsetMode()の対象外(mainCard/sbSectionの表示切り替えしか行わず、videoEditSectionを
   // 表示しないため)。以前はvideo_editが許可リストに無く常にreference_to_videoへ強制されており、
   // リロード直後に一瞬「参照ページ」が見える原因になっていた。ここでonVideoEditTab()を直接呼び、
   // 最初からvideo_editへ復元する。
-  if(q==='video_edit'){onVideoEditTab()}else{setMode(['reference_to_video','image_to_video','text_to_video','storyboard'].includes(q)?q:'reference_to_video')}
+  // リファレンスタブは準備中のため、対象modeであってもsetMode()内でtext_to_videoへ差し替わる。
+  if(q==='video_edit'){onVideoEditTab()}else{setMode(['reference_to_video','image_to_video','text_to_video','storyboard'].includes(q)?q:'text_to_video')}
 }
 renderAssets();updateCreditUi();syncComboWarning();
 
