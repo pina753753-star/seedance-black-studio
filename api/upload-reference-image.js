@@ -7,6 +7,7 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/webp'
 ]);
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const QUARANTINE_BUCKET = 'reference-image-quarantine';
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -50,6 +51,7 @@ module.exports = async function handler(req, res) {
     const dataUrl = String(body.dataUrl || '');
     const filename = String(body.filename || `reference-${Date.now()}.jpg`);
     const requestedContentType = String(body.contentType || '').toLowerCase();
+    const quarantineOnly = body.quarantineOnly === true;
 
     const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
     if (!match) {
@@ -68,15 +70,47 @@ module.exports = async function handler(req, res) {
     }
 
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const path = `seedance/${Date.now()}-${Math.random().toString(36).slice(2)}-${safeName}`;
+    const pathPrefix = quarantineOnly ? `verification/${auth.user.id}` : 'seedance';
+    const path = `${pathPrefix}/${Date.now()}-${Math.random().toString(36).slice(2)}-${safeName}`;
+    const targetBucket = quarantineOnly ? QUARANTINE_BUCKET : bucket;
 
-    const { error } = await supabase.storage.from(bucket).upload(path, buffer, {
+    const { error } = await supabase.storage.from(targetBucket).upload(path, buffer, {
       contentType,
       upsert: false
     });
 
     if (error) {
-      return res.status(500).json({ ok: false, error: error.message, bucket, path });
+      return res.status(500).json({
+        ok: false,
+        error: quarantineOnly ? 'QUARANTINE_UPLOAD_FAILED' : error.message,
+        bucket: targetBucket,
+        path
+      });
+    }
+
+    if (quarantineOnly) {
+      const { error: deleteError } = await supabase.storage.from(QUARANTINE_BUCKET).remove([path]);
+
+      if (deleteError) {
+        console.error('Reference image quarantine cleanup failed', {
+          bucket: QUARANTINE_BUCKET,
+          path,
+          message: deleteError.message
+        });
+        return res.status(500).json({
+          ok: false,
+          error: 'QUARANTINE_DELETE_FAILED',
+          message: '隔離画像の削除を確認できませんでした。'
+        });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        quarantineVerified: true,
+        deleted: true,
+        publicUrlIssued: false,
+        size: buffer.length
+      });
     }
 
     const { data } = supabase.storage.from(bucket).getPublicUrl(path);
