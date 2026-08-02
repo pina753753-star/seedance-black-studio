@@ -26,6 +26,21 @@ module.exports = async function handler(req, res) {
     return res.status(auth.status).json(auth.body);
   }
 
+  const testBypassUserId = String(process.env.TEST_BYPASS_USER_ID || '').trim();
+  const isApprovedTestUser = Boolean(
+    testBypassUserId &&
+    auth.user &&
+    auth.user.id === testBypassUserId
+  );
+
+  if (!isApprovedTestUser) {
+    return res.status(503).json({
+      ok: false,
+      error: 'REFERENCE_IMAGE_UPLOAD_DISABLED',
+      message: '参照画像機能は安全確認中のため、現在利用できません。'
+    });
+  }
+
   const supabase = auth.supabase || createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false }
   });
