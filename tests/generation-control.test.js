@@ -181,6 +181,23 @@ test('Seedanceは残高控除とプール別台帳を1トランザクション�
   assert.match(source, /grant execute on function[\s\S]*to service_role/i, 'only service_role may execute the RPC');
 });
 
+test('Seedanceはタスク予約時点でOpenRouter復旧対象を永続化する', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'supabase/migrations/20260803081000_add_atomic_generation_credit_deduction.sql'),
+    'utf8'
+  );
+  const reserveStart = source.indexOf('create or replace function public.reserve_generation_task(');
+  const deductStart = source.indexOf('create or replace function public.deduct_generation_credits_atomic(');
+  const reserveFunction = source.slice(reserveStart, deductStart);
+
+  assert.notEqual(reserveStart, -1, 'reservation RPC redefinition is missing');
+  assert.match(reserveFunction, /api_provider[\s\S]*'openrouter'/i, 'provider must be inserted with the queued task');
+  assert.match(reserveFunction, /pg_try_advisory_xact_lock/i, 'per-user reservation lock must be preserved');
+  assert.match(reserveFunction, /interval '60 seconds'/i, 'generation cooldown must be preserved');
+  assert.match(reserveFunction, /set search_path = ''/i, 'reservation RPC search_path must be fixed');
+  assert.match(reserveFunction, /grant execute on function[\s\S]*to service_role/i, 'reservation RPC must remain service-role only');
+});
+
 test('Seedanceの控除処理は原子的RPC以外で残高や台帳を書き込まない', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'api/_lib/seedance-start.js'), 'utf8');
   const start = source.indexOf('async function checkAndDeduct(');

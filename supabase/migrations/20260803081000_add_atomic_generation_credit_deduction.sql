@@ -1,5 +1,106 @@
 begin;
 
+-- Persist the provider in the same transaction that reserves the task. This
+-- keeps even a pre-deduction orphan discoverable by openrouter-reconcile.
+create or replace function public.reserve_generation_task(
+  p_user_id uuid,
+  p_mode text,
+  p_model text,
+  p_prompt text,
+  p_resolution text,
+  p_duration_secs integer,
+  p_aspect_ratio text,
+  p_credit_cost integer
+)
+returns table (
+  task_id uuid,
+  rejection_reason text,
+  retry_after_seconds integer
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_lock_key bigint;
+  v_active_count integer;
+  v_finished_at timestamptz;
+  v_cooldown_secs integer;
+  v_new_task_id uuid;
+begin
+  v_lock_key := hashtext(p_user_id::text)::bigint;
+
+  if not pg_try_advisory_xact_lock(v_lock_key) then
+    return query select null::uuid, 'active_generation'::text, 0::integer;
+    return;
+  end if;
+
+  select count(*)
+    into v_active_count
+    from public.generation_tasks
+   where user_id = p_user_id
+     and status in ('queued', 'processing');
+
+  if v_active_count > 0 then
+    return query select null::uuid, 'active_generation'::text, 0::integer;
+    return;
+  end if;
+
+  select max(finished_at)
+    into v_finished_at
+    from public.generation_tasks
+   where user_id = p_user_id
+     and finished_at is not null;
+
+  if v_finished_at is not null and v_finished_at + interval '60 seconds' > now() then
+    v_cooldown_secs := greatest(
+      1,
+      least(
+        60,
+        ceil(extract(epoch from (v_finished_at + interval '60 seconds' - now())))::integer
+      )
+    );
+    return query select null::uuid, 'cooldown_active'::text, v_cooldown_secs;
+    return;
+  end if;
+
+  insert into public.generation_tasks (
+    user_id,
+    mode,
+    model,
+    prompt,
+    resolution,
+    duration_seconds,
+    aspect_ratio,
+    credit_cost,
+    status,
+    api_provider
+  ) values (
+    p_user_id,
+    p_mode,
+    p_model,
+    p_prompt,
+    p_resolution,
+    p_duration_secs,
+    p_aspect_ratio,
+    p_credit_cost,
+    'queued',
+    'openrouter'
+  )
+  returning id into v_new_task_id;
+
+  return query select v_new_task_id, null::text, 0::integer;
+end;
+$$;
+
+revoke all on function public.reserve_generation_task(
+  uuid, text, text, text, text, integer, text, integer
+) from public, anon, authenticated, service_role;
+
+grant execute on function public.reserve_generation_task(
+  uuid, text, text, text, text, integer, text, integer
+) to service_role;
+
 create or replace function public.deduct_generation_credits_atomic(
   p_task_id uuid,
   p_user_id uuid,
