@@ -135,80 +135,43 @@ function serviceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
 }
 
-// Reads the current balance and deducts creditCost atomically using optimistic
-// concurrency control: the UPDATE only succeeds if the balance hasn't changed
-// since we read it, which prevents double-deduction from concurrent requests.
+// Deducts the balance and writes all per-pool charge ledger rows in one DB
+// transaction. The task row and balance row are locked by the RPC, and a retry
+// for the same task returns the existing charge instead of deducting twice.
 async function checkAndDeduct(db, userId, creditCost, taskId) {
-  const { data: bal, error: readErr } = await db
-    .from('credit_balances')
-    .select('free_credits,subscription_credits,purchased_credits,subscription_expires_at,purchased_expires_at')
-    .eq('user_id', userId)
-    .maybeSingle();
+  try {
+    const { data, error } = await db.rpc('deduct_generation_credits_atomic', {
+      p_task_id: taskId,
+      p_user_id: userId,
+      p_credit_cost: creditCost
+    });
+    if (error) return { ok: false, error: error.message };
+    if (!data?.ok) {
+      const balance = Number(data?.balance || 0);
+      const required = Number(data?.required || creditCost);
+      if (data?.code === 'insufficient_credits') {
+        return {
+          ok: false,
+          insufficient: true,
+          balance,
+          required,
+          error: `クレジット不足です（残高: ${balance}、必要: ${required}）`
+        };
+      }
+      return { ok: false, error: data?.code || 'クレジット控除に失敗しました' };
+    }
 
-  if (readErr) return { ok: false, error: readErr.message };
-  if (!bal) return { ok: false, error: 'クレジット残高が見つかりません' };
-
-  const now = new Date();
-  const expiredFields = {};
-  if (bal.subscription_expires_at && new Date(bal.subscription_expires_at) < now) {
-    expiredFields.subscription_credits = 0;
-    bal.subscription_credits = 0;
+    return {
+      ok: true,
+      deducted: Number(data.deducted || creditCost),
+      newBalance: Number(data.new_balance || 0),
+      fromSub: Number(data.from_subscription || 0),
+      fromFree: Number(data.from_free || 0),
+      fromPurchased: Number(data.from_purchased || 0)
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
   }
-  if (bal.purchased_expires_at && new Date(bal.purchased_expires_at) < now) {
-    expiredFields.purchased_credits = 0;
-    bal.purchased_credits = 0;
-  }
-  if (Object.keys(expiredFields).length > 0) {
-    expiredFields.updated_at = now.toISOString();
-    await db.from('credit_balances').update(expiredFields).eq('user_id', userId);
-  }
-
-  const free = Number(bal.free_credits || 0);
-  const sub = Number(bal.subscription_credits || 0);
-  const purchased = Number(bal.purchased_credits || 0);
-  const total = free + sub + purchased;
-
-  if (total < creditCost) {
-    return { ok: false, insufficient: true, balance: total, required: creditCost,
-      error: `クレジット不足です（残高: ${total}、必要: ${creditCost}）` };
-  }
-
-  // Deduct priority: subscription → free → purchased
-  let remaining = creditCost;
-  const fromSub = Math.min(remaining, sub); remaining -= fromSub;
-  const fromFree = Math.min(remaining, free); remaining -= fromFree;
-  const fromPurchased = Math.min(remaining, purchased);
-
-  // Optimistic lock: WHERE clause matches the exact values we read.
-  // If another request already modified the balance, this returns 0 rows.
-  const { data: updated, error: updateErr } = await db
-    .from('credit_balances')
-    .update({
-      subscription_credits: sub - fromSub,
-      free_credits: free - fromFree,
-      purchased_credits: purchased - fromPurchased,
-      updated_at: new Date().toISOString()
-    })
-    .eq('user_id', userId)
-    .eq('subscription_credits', sub)
-    .eq('free_credits', free)
-    .eq('purchased_credits', purchased)
-    .select('free_credits,subscription_credits,purchased_credits');
-
-  if (updateErr) return { ok: false, error: updateErr.message };
-  if (!updated || updated.length === 0) {
-    return { ok: false, concurrentUpdate: true,
-      error: 'クレジット残高が更新中です。もう一度お試しください。' };
-  }
-
-  // Record per-pool transactions
-  const txRows = [];
-  if (fromSub > 0) txRows.push({ user_id: userId, amount: -fromSub, credit_type: 'subscription', reason: 'video_generation', related_task_id: taskId || null });
-  if (fromFree > 0) txRows.push({ user_id: userId, amount: -fromFree, credit_type: 'free', reason: 'video_generation', related_task_id: taskId || null });
-  if (fromPurchased > 0) txRows.push({ user_id: userId, amount: -fromPurchased, credit_type: 'purchased', reason: 'video_generation', related_task_id: taskId || null });
-  if (txRows.length) await db.from('credit_transactions').insert(txRows);
-
-  return { ok: true, deducted: creditCost, newBalance: total - creditCost, fromSub, fromFree, fromPurchased };
 }
 
 // Returns credits to the exact pools they were deducted from.
@@ -617,12 +580,8 @@ module.exports = async function handler(req, res) {
       let refundData = null;
       let refundError = null;
       try {
-        const refundResult = await db.rpc('refund_unsent_generation_task_atomic', {
+        const refundResult = await db.rpc('refund_generation_task_atomic', {
           p_task_id: taskId,
-          p_user_id: user.id,
-          p_from_subscription: deduction.fromSub,
-          p_from_free: deduction.fromFree,
-          p_from_purchased: deduction.fromPurchased,
           p_error_message: 'Generation stopped before provider submission'
         });
         refundData = refundResult.data;

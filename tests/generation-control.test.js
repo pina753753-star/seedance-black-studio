@@ -107,7 +107,7 @@ test('3つの開始経路すべてが外部処理より前に停止判定する'
 test('時間のかかる処理後と外部送信直前にも停止状態を再確認する', () => {
   const root = path.join(__dirname, '..');
   const checks = [
-    ['api/_lib/seedance-start.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(OPENROUTER_VIDEO_ENDPOINT', "db.rpc('refund_unsent_generation_task_atomic'"],
+    ['api/_lib/seedance-start.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(OPENROUTER_VIDEO_ENDPOINT', "db.rpc('refund_generation_task_atomic'"],
     ['api/video-edit.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(`${railwayBaseUrl', "db.rpc('refund_video_edit_task'"],
     ['api/storyboard-prompt.js', 2, 'const preSendControl = await checkGenerationControl(auth.supabase);', 'fetch(OPENROUTER_CHAT_ENDPOINT', null]
   ];
@@ -153,30 +153,40 @@ test('Seedanceの送信前停止は原子的返還を使い、失敗時の復旧
   const sendIndex = source.indexOf('fetch(OPENROUTER_VIDEO_ENDPOINT', finalCheckIndex);
   const finalBlock = source.slice(finalCheckIndex, sendIndex);
 
-  assert.match(finalBlock, /db\.rpc\('refund_unsent_generation_task_atomic'/, 'atomic refund RPC is missing');
-  assert.match(finalBlock, /p_from_subscription: deduction\.fromSub/, 'subscription refund amount is missing');
-  assert.match(finalBlock, /p_from_free: deduction\.fromFree/, 'free refund amount is missing');
-  assert.match(finalBlock, /p_from_purchased: deduction\.fromPurchased/, 'purchased refund amount is missing');
+  assert.match(finalBlock, /db\.rpc\('refund_generation_task_atomic'/, 'atomic refund RPC is missing');
   assert.match(finalBlock, /refundData\.code === 'refunded'/, 'confirmed refund result is not checked');
   assert.match(finalBlock, /refundData\.code === 'already_refunded'/, 'idempotent refund result is not accepted');
   assert.doesNotMatch(finalBlock, /refundCredits\(/, 'non-atomic JavaScript refund must not be used');
   assert.doesNotMatch(finalBlock, /releaseTask\(/, 'failed refund must not remove the task from reconciliation');
 });
 
-test('Seedance送信前の専用RPCは台帳欠落時も控除結果から原子的に返還できる', () => {
+test('Seedanceは残高控除とプール別台帳を1トランザクションで完了する', () => {
   const source = fs.readFileSync(
-    path.join(__dirname, '..', 'supabase/migrations/20260803081000_add_emergency_generation_refund.sql'),
+    path.join(__dirname, '..', 'supabase/migrations/20260803081000_add_atomic_generation_credit_deduction.sql'),
     'utf8'
   );
 
   assert.match(source, /security definer/i, 'SECURITY DEFINER is required');
   assert.match(source, /set search_path = ''/i, 'search_path must be fixed');
   assert.match(source, /for update;/i, 'row locks are required');
-  assert.match(source, /p_from_subscription \+ p_from_free \+ p_from_purchased <> v_credit_cost/i, 'task cost must match refund total');
-  assert.match(source, /subscription_credits = subscription_credits \+ p_from_subscription/i, 'subscription pool restore is missing');
-  assert.match(source, /free_credits = free_credits \+ p_from_free/i, 'free pool restore is missing');
-  assert.match(source, /purchased_credits = purchased_credits \+ p_from_purchased/i, 'purchased pool restore is missing');
-  assert.match(source, /credit_transactions_generation_refund_unique|reason = 'generation_refund'/i, 'idempotent refund ledger is missing');
+  assert.match(source, /v_task_credit_cost <> p_credit_cost/i, 'task cost must match requested deduction');
+  assert.match(source, /subscription_credits = v_subscription - v_from_subscription/i, 'subscription deduction is missing');
+  assert.match(source, /free_credits = v_free - v_from_free/i, 'free deduction is missing');
+  assert.match(source, /purchased_credits = v_purchased - v_from_purchased/i, 'purchased deduction is missing');
+  assert.match(source, /'subscription', 'video_generation'/i, 'subscription ledger is missing');
+  assert.match(source, /'free', 'video_generation'/i, 'free ledger is missing');
+  assert.match(source, /'purchased', 'video_generation'/i, 'purchased ledger is missing');
   assert.match(source, /revoke all on function[\s\S]*from public, anon, authenticated, service_role/i, 'default execute privileges must be revoked');
   assert.match(source, /grant execute on function[\s\S]*to service_role/i, 'only service_role may execute the RPC');
+});
+
+test('Seedanceの控除処理は原子的RPC以外で残高や台帳を書き込まない', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api/_lib/seedance-start.js'), 'utf8');
+  const start = source.indexOf('async function checkAndDeduct(');
+  const end = source.indexOf('// Returns credits to the exact pools', start);
+  const functionSource = source.slice(start, end);
+
+  assert.match(functionSource, /db\.rpc\('deduct_generation_credits_atomic'/, 'atomic deduction RPC is missing');
+  assert.doesNotMatch(functionSource, /\.from\('credit_balances'\)/, 'balance must not be updated outside the transaction');
+  assert.doesNotMatch(functionSource, /\.from\('credit_transactions'\)/, 'ledger must not be inserted outside the transaction');
 });
