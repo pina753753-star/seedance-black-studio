@@ -29,16 +29,6 @@ function reasonTag(kind, stripeId) {
   return `stripe:${kind}:${stripeId}`;
 }
 
-async function alreadyProcessed(db, reason) {
-  const { data, error } = await db
-    .from('credit_transactions')
-    .select('id')
-    .eq('reason', reason)
-    .limit(1);
-  if (error) return false;
-  return Array.isArray(data) && data.length > 0;
-}
-
 // Expires-at helpers
 function calcExpiresAt(pool) {
   const now = new Date();
@@ -52,66 +42,40 @@ function calcExpiresAt(pool) {
   return null;
 }
 
-// Grant credits to a pool (subscription_credits | purchased_credits).
-// Uses upsert-style logic: INSERT if no row exists, UPDATE otherwise.
-// related_task_id is intentionally left null for Stripe-sourced grants
-// (the column is uuid; Stripe IDs are text and cannot be stored there).
+// Grant credits and write the Stripe ledger entry in one database transaction.
+// The RPC is executable only by service_role and uses the unique Stripe reason
+// index to make retries and concurrent webhook deliveries idempotent.
 async function grantCredits(db, { userId, credits, pool, creditType, reason, plan }) {
   if (!userId || !(credits > 0)) return { ok: false, skipped: 'no-credits' };
 
-  if (await alreadyProcessed(db, reason)) {
-    return { ok: true, skipped: 'duplicate' };
+  const expectedCreditType = pool === 'subscription_credits'
+    ? 'subscription'
+    : pool === 'purchased_credits'
+      ? 'purchased'
+      : '';
+  if (!expectedCreditType || creditType !== expectedCreditType) {
+    return { ok: false, error: 'invalid_credit_pool' };
   }
 
-  // Insert the ledger row FIRST. credit_transactions_stripe_reason_unique (partial
-  // unique index on reason WHERE reason LIKE 'stripe:%') rejects a concurrent
-  // duplicate delivery of the same Stripe event here, before any balance is
-  // touched — closing the race that the alreadyProcessed() check above cannot
-  // close on its own (SELECT-then-act is not atomic across concurrent requests).
-  const { error: txErr } = await db.from('credit_transactions').insert({
-    user_id: userId,
-    amount: credits,
-    credit_type: creditType,
-    reason,
-    related_task_id: null  // uuid column cannot hold Stripe text IDs
+  const { data, error } = await db.rpc('grant_stripe_credits_atomic', {
+    p_user_id: userId,
+    p_credits: Math.round(credits),
+    p_pool: pool,
+    p_reason: reason,
+    p_expires_at: calcExpiresAt(pool),
+    p_plan: plan || null
   });
-  if (txErr) {
-    if (txErr.code === '23505') {
-      console.log('[stripe-webhook] duplicate grant blocked by unique constraint, reason:', reason);
-      return { ok: true, skipped: 'duplicate' };
-    }
-    console.error('[stripe-webhook] credit_transactions insert failed:', txErr.message, 'reason:', reason);
-    return { ok: false, error: txErr.message };
+
+  if (error) {
+    console.error('[stripe-webhook] atomic credit grant failed:', error.message, 'reason:', reason);
+    return { ok: false, error: error.message };
   }
 
-  const { data: bal } = await db
-    .from('credit_balances')
-    .select('free_credits,subscription_credits,purchased_credits')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  const expiresAt = calcExpiresAt(pool);
-  const expiresCol = pool === 'subscription_credits' ? 'subscription_expires_at' : 'purchased_expires_at';
-
-  if (!bal) {
-    const insertRow = { user_id: userId, free_credits: 0, subscription_credits: 0, purchased_credits: 0, [pool]: credits };
-    if (expiresAt) insertRow[expiresCol] = expiresAt;
-    const { error: insErr } = await db.from('credit_balances').insert(insertRow);
-    if (insErr) return { ok: false, error: insErr.message };
-  } else {
-    const current = Number(bal[pool] || 0);
-    const update = { [pool]: current + credits, updated_at: new Date().toISOString() };
-    if (expiresAt) update[expiresCol] = expiresAt;
-    const { error: updErr } = await db.from('credit_balances').update(update).eq('user_id', userId);
-    if (updErr) return { ok: false, error: updErr.message };
+  if (!data || data.ok !== true) {
+    return { ok: false, error: 'atomic_credit_grant_invalid_response' };
   }
 
-  if (plan) {
-    const { error: planErr } = await db.from('profiles').update({ plan }).eq('id', userId);
-    if (planErr) console.error('[stripe-webhook] profiles.plan update failed:', planErr.message, 'userId:', userId);
-  }
-
-  return { ok: true, granted: credits, pool };
+  return data;
 }
 
 // Upsert user_subscriptions row from a Stripe Subscription object.
@@ -171,19 +135,22 @@ async function upsertSubscription(db, sub, extraMeta) {
   };
 
   // Only set next_credit_grant_at on first insert for annual subs
-  const { data: existing } = await db
+  const { data: existing, error: existingError } = await db
     .from('user_subscriptions')
     .select('next_credit_grant_at')
     .eq('stripe_subscription_id', sub.id)
     .maybeSingle();
+  if (existingError) throw existingError;
 
   if (!existing) {
     if (nextGrantAt) row.next_credit_grant_at = nextGrantAt;
     row.created_at = new Date().toISOString();
-    await db.from('user_subscriptions').insert(row);
+    const { error } = await db.from('user_subscriptions').insert(row);
+    if (error) throw error;
   } else {
     // Update period/status but preserve next_credit_grant_at (Cron manages it)
-    await db.from('user_subscriptions').update(row).eq('stripe_subscription_id', sub.id);
+    const { error } = await db.from('user_subscriptions').update(row).eq('stripe_subscription_id', sub.id);
+    if (error) throw error;
   }
 }
 
@@ -211,12 +178,8 @@ async function handleCheckoutCompleted(db, stripe, session) {
   if (meta.purchaseType === 'subscription') {
     // Fetch the Stripe subscription to upsert into user_subscriptions
     if (session.subscription) {
-      try {
-        const sub = await stripe.subscriptions.retrieve(session.subscription);
-        await upsertSubscription(db, sub, session.metadata || {});
-      } catch (e) {
-        console.error('[stripe-webhook] subscription retrieve failed:', e.message);
-      }
+      const sub = await stripe.subscriptions.retrieve(session.subscription);
+      await upsertSubscription(db, sub, session.metadata || {});
     }
 
     return grantCredits(db, {
@@ -253,12 +216,8 @@ async function handleInvoicePaid(db, stripe, invoice) {
   if (billingInterval === 'year') {
     // Update subscription period dates; do NOT grant 12 months of credits here
     if (invoice.subscription) {
-      try {
-        const sub = await stripe.subscriptions.retrieve(invoice.subscription);
-        await upsertSubscription(db, sub, subMeta);
-      } catch (e) {
-        console.error('[stripe-webhook] annual renewal subscription retrieve failed:', e.message);
-      }
+      const sub = await stripe.subscriptions.retrieve(invoice.subscription);
+      await upsertSubscription(db, sub, subMeta);
     }
     return { ok: true, skipped: 'annual-renewal-handled-by-cron' };
   }
@@ -311,7 +270,7 @@ async function clearProfilePlanIfEnded(db, sub) {
 
   if (lookupErr) {
     console.error('[stripe-webhook] active-subscription lookup failed:', lookupErr.message, 'userId:', userId);
-    return; // Don't touch profiles.plan if we couldn't verify — safe side is to leave it as-is.
+    throw lookupErr;
   }
 
   const stillActive = (others || []).find(
@@ -320,7 +279,7 @@ async function clearProfilePlanIfEnded(db, sub) {
 
   const nextPlan = stillActive ? stillActive.plan : 'free';
   const { error } = await db.from('profiles').update({ plan: nextPlan }).eq('id', userId);
-  if (error) console.error('[stripe-webhook] profiles.plan reset failed:', error.message, 'userId:', userId);
+  if (error) throw error;
 }
 
 async function handleSubscriptionUpdated(db, sub) {
@@ -338,7 +297,7 @@ async function handleSubscriptionDeleted(db, sub) {
     .from('user_subscriptions')
     .update({ status: sub.status || 'canceled', updated_at: new Date().toISOString() })
     .eq('stripe_subscription_id', sub.id);
-  if (error) console.error('[stripe-webhook] subscription delete sync failed:', error.message);
+  if (error) throw error;
   await clearProfilePlanIfEnded(db, sub);
   return { ok: true };
 }
@@ -382,6 +341,7 @@ module.exports = async function handler(req, res) {
 
     if (result && !result.ok && !result.skipped) {
       console.error('[stripe-webhook] handler failed:', event.type, JSON.stringify(result));
+      return res.status(500).json({ ok: false, type: event.type, eventId: event.id, result });
     }
     return res.status(200).json({ ok: true, type: event.type, eventId: event.id, result });
   } catch (e) {
