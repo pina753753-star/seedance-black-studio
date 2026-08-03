@@ -5,6 +5,7 @@
 
   function safeJson(text,fallback){try{return JSON.parse(text||'')}catch(_){return fallback}}
   function $(id){return document.getElementById(id)}
+  async function getToken(){try{const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;if(!client)return'';const{data}=await client.auth.getSession();return data?.session?.access_token||''}catch(_){return''}}
   function findVideoUrl(value){
     if(!value)return'';
     if(typeof value==='string'){
@@ -28,7 +29,9 @@
   async function check(jobId,pollingUrl){
     const p=new URLSearchParams();
     if(pollingUrl)p.set('pollingUrl',pollingUrl);else p.set('id',jobId);
-    const res=await fetch('/api/seedance-status?'+p.toString(),{cache:'no-store'});
+    const token=await getToken();
+    if(!token)return false;
+    const res=await fetch('/api/seedance-status?'+p.toString(),{cache:'no-store',headers:{'Authorization':'Bearer '+token}});
     const data=await res.json();
     const url=data.videoUrl||findVideoUrl(data);
     if(data.done&&url){
