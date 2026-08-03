@@ -306,7 +306,7 @@ function dbClient() {
 
 function isStatusEndpointUrl(url) {
   const value = String(url || '');
-  return /^https?:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(value);
+  return /^https:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(value);
 }
 
 function isOpenRouterContentUrl(url) {
