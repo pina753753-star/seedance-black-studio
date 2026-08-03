@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { moderateContent } = require('./openai-moderation.js');
 const { resolveModerationDecision } = require('./moderation-decision.js');
 const { requireConfirmedAuth } = require('./confirmed-auth.js');
+const { checkGenerationControl, REFUND_UNCONFIRMED_MESSAGE } = require('./generation-control.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
@@ -134,80 +135,43 @@ function serviceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
 }
 
-// Reads the current balance and deducts creditCost atomically using optimistic
-// concurrency control: the UPDATE only succeeds if the balance hasn't changed
-// since we read it, which prevents double-deduction from concurrent requests.
+// Deducts the balance and writes all per-pool charge ledger rows in one DB
+// transaction. The task row and balance row are locked by the RPC, and a retry
+// for the same task returns the existing charge instead of deducting twice.
 async function checkAndDeduct(db, userId, creditCost, taskId) {
-  const { data: bal, error: readErr } = await db
-    .from('credit_balances')
-    .select('free_credits,subscription_credits,purchased_credits,subscription_expires_at,purchased_expires_at')
-    .eq('user_id', userId)
-    .maybeSingle();
+  try {
+    const { data, error } = await db.rpc('deduct_generation_credits_atomic', {
+      p_task_id: taskId,
+      p_user_id: userId,
+      p_credit_cost: creditCost
+    });
+    if (error) return { ok: false, uncertain: true, error: error.message };
+    if (!data?.ok) {
+      const balance = Number(data?.balance || 0);
+      const required = Number(data?.required || creditCost);
+      if (data?.code === 'insufficient_credits') {
+        return {
+          ok: false,
+          insufficient: true,
+          balance,
+          required,
+          error: `クレジット不足です（残高: ${balance}、必要: ${required}）`
+        };
+      }
+      return { ok: false, error: data?.code || 'クレジット控除に失敗しました' };
+    }
 
-  if (readErr) return { ok: false, error: readErr.message };
-  if (!bal) return { ok: false, error: 'クレジット残高が見つかりません' };
-
-  const now = new Date();
-  const expiredFields = {};
-  if (bal.subscription_expires_at && new Date(bal.subscription_expires_at) < now) {
-    expiredFields.subscription_credits = 0;
-    bal.subscription_credits = 0;
+    return {
+      ok: true,
+      deducted: Number(data.deducted || creditCost),
+      newBalance: Number(data.new_balance || 0),
+      fromSub: Number(data.from_subscription || 0),
+      fromFree: Number(data.from_free || 0),
+      fromPurchased: Number(data.from_purchased || 0)
+    };
+  } catch (error) {
+    return { ok: false, uncertain: true, error: error?.message || String(error) };
   }
-  if (bal.purchased_expires_at && new Date(bal.purchased_expires_at) < now) {
-    expiredFields.purchased_credits = 0;
-    bal.purchased_credits = 0;
-  }
-  if (Object.keys(expiredFields).length > 0) {
-    expiredFields.updated_at = now.toISOString();
-    await db.from('credit_balances').update(expiredFields).eq('user_id', userId);
-  }
-
-  const free = Number(bal.free_credits || 0);
-  const sub = Number(bal.subscription_credits || 0);
-  const purchased = Number(bal.purchased_credits || 0);
-  const total = free + sub + purchased;
-
-  if (total < creditCost) {
-    return { ok: false, insufficient: true, balance: total, required: creditCost,
-      error: `クレジット不足です（残高: ${total}、必要: ${creditCost}）` };
-  }
-
-  // Deduct priority: subscription → free → purchased
-  let remaining = creditCost;
-  const fromSub = Math.min(remaining, sub); remaining -= fromSub;
-  const fromFree = Math.min(remaining, free); remaining -= fromFree;
-  const fromPurchased = Math.min(remaining, purchased);
-
-  // Optimistic lock: WHERE clause matches the exact values we read.
-  // If another request already modified the balance, this returns 0 rows.
-  const { data: updated, error: updateErr } = await db
-    .from('credit_balances')
-    .update({
-      subscription_credits: sub - fromSub,
-      free_credits: free - fromFree,
-      purchased_credits: purchased - fromPurchased,
-      updated_at: new Date().toISOString()
-    })
-    .eq('user_id', userId)
-    .eq('subscription_credits', sub)
-    .eq('free_credits', free)
-    .eq('purchased_credits', purchased)
-    .select('free_credits,subscription_credits,purchased_credits');
-
-  if (updateErr) return { ok: false, error: updateErr.message };
-  if (!updated || updated.length === 0) {
-    return { ok: false, concurrentUpdate: true,
-      error: 'クレジット残高が更新中です。もう一度お試しください。' };
-  }
-
-  // Record per-pool transactions
-  const txRows = [];
-  if (fromSub > 0) txRows.push({ user_id: userId, amount: -fromSub, credit_type: 'subscription', reason: 'video_generation', related_task_id: taskId || null });
-  if (fromFree > 0) txRows.push({ user_id: userId, amount: -fromFree, credit_type: 'free', reason: 'video_generation', related_task_id: taskId || null });
-  if (fromPurchased > 0) txRows.push({ user_id: userId, amount: -fromPurchased, credit_type: 'purchased', reason: 'video_generation', related_task_id: taskId || null });
-  if (txRows.length) await db.from('credit_transactions').insert(txRows);
-
-  return { ok: true, deducted: creditCost, newBalance: total - creditCost, fromSub, fromFree, fromPurchased };
 }
 
 // Returns credits to the exact pools they were deducted from.
@@ -418,6 +382,15 @@ module.exports = async function handler(req, res) {
   const db = auth.supabase || serviceClient();
   if (!db) return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
 
+  // Global emergency stop. Check after authentication but before moderation,
+  // task creation, credit deduction, or any OpenRouter request. A missing row
+  // or database read error fails closed so an uncertain control state can
+  // never start a paid generation.
+  const generationControl = await checkGenerationControl(db);
+  if (!generationControl.ok) {
+    return res.status(generationControl.status).json(generationControl.body);
+  }
+
   let taskId = null;
   let deduction = null;
   let orStarted = false;
@@ -523,6 +496,14 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // Moderation and the balance read can take long enough for an operator to
+    // activate the stop after the request's first check. Recheck immediately
+    // before task reservation so no write begins after a confirmed stop.
+    const preReservationControl = await checkGenerationControl(db);
+    if (!preReservationControl.ok) {
+      return res.status(preReservationControl.status).json(preReservationControl.body);
+    }
+
     // Reserve task atomically via RPC (advisory lock + active check + cooldown check + INSERT).
     // The partial unique index (queued/processing per user) remains as a final defence.
     // Credits and OpenRouter are never touched if reservation is rejected.
@@ -553,10 +534,59 @@ module.exports = async function handler(req, res) {
     taskId = taskResult.id;
     console.log('[seedance-start] task created:', taskId, 'user:', user.id, 'mode:', mode);
 
-    // Deduct credits with optimistic concurrency control (prevents double-deduction)
+    // Deduct balance + ledger rows in one DB transaction.
     deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
     if (!deduction.ok) {
       console.error('[seedance-start] credit deduction failed:', deduction.error, 'taskId:', taskId);
+
+      if (deduction.uncertain) {
+        // A transport error can arrive after the DB transaction committed.
+        // Reconcile atomically before changing the task to a terminal state.
+        // If this recovery call also fails, leave the queued task for the
+        // existing OpenRouter reconciliation job instead of losing the path.
+        let recoveryData = null;
+        let recoveryError = null;
+        try {
+          const recoveryResult = await db.rpc('refund_generation_task_atomic', {
+            p_task_id: taskId,
+            p_error_message: 'Generation credit deduction result was uncertain'
+          });
+          recoveryData = recoveryResult.data;
+          recoveryError = recoveryResult.error;
+        } catch (error) {
+          recoveryError = error;
+        }
+
+        const recoveryConfirmed = !recoveryError
+          && recoveryData?.ok === true
+          && ['refunded', 'already_refunded', 'no_charge_found'].includes(recoveryData.code);
+        const refunded = recoveryConfirmed
+          && (recoveryData.code === 'refunded' || recoveryData.code === 'already_refunded');
+
+        if (!recoveryConfirmed) {
+          console.error(
+            '[seedance-start] CRITICAL: uncertain deduction recovery failed, taskId:',
+            taskId,
+            'code:',
+            recoveryData?.code,
+            'error:',
+            recoveryError?.message || recoveryError || null
+          );
+        }
+
+        return res.status(recoveryConfirmed ? 409 : 500).json({
+          ok: false,
+          error: 'credit_deduction_unconfirmed',
+          message: recoveryConfirmed
+            ? (refunded
+              ? '生成は開始されず、クレジットを返還しました。もう一度お試しください。'
+              : 'クレジット控除を確認できなかったため、生成を開始しませんでした。もう一度お試しください。')
+            : REFUND_UNCONFIRMED_MESSAGE,
+          refunded,
+          creditRefunded: refunded ? creditCost : 0
+        });
+      }
+
       await releaseTask(db, user.id, taskId, 'cancelled');
       return res.status(deduction.insufficient ? 402 : 409).json({
         ok: false,
@@ -589,6 +619,48 @@ module.exports = async function handler(req, res) {
       if (inputReferences.length) payload.input_references = inputReferences;
       else if (referenceUrls.length) payload.input_references = referenceUrls;
       else if (referenceUrl) payload.input_references = [imageObject(referenceUrl)].filter(Boolean);
+    }
+
+    // Final check at the external-send boundary. If the stop was activated
+    // after reservation/deduction, restore the exact credit pools and mark the
+    // task failed in one idempotent DB transaction before returning.
+    const preSendControl = await checkGenerationControl(db);
+    if (!preSendControl.ok) {
+      let refundData = null;
+      let refundError = null;
+      try {
+        const refundResult = await db.rpc('refund_generation_task_atomic', {
+          p_task_id: taskId,
+          p_error_message: 'Generation stopped before provider submission'
+        });
+        refundData = refundResult.data;
+        refundError = refundResult.error;
+      } catch (error) {
+        refundError = error;
+      }
+
+      const refundConfirmed = !refundError
+        && refundData?.ok === true
+        && (refundData.code === 'refunded' || refundData.code === 'already_refunded');
+      if (!refundConfirmed) {
+        // Keep the task queued. The OpenRouter reconciliation job can retry the
+        // same atomic refund instead of losing the recovery path.
+        console.error(
+          '[seedance-start] CRITICAL: emergency-stop refund unconfirmed, taskId:',
+          taskId,
+          'code:',
+          refundData?.code,
+          'error:',
+          refundError?.message || refundError || null
+        );
+      }
+
+      return res.status(refundConfirmed ? preSendControl.status : 500).json({
+        ...preSendControl.body,
+        message: refundConfirmed ? preSendControl.body.message : REFUND_UNCONFIRMED_MESSAGE,
+        refunded: refundConfirmed,
+        creditRefunded: refundConfirmed ? creditCost : 0
+      });
     }
 
     // Call OpenRouter

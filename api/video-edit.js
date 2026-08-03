@@ -31,6 +31,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 const { calculateVideoEditCreditCost } = require('./_lib/video-edit-pricing.js');
+const { checkGenerationControl, REFUND_UNCONFIRMED_MESSAGE } = require('./_lib/generation-control.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
@@ -162,6 +163,13 @@ module.exports = async function handler(req, res) {
   const db = auth.supabase || dbClient();
   if (!db) return res.status(500).json({ ok: false, error: 'SERVER_NOT_CONFIGURED' });
 
+  // Apply the same global stop used by Seedance before plan checks, task
+  // reservation, credit deduction, or the Railway edit request.
+  const generationControl = await checkGenerationControl(db);
+  if (!generationControl.ok) {
+    return res.status(generationControl.status).json(generationControl.body);
+  }
+
   // Paid-plan gate on server-owned state only. Same approach as the
   // previous version of this file: subscription_expires_at is refreshed by
   // the Stripe webhook (service role) on every paid payment, so a future
@@ -223,6 +231,13 @@ module.exports = async function handler(req, res) {
   const inputManifest = {
     clips: resolvedClips.map((c) => ({ videoId: c.videoId, start: c.start, end: c.end, sourceUrl: c.sourceUrl }))
   };
+
+  // Source lookup and pricing can take place after the request's first stop
+  // check. Recheck immediately before the atomic reserve-and-deduct RPC.
+  const preReservationControl = await checkGenerationControl(db);
+  if (!preReservationControl.ok) {
+    return res.status(preReservationControl.status).json(preReservationControl.body);
+  }
 
   let taskId = null;
   let railwayReached = false; // true once we've received *any* HTTP response from Railway
@@ -301,6 +316,29 @@ module.exports = async function handler(req, res) {
       // file even if this request never gets a response back from Railway.
       taskId
     };
+
+    // Final check immediately before the Railway request. If the stop was
+    // activated after the atomic reservation, use the existing idempotent,
+    // row-locked refund RPC and leave no queued/processing edit behind.
+    const preSendControl = await checkGenerationControl(db);
+    if (!preSendControl.ok) {
+      const { data: refundRows, error: refundError } = await db.rpc('refund_video_edit_task', {
+        p_task_id: taskId,
+        p_failure_code: 'generation_emergency_stop'
+      });
+      const refundRow = Array.isArray(refundRows) ? refundRows[0] : refundRows;
+      const refunded = !refundError && Boolean(refundRow?.ok);
+      if (!refunded) {
+        console.error('[video-edit] CRITICAL: emergency-stop refund failed, taskId:', taskId, refundError?.message || refundRow?.reason);
+      }
+      return res.status(refunded ? preSendControl.status : 500).json({
+        ...preSendControl.body,
+        message: refunded ? preSendControl.body.message : REFUND_UNCONFIRMED_MESSAGE,
+        taskId,
+        refunded,
+        creditRefunded: refunded ? creditCost : 0
+      });
+    }
 
     let railwayResponse, railwayText, railwayData;
     const controller = new AbortController();

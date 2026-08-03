@@ -6,6 +6,7 @@
 // generation continues to go through the existing /api/seedance-start flow
 // unchanged, with mode: 'reference_to_video'.
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
+const { checkGenerationControl } = require('./_lib/generation-control.js');
 
 const OPENROUTER_CHAT_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const STORYBOARD_MODEL = 'anthropic/claude-sonnet-4-5';
@@ -87,6 +88,13 @@ module.exports = async function handler(req, res) {
     return res.status(auth.status).json(auth.body);
   }
 
+  // Do not spend OpenRouter chat-completion cost while all new video work is
+  // stopped. The same fail-closed control is shared with generation/editing.
+  const generationControl = await checkGenerationControl(auth.supabase);
+  if (!generationControl.ok) {
+    return res.status(generationControl.status).json(generationControl.body);
+  }
+
   // Reference-image generation is still temporarily paused site-wide
   // (see api/seedance-start-priced.js). Mirror the same bypass so a
   // non-bypass user cannot use this endpoint to get a free analysis that
@@ -143,6 +151,13 @@ module.exports = async function handler(req, res) {
 
   const durationSeconds = normalizeDuration(body.durationSeconds || body.duration);
   const aspectRatio = normalizeAspectRatio(body.aspectRatio || body.aspect_ratio);
+
+  // Image validation can take place after the first check. Recheck at the
+  // OpenRouter boundary so an analysis that has not been sent yet stops.
+  const preSendControl = await checkGenerationControl(auth.supabase);
+  if (!preSendControl.ok) {
+    return res.status(preSendControl.status).json(preSendControl.body);
+  }
 
   let response, data;
   try {
