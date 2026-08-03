@@ -280,6 +280,33 @@ test('年齢外見項目だけがfalseでも安全な架空アニメなら許可
   assert.equal(result.reason, 'safe_fictional_non_graphic_action');
 });
 
+test('明確な未成年でも負傷なしの一般向け魔法戦闘は許可', async () => {
+  const result = await resolveModerationDecision(
+    '12歳の妖精が怪物の攻撃を魔法の盾で防ぐ。負傷、流血、性的表現なし。',
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text'] }
+    },
+    {
+      apiKey: 'test',
+      fetchImpl: async () => mockResponse(200, {
+        output_text: JSON.stringify(safeAllow({
+          adult_or_nonhuman_only: false,
+          minor_harm: false,
+          non_graphic_action: true
+        }))
+      })
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
+});
+
 test('明確な未成年への危害は年齢項目に関係なく拒否', async () => {
   const result = await resolveModerationDecision(
     '12歳の子どもが怪物に負傷させられるアニメ場面',

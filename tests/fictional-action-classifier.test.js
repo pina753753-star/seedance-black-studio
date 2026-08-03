@@ -763,35 +763,108 @@ test('二次判定指示文は年齢不詳の一般的なオリジナルアニ�
   );
 });
 
-test('二次判定指示文は12歳や中学生を明確な未成年としてfalseにする', async () => {
+test('二次判定指示文は明確な未成年でも負傷なしの一般向けアニメ戦闘を危害扱いしない', async () => {
   const sentPrompt = await captureClassifierPrompt(
     '12歳の妖精と中学生が架空のアニメ世界で戦う'
   );
 
   assert.equal(
     sentPrompt.includes(
-      'A 12-year-old fairy child battles a monster.'
+      'A 12-year-old fairy child uses a magical shield against a monster without injury.'
     ),
     true
   );
 
   assert.equal(
     sentPrompt.includes(
-      'adult_or_nonhuman_only must be false because the explicit minor age and child status override the non-human label.'
+      'Set adult_or_nonhuman_only false, minor_harm false, and non_graphic_action true'
     ),
     true
   );
 
   assert.equal(
     sentPrompt.includes(
-      'A middle-school student fights a mosquito with a sword.'
+      'A middle-school student comically chases a mosquito with a fantasy sword without injury.'
     ),
     true
   );
 
   assert.equal(
     sentPrompt.includes(
-      'adult_or_nonhuman_only must be false because the school status clearly establishes a minor.'
+      'the school status establishes a minor, but does not by itself make the general-audience action harmful.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Mere participation by a young-looking or explicitly minor fictional character in a general-audience fantasy adventure or non-graphic fantasy battle is not minor_harm.'
+    ),
+    true
+  );
+});
+
+test('二次判定指示文は明確な未成年への実害と性的搾取を引き続き危害扱いする', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '12歳の子どもが怪物に負傷させられるアニメ場面'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'A 12-year-old child is wounded, abused, sexually exploited, tortured, or subjected to targeted realistic assault.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Set adult_or_nonhuman_only false, minor_harm true, and non_graphic_action false.'
+    ),
+    true
+  );
+
+  for (const blockedBoundary of [
+    'actual injury',
+    'abuse',
+    'exploitation',
+    'sexual content',
+    'targeted realistic assault',
+    'torture',
+    'prolonged suffering'
+  ]) {
+    assert.equal(sentPrompt.includes(blockedBoundary), true);
+  }
+});
+
+test('二次判定指示文は少年兵や未成年への現実的な武装攻撃を許可しない', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '成人主人公が16歳の敵兵士と現実的な銃撃戦をする'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Using an explicitly minor character as a child soldier, or targeting an explicitly minor character with realistic human or militarized violence'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'set minor_harm true and non_graphic_action false.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'The general-audience fantasy exception does not cover child soldiers, realistic armed attacks on minors'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'A 16-year-old enemy soldier or a child soldier is attacked in a militarized battle.'
     ),
     true
   );
