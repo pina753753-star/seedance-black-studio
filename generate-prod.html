@@ -36,9 +36,9 @@
 <header class="top"><a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a><button class="home" id="menuBtn">☰</button></header>
 
 <div class="tabs">
-  <button class="on" data-mode="reference_to_video">リファレンス</button>
+  <button data-mode="reference_to_video" id="referenceTab" disabled>リファレンス（準備中）</button>
   <button data-mode="image_to_video">画像から動画</button>
-  <button data-mode="text_to_video">テキストから動画</button>
+  <button class="on" data-mode="text_to_video">テキストから動画</button>
   <button data-mode="storyboard">絵コンテ</button>
   <button data-mode="video_edit" id="videoEditTab">動画編集</button>
 </div>
@@ -168,7 +168,7 @@ function sbReadDraft(){try{return JSON.parse(localStorage.getItem(SB_DRAFT_KEY)|
 function sbWriteDraft(patch){const d={...sbReadDraft(),...patch,updatedAt:new Date().toISOString()};localStorage.setItem(SB_DRAFT_KEY,JSON.stringify(d));return d}
 
 let draft=readDraft();
-let mode=draft.mode||'reference_to_video',urls=[],files=[],_activePtId='';
+let mode=(draft.mode==='reference_to_video'?'text_to_video':draft.mode)||'text_to_video',urls=[],files=[],_activePtId='';
 // assets: リファレンス/画像から動画タブで表示中の各画像の状態管理。
 // {id, status:'pending'|'uploading'|'completed'|'failed', url, objectUrl, file, error}
 // urlsは常にassetsのcompleted項目から再構築される派生値であり、localStorageへ保存する
@@ -585,6 +585,27 @@ function save(item){const current=JSON.parse(localStorage.getItem('flowvidHistor
 
 async function getToken(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return '';if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data}=await window.__flowvidUserClient.auth.getSession();return data?.session?.access_token||''}catch(_){return ''}}
 
+// リファレンスタブは一般ユーザーには準備中として無効化する。TEST_BYPASS_USER_ID相当の
+// テストユーザーかどうかはサーバー側(api/reference-image-access.js)でのみ判定し、
+// クライアントにはisTestBypassUserの真偽値だけを返す。API判定に失敗した場合は
+// 一般ユーザー扱い(false)のまま維持する。
+async function checkReferenceAccess(){
+  try{
+    const token=await getToken();
+    if(!token)return false;
+    const res=await fetch('/api/reference-image-access',{headers:{'Authorization':'Bearer '+token}});
+    if(!res.ok)return false;
+    const data=await res.json();
+    return data&&data.isTestBypassUser===true;
+  }catch(_){return false}
+}
+function enableReferenceTab(){
+  const btn=$('referenceTab');
+  if(!btn)return;
+  btn.disabled=false;
+  btn.textContent='リファレンス';
+}
+
 async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return null;if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return null;const{data}=await window.__flowvidUserClient.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',user.id).maybeSingle();return Number(data?.free_credits||0)+Number(data?.subscription_credits||0)+Number(data?.purchased_credits||0)}catch(_){return null}}
 
 function showCreditShortage(needed,balance){const el=$('creditStatus');if(!el)return;const shortage=needed-balance;el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="color:#fca5a5;font-weight:800;font-size:15px">クレジットが足りません</div><button type="button" onclick="hideCreditStatus()" aria-label="閉じる" style="background:none;border:none;color:#9ca3af;font-size:20px;line-height:1;cursor:pointer;padding:0 4px;flex-shrink:0">×</button></div><div style="color:#d1d5db;font-size:13px;line-height:1.9;margin-bottom:12px">必要: '+needed+' cr<br>現在: '+balance+' cr<br>不足: '+shortage+' cr</div><a href="./pricing.html#credit" style="display:inline-block;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:12px;padding:10px 18px;font-weight:800;text-decoration:none;font-size:14px">クレジットを購入 →</a>';el.style.display='block';setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50)}
@@ -928,14 +949,31 @@ $('create').onclick=start;window.flowvidCreateHandler=start;
 restoreDraft();
 // 絵コンテのプロンプト確定(prepared)済みの専用下書きがあれば、通常タブのdraft.modeや
 // flowvidGenerateModeより優先して絵コンテタブ選択+mainCard表示を復元する。
-if(!sbTryRestorePrepared()){
-  const q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
+const sbRestored=sbTryRestorePrepared();
+let wantsReference=false;
+if(!sbRestored){
+  let q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'text_to_video';
+  // リファレンスタブは一般ユーザーには準備中のため、URL指定・下書き・保存済みモードが
+  // reference_to_videoでも初期表示ではtext_to_videoへフォールバックする。
+  // テストユーザーかどうかは非同期でapi/reference-image-access.jsへ問い合わせるため、
+  // この時点ではまだ判定できず、いったんtext_to_videoで描画する。
+  wantsReference=q==='reference_to_video';
+  if(wantsReference)q='text_to_video';
   // video_editはsetMode()の対象外(mainCard/sbSectionの表示切り替えしか行わず、videoEditSectionを
   // 表示しないため)。以前はvideo_editが許可リストに無く常にreference_to_videoへ強制されており、
   // リロード直後に一瞬「参照ページ」が見える原因になっていた。ここでonVideoEditTab()を直接呼び、
   // 最初からvideo_editへ復元する。
-  if(q==='video_edit'){onVideoEditTab()}else{setMode(['reference_to_video','image_to_video','text_to_video','storyboard'].includes(q)?q:'reference_to_video')}
+  if(q==='video_edit'){onVideoEditTab()}else{setMode(['image_to_video','text_to_video','storyboard'].includes(q)?q:'text_to_video')}
 }
+// テストユーザー判定は、絵コンテ復元(sbRestored)の有無に関わらず必ず1回実行し、
+// リファレンスタブの有効化だけは常に行う。reference_to_videoへの画面切り替えは
+// 通常初期化経路(!sbRestored)のときだけ行い、絵コンテ復元中の画面は勝手に切り替えない。
+checkReferenceAccess().then(isTestUser=>{
+  if(!isTestUser)return;
+  enableReferenceTab();
+  // 判定待ちの間にユーザーが他タブへ切り替えていた場合は上書きしない。
+  if(!sbRestored&&wantsReference&&mode==='text_to_video')setMode('reference_to_video');
+});
 renderAssets();updateCreditUi();syncComboWarning();
 
 // ---- pending tasks ----
