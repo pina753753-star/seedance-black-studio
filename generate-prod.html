@@ -949,26 +949,31 @@ $('create').onclick=start;window.flowvidCreateHandler=start;
 restoreDraft();
 // 絵コンテのプロンプト確定(prepared)済みの専用下書きがあれば、通常タブのdraft.modeや
 // flowvidGenerateModeより優先して絵コンテタブ選択+mainCard表示を復元する。
-if(!sbTryRestorePrepared()){
+const sbRestored=sbTryRestorePrepared();
+let wantsReference=false;
+if(!sbRestored){
   let q=new URLSearchParams(location.search).get('mode')||draft.mode||localStorage.getItem('flowvidGenerateMode')||'text_to_video';
   // リファレンスタブは一般ユーザーには準備中のため、URL指定・下書き・保存済みモードが
   // reference_to_videoでも初期表示ではtext_to_videoへフォールバックする。
   // テストユーザーかどうかは非同期でapi/reference-image-access.jsへ問い合わせるため、
   // この時点ではまだ判定できず、いったんtext_to_videoで描画する。
-  const wantsReference=q==='reference_to_video';
+  wantsReference=q==='reference_to_video';
   if(wantsReference)q='text_to_video';
   // video_editはsetMode()の対象外(mainCard/sbSectionの表示切り替えしか行わず、videoEditSectionを
   // 表示しないため)。以前はvideo_editが許可リストに無く常にreference_to_videoへ強制されており、
   // リロード直後に一瞬「参照ページ」が見える原因になっていた。ここでonVideoEditTab()を直接呼び、
   // 最初からvideo_editへ復元する。
   if(q==='video_edit'){onVideoEditTab()}else{setMode(['image_to_video','text_to_video','storyboard'].includes(q)?q:'text_to_video')}
-  checkReferenceAccess().then(isTestUser=>{
-    if(!isTestUser)return;
-    enableReferenceTab();
-    // 判定待ちの間にユーザーが他タブへ切り替えていた場合は上書きしない。
-    if(wantsReference&&mode==='text_to_video')setMode('reference_to_video');
-  });
 }
+// テストユーザー判定は、絵コンテ復元(sbRestored)の有無に関わらず必ず1回実行し、
+// リファレンスタブの有効化だけは常に行う。reference_to_videoへの画面切り替えは
+// 通常初期化経路(!sbRestored)のときだけ行い、絵コンテ復元中の画面は勝手に切り替えない。
+checkReferenceAccess().then(isTestUser=>{
+  if(!isTestUser)return;
+  enableReferenceTab();
+  // 判定待ちの間にユーザーが他タブへ切り替えていた場合は上書きしない。
+  if(!sbRestored&&wantsReference&&mode==='text_to_video')setMode('reference_to_video');
+});
 renderAssets();updateCreditUi();syncComboWarning();
 
 // ---- pending tasks ----
