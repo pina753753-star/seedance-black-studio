@@ -617,8 +617,12 @@ module.exports = async function handler(req, res) {
       let refundData = null;
       let refundError = null;
       try {
-        const refundResult = await db.rpc('refund_generation_task_atomic', {
+        const refundResult = await db.rpc('refund_unsent_generation_task_atomic', {
           p_task_id: taskId,
+          p_user_id: user.id,
+          p_from_subscription: deduction.fromSub,
+          p_from_free: deduction.fromFree,
+          p_from_purchased: deduction.fromPurchased,
           p_error_message: 'Generation stopped before provider submission'
         });
         refundData = refundResult.data;
