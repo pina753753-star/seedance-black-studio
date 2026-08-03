@@ -107,7 +107,7 @@ test('3つの開始経路すべてが外部処理より前に停止判定する'
 test('時間のかかる処理後と外部送信直前にも停止状態を再確認する', () => {
   const root = path.join(__dirname, '..');
   const checks = [
-    ['api/_lib/seedance-start.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(OPENROUTER_VIDEO_ENDPOINT', 'refundCredits(db, user.id, deduction, taskId)'],
+    ['api/_lib/seedance-start.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(OPENROUTER_VIDEO_ENDPOINT', "db.rpc('refund_generation_task_atomic'"],
     ['api/video-edit.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(`${railwayBaseUrl', "db.rpc('refund_video_edit_task'"],
     ['api/storyboard-prompt.js', 2, 'const preSendControl = await checkGenerationControl(auth.supabase);', 'fetch(OPENROUTER_CHAT_ENDPOINT', null]
   ];
@@ -129,4 +129,33 @@ test('時間のかかる処理後と外部送信直前にも停止状態を再�
       assert.ok(refundIndex < sendIndex, `${relativePath}: emergency refund must run before provider send`);
     }
   }
+});
+
+test('Seedanceは残高確認後の予約直前に停止状態を再確認する', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api/_lib/seedance-start.js'), 'utf8');
+  const balanceMarker = 'if (total < creditCost) {';
+  const reservationCheckMarker = 'const preReservationControl = await checkGenerationControl(db);';
+  const reservationMarker = 'const taskResult = await createTask(db,';
+
+  const balanceIndex = source.indexOf(balanceMarker);
+  const checkIndex = source.indexOf(reservationCheckMarker);
+  const reservationIndex = source.indexOf(reservationMarker);
+  assert.notEqual(balanceIndex, -1, 'balance check is missing');
+  assert.notEqual(checkIndex, -1, 'pre-reservation stop check is missing');
+  assert.notEqual(reservationIndex, -1, 'task reservation is missing');
+  assert.ok(balanceIndex < checkIndex, 'stop check must run after the read-only balance check');
+  assert.ok(checkIndex < reservationIndex, 'stop check must run before task reservation');
+});
+
+test('Seedanceの送信前停止は原子的返還を使い、失敗時の復旧対象を残す', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api/_lib/seedance-start.js'), 'utf8');
+  const finalCheckIndex = source.indexOf('const preSendControl = await checkGenerationControl(db);');
+  const sendIndex = source.indexOf('fetch(OPENROUTER_VIDEO_ENDPOINT', finalCheckIndex);
+  const finalBlock = source.slice(finalCheckIndex, sendIndex);
+
+  assert.match(finalBlock, /db\.rpc\('refund_generation_task_atomic'/, 'atomic refund RPC is missing');
+  assert.match(finalBlock, /refundData\.code === 'refunded'/, 'confirmed refund result is not checked');
+  assert.match(finalBlock, /refundData\.code === 'already_refunded'/, 'idempotent refund result is not accepted');
+  assert.doesNotMatch(finalBlock, /refundCredits\(/, 'non-atomic JavaScript refund must not be used');
+  assert.doesNotMatch(finalBlock, /releaseTask\(/, 'failed refund must not remove the task from reconciliation');
 });

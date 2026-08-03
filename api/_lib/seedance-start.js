@@ -517,14 +517,6 @@ module.exports = async function handler(req, res) {
 
     const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
 
-    // Moderation can take long enough for an operator to activate the stop
-    // after the request's first check. Recheck at the task-reservation
-    // boundary so a request that has not written anything yet stops here.
-    const preReservationControl = await checkGenerationControl(db);
-    if (!preReservationControl.ok) {
-      return res.status(preReservationControl.status).json(preReservationControl.body);
-    }
-
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db
       .from('credit_balances')
@@ -539,6 +531,14 @@ module.exports = async function handler(req, res) {
         balance: total,
         required: creditCost
       });
+    }
+
+    // Moderation and the balance read can take long enough for an operator to
+    // activate the stop after the request's first check. Recheck immediately
+    // before task reservation so no write begins after a confirmed stop.
+    const preReservationControl = await checkGenerationControl(db);
+    if (!preReservationControl.ok) {
+      return res.status(preReservationControl.status).json(preReservationControl.body);
     }
 
     // Reserve task atomically via RPC (advisory lock + active check + cooldown check + INSERT).
@@ -610,20 +610,44 @@ module.exports = async function handler(req, res) {
     }
 
     // Final check at the external-send boundary. If the stop was activated
-    // after reservation/deduction, cancel the unsent task and restore the
-    // exact credit pools before returning.
+    // after reservation/deduction, restore the exact credit pools and mark the
+    // task failed in one idempotent DB transaction before returning.
     const preSendControl = await checkGenerationControl(db);
     if (!preSendControl.ok) {
-      const refundResult = await refundCredits(db, user.id, deduction, taskId);
-      await releaseTask(db, user.id, taskId, 'cancelled', 'Generation stopped before provider submission');
-      if (!refundResult.ok) {
-        console.error('[seedance-start] CRITICAL: emergency-stop refund failed, taskId:', taskId, refundResult.error);
+      let refundData = null;
+      let refundError = null;
+      try {
+        const refundResult = await db.rpc('refund_generation_task_atomic', {
+          p_task_id: taskId,
+          p_error_message: 'Generation stopped before provider submission'
+        });
+        refundData = refundResult.data;
+        refundError = refundResult.error;
+      } catch (error) {
+        refundError = error;
       }
-      return res.status(refundResult.ok ? preSendControl.status : 500).json({
+
+      const refundConfirmed = !refundError
+        && refundData?.ok === true
+        && (refundData.code === 'refunded' || refundData.code === 'already_refunded');
+      if (!refundConfirmed) {
+        // Keep the task queued. The OpenRouter reconciliation job can retry the
+        // same atomic refund instead of losing the recovery path.
+        console.error(
+          '[seedance-start] CRITICAL: emergency-stop refund unconfirmed, taskId:',
+          taskId,
+          'code:',
+          refundData?.code,
+          'error:',
+          refundError?.message || refundError || null
+        );
+      }
+
+      return res.status(refundConfirmed ? preSendControl.status : 500).json({
         ...preSendControl.body,
-        message: refundResult.ok ? preSendControl.body.message : REFUND_UNCONFIRMED_MESSAGE,
-        refunded: refundResult.ok,
-        creditRefunded: refundResult.ok ? creditCost : 0
+        message: refundConfirmed ? preSendControl.body.message : REFUND_UNCONFIRMED_MESSAGE,
+        refunded: refundConfirmed,
+        creditRefunded: refundConfirmed ? creditCost : 0
       });
     }
 
