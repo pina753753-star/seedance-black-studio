@@ -247,6 +247,10 @@ async function moderateContent(prompt, imageUrls, options = {}) {
     categoryAppliedInputTypes: serializeAppliedInputTypes(categoryAppliedInputTypes),
     checkedInputCount,
     checkedImageCount,
+    // Keep the complete, already-moderated reference set available to the
+    // secondary fictional-action review. A safe character sheet still carries
+    // context that is relevant when only the prompt text triggered violence.
+    reviewImageUrls: urls,
     flaggedImageUrls: [...flaggedImageUrls],
     flaggedImageIndexes: [...flaggedImageIndexes].sort((a, b) => a - b)
   };

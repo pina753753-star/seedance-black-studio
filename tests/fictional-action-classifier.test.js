@@ -75,7 +75,7 @@ test('violenceが文章由来だけなら二次判定対象', () => {
   assert.equal(violenceComesFromTextOnly({}), false);
 });
 
-test('画像由来のviolenceは例外許可しない', () => {
+test('画像由来のviolenceで確認用画像が欠ければ安全側停止', () => {
   const decision = shouldRunFictionalActionClassifier({
     ok: true,
     flagged: true,
@@ -84,7 +84,7 @@ test('画像由来のviolenceは例外許可しない', () => {
   });
   assert.deepEqual(decision, {
     run: false,
-    reason: 'violence_not_confirmed_text_only'
+    reason: 'image_violence_missing_review_inputs'
   });
 });
 
@@ -103,17 +103,18 @@ test('安全な参照画像があってもviolenceが文章由来だけなら二
   });
 });
 
-test('参照画像がありviolenceが文章と画像の両方に由来する場合は二次判定しない', () => {
+test('violenceが文章と画像の両方に由来しても確認用画像があれば二次判定', () => {
   const decision = shouldRunFictionalActionClassifier({
     ok: true,
     flagged: true,
     categories: ['violence'],
     categoryAppliedInputTypes: { violence: ['text', 'image'] },
-    checkedImageCount: 9
+    checkedImageCount: 9,
+    flaggedImageUrls: ['https://example.com/flagged.png']
   });
   assert.deepEqual(decision, {
-    run: false,
-    reason: 'violence_not_confirmed_text_only'
+    run: true,
+    reason: 'image_violence_reviewable'
   });
 });
 
@@ -145,8 +146,7 @@ for (const [name, overrides] of [
   ['武器の殺傷指南', { weapon_instruction: true }],
   ['エフェクトで重大危害を隠す', { effects_hide_serious_harm: true }],
   ['非グラフィックではない', { non_graphic_action: false }],
-  ['架空設定ではない', { fictional_setting: false }],
-  ['成人または人外に限定されない', { adult_or_nonhuman_only: false }]
+  ['架空設定ではない', { fictional_setting: false }]
 ]) {
   test(`${name}は拒否`, () => {
     const result = validateClassification(safeAllow(overrides));
@@ -155,6 +155,16 @@ for (const [name, overrides] of [
     assert.equal(result.reason, 'classification_blocked');
   });
 }
+
+test('年齢外見項目だけがfalseでも安全な架空アニメは許可', () => {
+  const result = validateClassification(safeAllow({
+    adult_or_nonhuman_only: false
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
+});
 
 test('出力形式が欠けていれば安全側でエラー', () => {
   const value = safeAllow();
@@ -264,7 +274,7 @@ test('矛盾ルールと非矛盾ルールを検知する', () => {
     detectClassificationContradictions(
       safeAllow({ minor_harm: true })
     ),
-    ['adult_only_with_minor_harm']
+    ['adult_only_with_minor_harm', 'minor_harm_with_non_graphic_action']
   );
 
   assert.deepEqual(
@@ -387,7 +397,7 @@ test('ハード矛盾は1回だけ再判定し、整合すれば許可', async (
   assert.equal(logs[0][1].finalAction, 'retry');
 });
 
-test('ハード矛盾は1回だけ再判定し、整合すれば通常拒否も許可しない', async () => {
+test('ハード矛盾は1回だけ再判定し、年齢項目だけの誤判定なら許可', async () => {
   let callCount = 0;
 
   const queued = [
@@ -416,8 +426,8 @@ test('ハード矛盾は1回だけ再判定し、整合すれば通常拒否も�
 
   assert.equal(callCount, 2);
   assert.equal(result.ok, true);
-  assert.equal(result.allow, false);
-  assert.equal(result.reason, 'classification_blocked');
+  assert.equal(result.allow, true);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
 });
 
 test('2回とも矛盾すれば503相当のerrorCodeで安全側停止', async () => {

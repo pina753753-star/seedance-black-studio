@@ -57,7 +57,7 @@ async function resolveModerationDecision(prompt, moderation, options = {}) {
 
   const classification = await classifyFictionalAction(prompt, {
     ...options,
-    imageUrls: moderation.flaggedImageUrls || []
+    imageUrls: moderation.reviewImageUrls || moderation.flaggedImageUrls || []
   });
 
   if (!classification.ok) {

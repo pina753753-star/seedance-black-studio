@@ -72,6 +72,31 @@ test('violence/graphicを含む場合は二次APIなしで拒否', async () => {
   assert.equal(called, false);
 });
 
+test('未成年への性的内容が混ざれば二次例外へ進めず拒否', async () => {
+  let called = false;
+  const result = await resolveModerationDecision('未成年への性的内容を含む場面', {
+    ok: true,
+    flagged: true,
+    categories: ['violence', 'sexual/minors'],
+    categoryAppliedInputTypes: {
+      violence: ['text'],
+      'sexual/minors': ['text']
+    }
+  }, {
+    apiKey: 'test',
+    fetchImpl: async () => {
+      called = true;
+      throw new Error('should not run');
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, false);
+  assert.equal(result.status, 422);
+  assert.equal(result.reason, 'not_violence_only');
+  assert.equal(called, false);
+});
+
 test('画像由来のviolenceは二次APIなしで拒否', async () => {
   let called = false;
   const result = await resolveModerationDecision('安全そうな文章', {
@@ -95,6 +120,7 @@ test('画像由来のviolenceは二次APIなしで拒否', async () => {
 
 test('安全な参照画像がありviolenceが文章由来だけなら二次判定し許可', async () => {
   let called = false;
+  let sentImageUrls = [];
 
   const result = await resolveModerationDecision(
     '劇場版アニメ。成人キャラクターが蚊を電撃ハエ叩きで追う。流血、負傷、殺害なし。',
@@ -103,12 +129,20 @@ test('安全な参照画像がありviolenceが文章由来だけなら二次判
       flagged: true,
       categories: ['violence'],
       categoryAppliedInputTypes: { violence: ['text'] },
-      checkedImageCount: 9
+      checkedImageCount: 2,
+      reviewImageUrls: [
+        'https://example.com/character.png',
+        'https://example.com/background.png'
+      ]
     },
     {
       apiKey: 'test',
-      fetchImpl: async () => {
+      fetchImpl: async (_url, options) => {
         called = true;
+        const body = JSON.parse(options.body);
+        sentImageUrls = body.input[1].content
+          .filter((item) => item.type === 'input_image')
+          .map((item) => item.image_url);
         return mockResponse(200, {
           output_text: JSON.stringify(safeAllow())
         });
@@ -120,6 +154,10 @@ test('安全な参照画像がありviolenceが文章由来だけなら二次判
   assert.equal(result.status, 200);
   assert.equal(result.allow, true);
   assert.equal(result.reason, 'safe_fictional_non_graphic_action');
+  assert.deepEqual(sentImageUrls, [
+    'https://example.com/character.png',
+    'https://example.com/background.png'
+  ]);
 });
 
 test('文章由来のviolenceだけなら二次判定し、安全なら許可', async () => {
@@ -217,7 +255,7 @@ test('危険項目が1つでもtrueなら422 classification_blocked', async () =
   assert.equal(result.reason, 'classification_blocked');
 });
 
-test('adult_or_nonhuman_onlyがfalseなら422 classification_blocked', async () => {
+test('年齢外見項目だけがfalseでも安全な架空アニメなら許可', async () => {
   const result = await resolveModerationDecision(
     '年齢不明の人物同士のアニメ戦闘',
     {
@@ -237,6 +275,33 @@ test('adult_or_nonhuman_onlyがfalseなら422 classification_blocked', async () 
   );
 
   assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
+});
+
+test('明確な未成年への危害は年齢項目に関係なく拒否', async () => {
+  const result = await resolveModerationDecision(
+    '12歳の子どもが怪物に負傷させられるアニメ場面',
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text'] }
+    },
+    {
+      apiKey: 'test',
+      fetchImpl: async () => mockResponse(200, {
+        output_text: JSON.stringify(safeAllow({
+          adult_or_nonhuman_only: false,
+          minor_harm: true,
+          non_graphic_action: false
+        }))
+      })
+    }
+  );
+
+  assert.equal(result.ok, true);
   assert.equal(result.allow, false);
   assert.equal(result.status, 422);
   assert.equal(result.reason, 'classification_blocked');
@@ -250,14 +315,14 @@ test('二次判定で拒否された場合は機微情報を含めず判定項�
     fictional_setting: true,
     adult_or_nonhuman_only: false,
     real_person_target: false,
-    minor_harm: false,
+    minor_harm: true,
     graphic_injury: false,
     lethal_or_maiming_action: false,
     torture_or_execution: false,
     sexual_violence: false,
     weapon_instruction: false,
     effects_hide_serious_harm: false,
-    non_graphic_action: true
+    non_graphic_action: false
   };
 
   const result = await resolveModerationDecision(
