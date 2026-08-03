@@ -152,6 +152,13 @@ module.exports = async function handler(req, res) {
   const durationSeconds = normalizeDuration(body.durationSeconds || body.duration);
   const aspectRatio = normalizeAspectRatio(body.aspectRatio || body.aspect_ratio);
 
+  // Image validation can take place after the first check. Recheck at the
+  // OpenRouter boundary so an analysis that has not been sent yet stops.
+  const preSendControl = await checkGenerationControl(auth.supabase);
+  if (!preSendControl.ok) {
+    return res.status(preSendControl.status).json(preSendControl.body);
+  }
+
   let response, data;
   try {
     response = await fetch(OPENROUTER_CHAT_ENDPOINT, {

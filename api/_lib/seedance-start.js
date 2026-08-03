@@ -2,7 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { moderateContent } = require('./openai-moderation.js');
 const { resolveModerationDecision } = require('./moderation-decision.js');
 const { requireConfirmedAuth } = require('./confirmed-auth.js');
-const { checkGenerationControl } = require('./generation-control.js');
+const { checkGenerationControl, REFUND_UNCONFIRMED_MESSAGE } = require('./generation-control.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
@@ -517,6 +517,14 @@ module.exports = async function handler(req, res) {
 
     const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
 
+    // Moderation can take long enough for an operator to activate the stop
+    // after the request's first check. Recheck at the task-reservation
+    // boundary so a request that has not written anything yet stops here.
+    const preReservationControl = await checkGenerationControl(db);
+    if (!preReservationControl.ok) {
+      return res.status(preReservationControl.status).json(preReservationControl.body);
+    }
+
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db
       .from('credit_balances')
@@ -599,6 +607,24 @@ module.exports = async function handler(req, res) {
       if (inputReferences.length) payload.input_references = inputReferences;
       else if (referenceUrls.length) payload.input_references = referenceUrls;
       else if (referenceUrl) payload.input_references = [imageObject(referenceUrl)].filter(Boolean);
+    }
+
+    // Final check at the external-send boundary. If the stop was activated
+    // after reservation/deduction, cancel the unsent task and restore the
+    // exact credit pools before returning.
+    const preSendControl = await checkGenerationControl(db);
+    if (!preSendControl.ok) {
+      const refundResult = await refundCredits(db, user.id, deduction, taskId);
+      await releaseTask(db, user.id, taskId, 'cancelled', 'Generation stopped before provider submission');
+      if (!refundResult.ok) {
+        console.error('[seedance-start] CRITICAL: emergency-stop refund failed, taskId:', taskId, refundResult.error);
+      }
+      return res.status(refundResult.ok ? preSendControl.status : 500).json({
+        ...preSendControl.body,
+        message: refundResult.ok ? preSendControl.body.message : REFUND_UNCONFIRMED_MESSAGE,
+        refunded: refundResult.ok,
+        creditRefunded: refundResult.ok ? creditCost : 0
+      });
     }
 
     // Call OpenRouter

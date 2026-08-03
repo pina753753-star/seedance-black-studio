@@ -8,6 +8,7 @@ const path = require('node:path');
 const {
   CONTROL_KEY,
   STOP_MESSAGE,
+  REFUND_UNCONFIRMED_MESSAGE,
   checkGenerationControl
 } = require('../api/_lib/generation-control.js');
 
@@ -43,6 +44,7 @@ test('enabled=falseは503で停止する', async () => {
   assert.equal(result.status, 503);
   assert.equal(result.body.error, 'video_generation_temporarily_disabled');
   assert.equal(result.body.message, STOP_MESSAGE);
+  assert.match(REFUND_UNCONFIRMED_MESSAGE, /返還を確認できません/);
 });
 
 test('制御行が無い場合も安全側で停止する', async () => {
@@ -98,6 +100,33 @@ test('3つの開始経路すべてが外部処理より前に停止判定する'
       const externalIndex = source.indexOf(externalWorkMarker);
       assert.notEqual(externalIndex, -1, `${relativePath}: external-work marker is missing`);
       assert.ok(controlIndex < externalIndex, `${relativePath}: stop check must run before ${externalWorkMarker}`);
+    }
+  }
+});
+
+test('時間のかかる処理後と外部送信直前にも停止状態を再確認する', () => {
+  const root = path.join(__dirname, '..');
+  const checks = [
+    ['api/_lib/seedance-start.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(OPENROUTER_VIDEO_ENDPOINT', 'refundCredits(db, user.id, deduction, taskId)'],
+    ['api/video-edit.js', 3, 'const preSendControl = await checkGenerationControl(db);', 'fetch(`${railwayBaseUrl', "db.rpc('refund_video_edit_task'"],
+    ['api/storyboard-prompt.js', 2, 'const preSendControl = await checkGenerationControl(auth.supabase);', 'fetch(OPENROUTER_CHAT_ENDPOINT', null]
+  ];
+
+  for (const [relativePath, expectedChecks, finalCheckMarker, sendMarker, refundMarker] of checks) {
+    const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
+    const actualChecks = (source.match(/await checkGenerationControl\(/g) || []).length;
+    assert.equal(actualChecks, expectedChecks, `${relativePath}: unexpected stop-check count`);
+
+    const finalCheckIndex = source.indexOf(finalCheckMarker);
+    const sendIndex = source.indexOf(sendMarker);
+    assert.notEqual(finalCheckIndex, -1, `${relativePath}: final stop check is missing`);
+    assert.notEqual(sendIndex, -1, `${relativePath}: send marker is missing`);
+    assert.ok(finalCheckIndex < sendIndex, `${relativePath}: final stop check must run before provider send`);
+
+    if (refundMarker) {
+      const refundIndex = source.indexOf(refundMarker, finalCheckIndex);
+      assert.notEqual(refundIndex, -1, `${relativePath}: emergency refund is missing`);
+      assert.ok(refundIndex < sendIndex, `${relativePath}: emergency refund must run before provider send`);
     }
   }
 });

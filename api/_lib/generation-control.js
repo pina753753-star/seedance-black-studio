@@ -2,6 +2,7 @@
 
 const CONTROL_KEY = 'video_generation';
 const STOP_MESSAGE = '現在、動画生成機能を一時停止しています。クレジットは消費されません。再開までしばらくお待ちください。';
+const REFUND_UNCONFIRMED_MESSAGE = '生成は開始されませんでしたが、クレジット返還を確認できません。再操作せず、サポートへお問い合わせください。';
 
 function stoppedResult(error) {
   return {
@@ -49,5 +50,6 @@ async function checkGenerationControl(db) {
 module.exports = {
   CONTROL_KEY,
   STOP_MESSAGE,
+  REFUND_UNCONFIRMED_MESSAGE,
   checkGenerationControl
 };
