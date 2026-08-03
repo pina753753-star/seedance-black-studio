@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
@@ -773,6 +774,11 @@ module.exports = async function handler(req, res) {
     });
   }
 
+  const auth = await requireConfirmedAuth(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json(auth.body);
+  }
+
   const apiKey = process.env.OPENROUTER_API_KEY || '';
   if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
 
@@ -783,11 +789,85 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({
       ok: false,
       error: 'id or pollingUrl query parameter is required',
-      example: '/api/seedance-status?id=video_job_id&pollingUrl=https://...'
+      example: '/api/seedance-status?id=video_job_id'
     });
   }
 
-  const statusUrl = pollingUrl || `${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(jobId)}`;
+  if (pollingUrl && !isStatusEndpointUrl(pollingUrl)) {
+    return res.status(400).json({
+      ok: false,
+      error: 'invalid_polling_url',
+      message: '状態確認URLが不正です。'
+    });
+  }
+
+  const pollingJobId = pollingUrl
+    ? effectiveJobId({ jobId: '', pollingUrl, rawVideoUrl: null })
+    : '';
+  if (jobId && pollingJobId && jobId !== pollingJobId) {
+    return res.status(400).json({
+      ok: false,
+      error: 'job_id_mismatch',
+      message: '生成IDと状態確認URLが一致しません。'
+    });
+  }
+
+  const requestedJobId = jobId || pollingJobId;
+  const ownershipDb = auth.supabase || dbClient();
+  if (!ownershipDb) {
+    return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
+  }
+
+  let ownedTask = null;
+  let ownershipError = null;
+
+  if (requestedJobId) {
+    const result = await ownershipDb
+      .from('generation_tasks')
+      .select('id,user_id,api_task_id,polling_url')
+      .eq('user_id', auth.user.id)
+      .eq('api_task_id', requestedJobId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    ownedTask = result.data || null;
+    ownershipError = result.error || null;
+  }
+
+  if (!ownedTask && !ownershipError && pollingUrl) {
+    const result = await ownershipDb
+      .from('generation_tasks')
+      .select('id,user_id,api_task_id,polling_url')
+      .eq('user_id', auth.user.id)
+      .eq('polling_url', pollingUrl)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    ownedTask = result.data || null;
+    ownershipError = result.error || null;
+  }
+
+  if (ownershipError) {
+    console.error('[seedance-status] ownership lookup failed:', ownershipError.message);
+    return res.status(500).json({ ok: false, error: 'generation_task_lookup_failed' });
+  }
+
+  if (!ownedTask) {
+    return res.status(404).json({
+      ok: false,
+      error: 'generation_task_not_found',
+      message: 'この生成タスクを確認できません。'
+    });
+  }
+
+  const statusUrl = pollingUrl || `${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(requestedJobId)}`;
+  if (!isStatusEndpointUrl(statusUrl)) {
+    return res.status(400).json({
+      ok: false,
+      error: 'invalid_status_url',
+      message: '状態確認URLが不正です。'
+    });
+  }
 
   try {
     const response = await fetch(statusUrl, {
