@@ -190,3 +190,19 @@ test('Seedanceの控除処理は原子的RPC以外で残高や台帳を書き込
   assert.doesNotMatch(functionSource, /\.from\('credit_balances'\)/, 'balance must not be updated outside the transaction');
   assert.doesNotMatch(functionSource, /\.from\('credit_transactions'\)/, 'ledger must not be inserted outside the transaction');
 });
+
+test('Seedanceは控除RPCの応答不明時に返還を確認し、復旧前にcancelledにしない', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api/_lib/seedance-start.js'), 'utf8');
+  const deductionFailureStart = source.indexOf('if (!deduction.ok) {');
+  const payloadStart = source.indexOf('// Build OpenRouter payload', deductionFailureStart);
+  const failureBlock = source.slice(deductionFailureStart, payloadStart);
+  const uncertainStart = failureBlock.indexOf('if (deduction.uncertain) {');
+  const uncertainEnd = failureBlock.indexOf("await releaseTask(db, user.id, taskId, 'cancelled');");
+  const uncertainBlock = failureBlock.slice(uncertainStart, uncertainEnd);
+
+  assert.notEqual(uncertainStart, -1, 'uncertain deduction branch is missing');
+  assert.match(uncertainBlock, /db\.rpc\('refund_generation_task_atomic'/, 'atomic recovery RPC is missing');
+  assert.match(uncertainBlock, /'no_charge_found'/, 'confirmed no-charge result must be handled');
+  assert.doesNotMatch(uncertainBlock, /releaseTask\(/, 'uncertain result must remain recoverable until DB recovery is confirmed');
+  assert.ok(uncertainEnd > uncertainStart, 'known no-charge cancellation must occur only after uncertain branch returns');
+});

@@ -145,7 +145,7 @@ async function checkAndDeduct(db, userId, creditCost, taskId) {
       p_user_id: userId,
       p_credit_cost: creditCost
     });
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, uncertain: true, error: error.message };
     if (!data?.ok) {
       const balance = Number(data?.balance || 0);
       const required = Number(data?.required || creditCost);
@@ -170,7 +170,7 @@ async function checkAndDeduct(db, userId, creditCost, taskId) {
       fromPurchased: Number(data.from_purchased || 0)
     };
   } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
+    return { ok: false, uncertain: true, error: error?.message || String(error) };
   }
 }
 
@@ -534,10 +534,59 @@ module.exports = async function handler(req, res) {
     taskId = taskResult.id;
     console.log('[seedance-start] task created:', taskId, 'user:', user.id, 'mode:', mode);
 
-    // Deduct credits with optimistic concurrency control (prevents double-deduction)
+    // Deduct balance + ledger rows in one DB transaction.
     deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
     if (!deduction.ok) {
       console.error('[seedance-start] credit deduction failed:', deduction.error, 'taskId:', taskId);
+
+      if (deduction.uncertain) {
+        // A transport error can arrive after the DB transaction committed.
+        // Reconcile atomically before changing the task to a terminal state.
+        // If this recovery call also fails, leave the queued task for the
+        // existing OpenRouter reconciliation job instead of losing the path.
+        let recoveryData = null;
+        let recoveryError = null;
+        try {
+          const recoveryResult = await db.rpc('refund_generation_task_atomic', {
+            p_task_id: taskId,
+            p_error_message: 'Generation credit deduction result was uncertain'
+          });
+          recoveryData = recoveryResult.data;
+          recoveryError = recoveryResult.error;
+        } catch (error) {
+          recoveryError = error;
+        }
+
+        const recoveryConfirmed = !recoveryError
+          && recoveryData?.ok === true
+          && ['refunded', 'already_refunded', 'no_charge_found'].includes(recoveryData.code);
+        const refunded = recoveryConfirmed
+          && (recoveryData.code === 'refunded' || recoveryData.code === 'already_refunded');
+
+        if (!recoveryConfirmed) {
+          console.error(
+            '[seedance-start] CRITICAL: uncertain deduction recovery failed, taskId:',
+            taskId,
+            'code:',
+            recoveryData?.code,
+            'error:',
+            recoveryError?.message || recoveryError || null
+          );
+        }
+
+        return res.status(recoveryConfirmed ? 409 : 500).json({
+          ok: false,
+          error: 'credit_deduction_unconfirmed',
+          message: recoveryConfirmed
+            ? (refunded
+              ? '生成は開始されず、クレジットを返還しました。もう一度お試しください。'
+              : 'クレジット控除を確認できなかったため、生成を開始しませんでした。もう一度お試しください。')
+            : REFUND_UNCONFIRMED_MESSAGE,
+          refunded,
+          creditRefunded: refunded ? creditCost : 0
+        });
+      }
+
       await releaseTask(db, user.id, taskId, 'cancelled');
       return res.status(deduction.insufficient ? 402 : 409).json({
         ok: false,
