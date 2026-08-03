@@ -35,7 +35,7 @@ begin
     raise exception 'invalid Stripe reason';
   end if;
 
-  if p_plan is not null and p_plan not in ('standard', 'premium', 'ultimate', 'team') then
+  if p_plan is not null and p_plan not in ('standard', 'premium', 'ultimate', 'scale', 'team') then
     raise exception 'invalid plan';
   end if;
 
