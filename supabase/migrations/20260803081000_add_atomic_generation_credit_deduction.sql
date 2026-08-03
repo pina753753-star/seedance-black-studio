@@ -14,6 +14,7 @@ declare
   v_task_user_id uuid;
   v_task_status text;
   v_task_credit_cost integer;
+  v_api_provider text;
   v_api_task_id text;
   v_free integer;
   v_subscription integer;
@@ -35,8 +36,8 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  select user_id, status, credit_cost, api_task_id
-    into v_task_user_id, v_task_status, v_task_credit_cost, v_api_task_id
+  select user_id, status, credit_cost, api_provider, api_task_id
+    into v_task_user_id, v_task_status, v_task_credit_cost, v_api_provider, v_api_task_id
     from public.generation_tasks
    where id = p_task_id
    for update;
@@ -51,6 +52,10 @@ begin
 
   if v_task_status <> 'queued' or v_api_task_id is not null then
     return jsonb_build_object('ok', false, 'code', 'task_not_chargeable');
+  end if;
+
+  if v_api_provider is not null and v_api_provider <> 'openrouter' then
+    return jsonb_build_object('ok', false, 'code', 'wrong_provider');
   end if;
 
   if v_task_credit_cost <> p_credit_cost then
@@ -79,6 +84,12 @@ begin
       into v_free, v_subscription, v_purchased
       from public.credit_balances
      where user_id = p_user_id;
+
+    update public.generation_tasks
+       set api_provider = 'openrouter',
+           updated_at = now()
+     where id = p_task_id
+       and api_provider is null;
 
     return jsonb_build_object(
       'ok', true,
@@ -170,6 +181,12 @@ begin
     values
       (p_user_id, -v_from_purchased, 'purchased', 'video_generation', p_task_id);
   end if;
+
+  update public.generation_tasks
+     set api_provider = 'openrouter',
+         updated_at = now()
+   where id = p_task_id
+     and status = 'queued';
 
   return jsonb_build_object(
     'ok', true,

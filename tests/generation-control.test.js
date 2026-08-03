@@ -176,6 +176,7 @@ test('Seedanceは残高控除とプール別台帳を1トランザクション�
   assert.match(source, /'subscription', 'video_generation'/i, 'subscription ledger is missing');
   assert.match(source, /'free', 'video_generation'/i, 'free ledger is missing');
   assert.match(source, /'purchased', 'video_generation'/i, 'purchased ledger is missing');
+  assert.match(source, /set api_provider = 'openrouter'/i, 'queued recovery tasks must be discoverable by OpenRouter reconcile');
   assert.match(source, /revoke all on function[\s\S]*from public, anon, authenticated, service_role/i, 'default execute privileges must be revoked');
   assert.match(source, /grant execute on function[\s\S]*to service_role/i, 'only service_role may execute the RPC');
 });
