@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { moderateContent } = require('./openai-moderation.js');
 const { resolveModerationDecision } = require('./moderation-decision.js');
 const { requireConfirmedAuth } = require('./confirmed-auth.js');
+const { checkGenerationControl } = require('./generation-control.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
@@ -417,6 +418,15 @@ module.exports = async function handler(req, res) {
   const user = auth.user;
   const db = auth.supabase || serviceClient();
   if (!db) return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
+
+  // Global emergency stop. Check after authentication but before moderation,
+  // task creation, credit deduction, or any OpenRouter request. A missing row
+  // or database read error fails closed so an uncertain control state can
+  // never start a paid generation.
+  const generationControl = await checkGenerationControl(db);
+  if (!generationControl.ok) {
+    return res.status(generationControl.status).json(generationControl.body);
+  }
 
   let taskId = null;
   let deduction = null;

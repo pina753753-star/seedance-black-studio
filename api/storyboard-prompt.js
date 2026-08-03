@@ -6,6 +6,7 @@
 // generation continues to go through the existing /api/seedance-start flow
 // unchanged, with mode: 'reference_to_video'.
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
+const { checkGenerationControl } = require('./_lib/generation-control.js');
 
 const OPENROUTER_CHAT_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const STORYBOARD_MODEL = 'anthropic/claude-sonnet-4-5';
@@ -85,6 +86,13 @@ module.exports = async function handler(req, res) {
   const auth = await requireConfirmedAuth(req);
   if (!auth.ok) {
     return res.status(auth.status).json(auth.body);
+  }
+
+  // Do not spend OpenRouter chat-completion cost while all new video work is
+  // stopped. The same fail-closed control is shared with generation/editing.
+  const generationControl = await checkGenerationControl(auth.supabase);
+  if (!generationControl.ok) {
+    return res.status(generationControl.status).json(generationControl.body);
   }
 
   // Reference-image generation is still temporarily paused site-wide

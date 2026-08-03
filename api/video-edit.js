@@ -31,6 +31,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 const { calculateVideoEditCreditCost } = require('./_lib/video-edit-pricing.js');
+const { checkGenerationControl } = require('./_lib/generation-control.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
@@ -161,6 +162,13 @@ module.exports = async function handler(req, res) {
   const user = auth.user;
   const db = auth.supabase || dbClient();
   if (!db) return res.status(500).json({ ok: false, error: 'SERVER_NOT_CONFIGURED' });
+
+  // Apply the same global stop used by Seedance before plan checks, task
+  // reservation, credit deduction, or the Railway edit request.
+  const generationControl = await checkGenerationControl(db);
+  if (!generationControl.ok) {
+    return res.status(generationControl.status).json(generationControl.body);
+  }
 
   // Paid-plan gate on server-owned state only. Same approach as the
   // previous version of this file: subscription_expires_at is refreshed by

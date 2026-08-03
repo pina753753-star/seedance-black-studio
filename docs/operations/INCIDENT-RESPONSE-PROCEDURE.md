@@ -114,13 +114,38 @@ Pina Studioで障害、不正利用、決済異常、情報漏えいの疑いな
 - 不適切コンテンツが安全確認を通過している疑い
 - 生成失敗が広範囲で継続している
 
-既存の参照画像生成停止は`api/seedance-start-priced.js`で、クレジット控除やOpenRouter呼び出しより前にHTTP 503を返す方式を採用している。
+生成機能全体の緊急停止は、本番Supabaseの`public.service_controls`にある`video_generation`行で管理する。`enabled`を`false`へ変更すると、以後の新しいSeedance生成、動画編集、絵コンテ解析は、クレジット控除やOpenRouter・Railway呼び出しより前にHTTP 503で停止する。フラグを読み取れない場合や行が存在しない場合も、安全側で停止する。
 
-ただし、Production環境変数`TEST_BYPASS_USER_ID`が設定されている場合、指定されたテストユーザーだけはこのHTTP 503停止を回避できる。緊急停止時は設定の有無を確認し、無効化確認が終わるまでは参照画像生成が完全停止したと判断しない。
+停止時はSupabase SQL Editorで次を1回だけ実行し、`updated_rows`が`1`であることを確認する。0件または2件以上の場合は追加操作をせず停止する。
 
-`TEST_BYPASS_USER_ID`の無効化が必要な場合も、Production環境変数を無断変更しない。現在値そのものを記録・共有せず、影響範囲と戻し方を確認し、ユーザーの明示承認後に変更する。
+```sql
+with updated as (
+  update public.service_controls
+  set enabled = false,
+      updated_at = now()
+  where control_key = 'video_generation'
+  returning control_key
+)
+select count(*) as updated_rows from updated;
+```
 
-生成機能全体を止める具体的な変更は、現状コードを確認して完成形を作成し、Preview確認後に反映する。緊急時でも環境変数やAPIコードを推測変更しない。
+停止状態は次の読み取りSQLで確認する。`enabled = false`を確認できるまで停止完了と判断しない。
+
+```sql
+select control_key, enabled, updated_at
+from public.service_controls
+where control_key = 'video_generation';
+```
+
+停止スイッチは新規処理だけを止める。すでにOpenRouterまたはRailwayへ送信済みの処理は中断せず、状態確認、完了保存、失敗時返金、復旧Cronを継続する。
+
+復旧時は原因解消、異常ログの増加停止、クレジット・タスク状態の整合を先に確認する。その後、停止時と同じ更新SQLで`enabled = true`へ戻し、更新件数1件と読み取り結果を確認する。実動画生成による最終確認は別途承認後に行う。
+
+既存の参照画像生成停止は`api/seedance-start-priced.js`で、クレジット控除やOpenRouter呼び出しより前にHTTP 503を返す方式を採用している。このモード別停止は、生成機能全体を再開しても自動では解除されない。
+
+Production環境変数`TEST_BYPASS_USER_ID`に登録されたテストユーザーは、上記の生成機能全体の緊急停止を回避できない。全体停止のために、この環境変数を変更・削除する必要はない。
+
+緊急時でも環境変数やAPIコードを推測変更せず、上記の1行だけを対象にする。
 
 ### 決済
 
