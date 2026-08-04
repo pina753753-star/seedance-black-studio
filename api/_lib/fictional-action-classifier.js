@@ -121,7 +121,6 @@ function extractOutputText(data) {
 
 function allSafetyConditionsSatisfied(value) {
   return value.fictional_setting === true
-    && value.adult_or_nonhuman_only === true
     && value.real_person_target === false
     && value.minor_harm === false
     && value.graphic_injury === false
@@ -138,6 +137,9 @@ function detectClassificationContradictions(value) {
   const contradictions = [];
   if (value.adult_or_nonhuman_only === true && value.minor_harm === true) {
     contradictions.push('adult_only_with_minor_harm');
+  }
+  if (value.minor_harm === true && value.non_graphic_action === true) {
+    contradictions.push('minor_harm_with_non_graphic_action');
   }
   if (value.non_graphic_action === true && value.graphic_injury === true) {
     contradictions.push('non_graphic_with_graphic_injury');
@@ -179,18 +181,39 @@ function validateClassification(value) {
 function buildClassifierPrompt(prompt, contradictions = [], hasImages = false) {
   const lines = [
     'Classify the requested video scene for a narrow safety exception.',
-    'Allow only clearly fictional anime/cartoon action involving adults, non-human characters, or ordinary original fictional characters with no concrete minor indicator.',
+    'Evaluate ordinary Japanese-anime-style fantasy, adventure, transformation, comedy, and action by what happens in the scene, not by youthful character design alone.',
     hasImages
       ? 'Inspect the user prompt and every supplied reference image together. Do not ignore visible blood, wounds, victims, real people, minors, or weapon instruction in an image.'
       : 'Classify the user prompt only.',
     '',
     'Return only the eleven boolean fields defined by the schema.',
+    'Do not return an overall decision, allow, block, or uncertain field.',
     'The application computes the final result from the individual boolean fields.',
     '',
     'Safety rules:',
     '- fictional_setting is true only when the scene is clearly fictional, animated, illustrated, game-like, or otherwise not a real-world depiction.',
-    '- adult_or_nonhuman_only is false if any relevant person is explicitly a child, minor, underage, school-age, or has another concrete minor indicator.',
-    '- Do not infer minor status solely from anime style, large eyes, short stature, cute appearance, girl, boy, 女の子, or 男の子.',
+    '- Prioritize minor protection for both human and non-human characters.',
+    '- adult_or_nonhuman_only is false only when a relevant character is explicitly a child, minor, underage, gives an age below adulthood, or has a grade or school-age status that clearly establishes minor status.',
+    '- Do not infer that a character is a minor solely from stylized anime features or ambiguous youthful wording such as short stature, chibi proportions, a small body, a youthful-looking face, large eyes, cute, girl, boy, 女の子, or 男の子.',
+    '- Trust explicit adult or non-human descriptions in the user prompt. adult_or_nonhuman_only should be true unless the prompt also contains a clear and conflicting minor or child status.',
+    '- A clearly fictional original anime, manga, cartoon, game, or illustrated character may satisfy adult_or_nonhuman_only when there is no concrete minor indicator.',
+    '- Do not require an exact numeric adult age for an ordinary original fictional anime character with no concrete minor indicator.',
+    '- If an ordinary original fictional character has no exact age and no concrete minor indicator, adult_or_nonhuman_only may be true. Do not infer minor status from anime style alone.',
+    '- Do not set adult_or_nonhuman_only false merely because an ordinary original fictional anime character has no exact age.',
+    '- A god, spirit, fairy, robot, demon, or other non-human character explicitly described as a child or minor is not covered by the adult-or-non-human exception.',
+    '- A non-human or original-fictional label never relaxes rules for sexual content, sexual violence, child exploitation, or clearly established minor characters.',
+    '- Explicit child roles or clearly stated child status override an adult-sounding, fictional, or non-human label.',
+    '- If age information conflicts, or there is a concrete reason to believe a relevant character may be a minor, use adult_or_nonhuman_only false.',
+    '- adult_or_nonhuman_only is age-context information. Youthful appearance alone is not a block for safe, fictional, non-sexual, non-graphic general-audience action.',
+    '',
+    'General-audience anime action rules:',
+    '- A youthful-looking or explicitly minor original anime character, deity, spirit, fairy, or other fictional being may transform, cast magic, pursue, evade, defend, or fight a fantasy creature when the scene has no sexual content, actual injury, graphic injury, killing, maiming, torture, targeted child abuse, or exploitation.',
+    '- Mere participation by a young-looking or explicitly minor fictional character in a general-audience fantasy adventure or non-graphic fantasy battle is not minor_harm.',
+    '- A non-injurious fantasy attack, pursuit, dodge, defense, duel, magical impact, or comedic scuffle involving a clearly fictional minor is not by itself minor_harm.',
+    '- minor_harm is true when a character with a concrete minor indicator is the target or victim of actual injury, abuse, exploitation, sexual content, targeted realistic assault, cruelty, torture, prolonged suffering, or other actual harm.',
+    '- Using an explicitly minor character as a child soldier, or targeting an explicitly minor character with realistic human or militarized violence, is exploitation or targeted realistic assault: set minor_harm true and non_graphic_action false.',
+    '- The general-audience fantasy exception does not cover child soldiers, realistic armed attacks on minors, domestic abuse, bullying presented as actual harm, sexual content, or exploitation.',
+    '- When minor_harm is true, non_graphic_action must be false. Do not label targeted harm to a concrete minor as safe general-audience action.',
     '',
     'Supporting and background character rules:',
     '- In a clearly fictional original anime, manga, cartoon, or game scene, an unnamed supporting or background character may satisfy adult_or_nonhuman_only when there is no concrete minor indicator.',
@@ -201,7 +224,7 @@ function buildClassifierPrompt(prompt, contradictions = [], hasImages = false) {
     '- These rules apply only to clearly fictional original characters and never override minor protection, sexual-content rules, real-person protection, or graphic-violence restrictions.',
     '',
     '- real_person_target is true when a real identifiable person is targeted, impersonated, attacked, or depicted without a clearly fictional-original context.',
-    '- minor_harm is true for any violence, injury, threat, or sexual content involving a minor.',
+    '- minor_harm is true for actual injury, abuse, exploitation, sexual content, targeted realistic assault, cruelty, torture, prolonged suffering, or other actual harm involving a minor. Do not mark ordinary non-injurious general-audience fantasy action as minor_harm solely because a fictional minor participates.',
     '- graphic_injury is true for heavy or extensive blood, open wounds, visible organs, gore, dismemberment, severed limbs, exposed bone, or emphasized corpses.',
     '- lethal_or_maiming_action is true for killing, execution, dismemberment, amputation, deliberate crippling, or a clearly lethal shooting or stabbing.',
     '- torture_or_execution is true for torture, execution, prolonged suffering, or sadistic harm.',
@@ -209,8 +232,21 @@ function buildClassifierPrompt(prompt, contradictions = [], hasImages = false) {
     '- weapon_instruction is true for practical real-world instructions to build, modify, aim, operate, or use a weapon to injure someone. Mere fictional weapon presence or ordinary non-instructional action is not enough.',
     '- effects_hide_serious_harm is true when flashes, smoke, silhouettes, or camera cuts merely conceal an otherwise serious stabbing, shooting, killing, or dismemberment.',
     '- non_graphic_action is true only for general-audience action such as pursuit, evasion, vehicle action, fantasy combat, sparks, smoke, energy effects, or non-graphic impacts without serious visible injury.',
+    '- An ordinary original fictional anime character with no concrete minor indicator may comically swat at, chase, or battle a mosquito or ordinary pest; this is ordinarily non-graphic action and does not by itself constitute lethal_or_maiming_action.',
+    '- Block pest scenes that add graphic crushing, dismemberment, prolonged suffering, torture, sexual content, harm to a minor, harm to a real person, or practical instructions for injuring living beings.',
     '',
-    'Weapons may appear in a fictional action scene, but heavy blood, gore, open wounds, killing, maiming, torture, execution, sexual violence, harm to minors, real-person targeting, and practical weapon instruction must remain blocked.',
+    'Examples:',
+    '- An original fictional spirit with a youthful anime design raises a magical staff. Set adult_or_nonhuman_only true because the character is explicitly non-human and no minor or child status is stated.',
+    '- An adult woman from the reference character sheet comically battles a mosquito in a fictional anime scene. Set adult_or_nonhuman_only true because the character is explicitly described as an adult woman and there is no conflicting concrete minor indicator.',
+    '- An ordinary original anime heroine with no stated age dodges a fantasy dragon and uses a glowing shield without injury. Treat this as safe non-graphic action; do not infer minor status from appearance or missing age.',
+    '- A 12-year-old fairy child uses a magical shield against a monster without injury. Set adult_or_nonhuman_only false, minor_harm false, and non_graphic_action true: the explicit minor status is recorded, but ordinary non-injurious fantasy action remains allowed.',
+    '- A middle-school student comically chases a mosquito with a fantasy sword without injury. Set adult_or_nonhuman_only false, minor_harm false, and non_graphic_action true: the school status establishes a minor, but does not by itself make the general-audience action harmful.',
+    '- A 12-year-old child is wounded, abused, sexually exploited, tortured, or subjected to targeted realistic assault. Set adult_or_nonhuman_only false, minor_harm true, and non_graphic_action false.',
+    '- A 16-year-old enemy soldier or a child soldier is attacked in a militarized battle. Set adult_or_nonhuman_only false, minor_harm true, and non_graphic_action false because this is child exploitation or targeted realistic assault, not ordinary fantasy adventure.',
+    '- For scenes with multiple relevant characters, evaluate every character. If any relevant character has a concrete minor indicator, adult_or_nonhuman_only must be false for the whole scene.',
+    '- An adult woman and a 12-year-old fairy fight together. adult_or_nonhuman_only must be false because one relevant character has an explicit minor indicator.',
+    '',
+    'Weapons may appear in a fictional action scene, but heavy blood, gore, open wounds, killing, maiming, torture, execution, sexual violence, actual injury or abuse of minors, child exploitation, real-person targeting, and practical weapon instruction must remain blocked.',
     'When required safety facts are genuinely unclear, use the safer value. Do not relax any safety rule.'
   ];
 
@@ -219,7 +255,11 @@ function buildClassifierPrompt(prompt, contradictions = [], hasImages = false) {
       '',
       'Your previous structured result was internally inconsistent.',
       `Detected contradictions: ${contradictions.join(', ')}`,
-      'Re-evaluate the same prompt and images and return a logically consistent classification.'
+      'Re-evaluate the same prompt and images and return a logically consistent classification.',
+      'Do not assume that a human person with a concrete minor indicator is an adult.',
+      'Trust explicit adult descriptions unless there is a concrete contradictory minor indicator.',
+      'Do not classify an ordinary original fictional anime character as a minor merely because no exact age is stated.',
+      'Apply the age and non-human classification rules above exactly.'
     );
   }
 
@@ -260,7 +300,7 @@ async function requestStructuredClassification(prompt, contradictions, options) 
             role: 'system',
             content: [{
               type: 'input_text',
-              text: 'Return only the requested structured classification. Be conservative.'
+              text: 'Return only the requested structured classification. Apply the explicit rules exactly and do not infer age from stylized appearance alone.'
             }]
           },
           { role: 'user', content: userContent }

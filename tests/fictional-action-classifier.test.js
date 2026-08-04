@@ -75,7 +75,7 @@ test('violenceが文章由来だけなら二次判定対象', () => {
   assert.equal(violenceComesFromTextOnly({}), false);
 });
 
-test('画像由来のviolenceは例外許可しない', () => {
+test('画像由来のviolenceで確認用画像が欠ければ安全側停止', () => {
   const decision = shouldRunFictionalActionClassifier({
     ok: true,
     flagged: true,
@@ -84,7 +84,7 @@ test('画像由来のviolenceは例外許可しない', () => {
   });
   assert.deepEqual(decision, {
     run: false,
-    reason: 'violence_not_confirmed_text_only'
+    reason: 'image_violence_missing_review_inputs'
   });
 });
 
@@ -103,17 +103,18 @@ test('安全な参照画像があってもviolenceが文章由来だけなら二
   });
 });
 
-test('参照画像がありviolenceが文章と画像の両方に由来する場合は二次判定しない', () => {
+test('violenceが文章と画像の両方に由来しても確認用画像があれば二次判定', () => {
   const decision = shouldRunFictionalActionClassifier({
     ok: true,
     flagged: true,
     categories: ['violence'],
     categoryAppliedInputTypes: { violence: ['text', 'image'] },
-    checkedImageCount: 9
+    checkedImageCount: 9,
+    flaggedImageUrls: ['https://example.com/flagged.png']
   });
   assert.deepEqual(decision, {
-    run: false,
-    reason: 'violence_not_confirmed_text_only'
+    run: true,
+    reason: 'image_violence_reviewable'
   });
 });
 
@@ -145,8 +146,7 @@ for (const [name, overrides] of [
   ['武器の殺傷指南', { weapon_instruction: true }],
   ['エフェクトで重大危害を隠す', { effects_hide_serious_harm: true }],
   ['非グラフィックではない', { non_graphic_action: false }],
-  ['架空設定ではない', { fictional_setting: false }],
-  ['成人または人外に限定されない', { adult_or_nonhuman_only: false }]
+  ['架空設定ではない', { fictional_setting: false }]
 ]) {
   test(`${name}は拒否`, () => {
     const result = validateClassification(safeAllow(overrides));
@@ -155,6 +155,16 @@ for (const [name, overrides] of [
     assert.equal(result.reason, 'classification_blocked');
   });
 }
+
+test('年齢外見項目だけがfalseでも安全な架空アニメは許可', () => {
+  const result = validateClassification(safeAllow({
+    adult_or_nonhuman_only: false
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
+});
 
 test('出力形式が欠けていれば安全側でエラー', () => {
   const value = safeAllow();
@@ -264,7 +274,7 @@ test('矛盾ルールと非矛盾ルールを検知する', () => {
     detectClassificationContradictions(
       safeAllow({ minor_harm: true })
     ),
-    ['adult_only_with_minor_harm']
+    ['adult_only_with_minor_harm', 'minor_harm_with_non_graphic_action']
   );
 
   assert.deepEqual(
@@ -387,7 +397,7 @@ test('ハード矛盾は1回だけ再判定し、整合すれば許可', async (
   assert.equal(logs[0][1].finalAction, 'retry');
 });
 
-test('ハード矛盾は1回だけ再判定し、整合すれば通常拒否も許可しない', async () => {
+test('ハード矛盾は1回だけ再判定し、年齢項目だけの誤判定なら許可', async () => {
   let callCount = 0;
 
   const queued = [
@@ -416,8 +426,8 @@ test('ハード矛盾は1回だけ再判定し、整合すれば通常拒否も�
 
   assert.equal(callCount, 2);
   assert.equal(result.ok, true);
-  assert.equal(result.allow, false);
-  assert.equal(result.reason, 'classification_blocked');
+  assert.equal(result.allow, true);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
 });
 
 test('2回とも矛盾すれば503相当のerrorCodeで安全側停止', async () => {
@@ -753,35 +763,108 @@ test('二次判定指示文は年齢不詳の一般的なオリジナルアニ�
   );
 });
 
-test('二次判定指示文は12歳や中学生を明確な未成年としてfalseにする', async () => {
+test('二次判定指示文は明確な未成年でも負傷なしの一般向けアニメ戦闘を危害扱いしない', async () => {
   const sentPrompt = await captureClassifierPrompt(
     '12歳の妖精と中学生が架空のアニメ世界で戦う'
   );
 
   assert.equal(
     sentPrompt.includes(
-      'A 12-year-old fairy child battles a monster.'
+      'A 12-year-old fairy child uses a magical shield against a monster without injury.'
     ),
     true
   );
 
   assert.equal(
     sentPrompt.includes(
-      'adult_or_nonhuman_only must be false because the explicit minor age and child status override the non-human label.'
+      'Set adult_or_nonhuman_only false, minor_harm false, and non_graphic_action true'
     ),
     true
   );
 
   assert.equal(
     sentPrompt.includes(
-      'A middle-school student fights a mosquito with a sword.'
+      'A middle-school student comically chases a mosquito with a fantasy sword without injury.'
     ),
     true
   );
 
   assert.equal(
     sentPrompt.includes(
-      'adult_or_nonhuman_only must be false because the school status clearly establishes a minor.'
+      'the school status establishes a minor, but does not by itself make the general-audience action harmful.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Mere participation by a young-looking or explicitly minor fictional character in a general-audience fantasy adventure or non-graphic fantasy battle is not minor_harm.'
+    ),
+    true
+  );
+});
+
+test('二次判定指示文は明確な未成年への実害と性的搾取を引き続き危害扱いする', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '12歳の子どもが怪物に負傷させられるアニメ場面'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'A 12-year-old child is wounded, abused, sexually exploited, tortured, or subjected to targeted realistic assault.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Set adult_or_nonhuman_only false, minor_harm true, and non_graphic_action false.'
+    ),
+    true
+  );
+
+  for (const blockedBoundary of [
+    'actual injury',
+    'abuse',
+    'exploitation',
+    'sexual content',
+    'targeted realistic assault',
+    'torture',
+    'prolonged suffering'
+  ]) {
+    assert.equal(sentPrompt.includes(blockedBoundary), true);
+  }
+});
+
+test('二次判定指示文は少年兵や未成年への現実的な武装攻撃を許可しない', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '成人主人公が16歳の敵兵士と現実的な銃撃戦をする'
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'Using an explicitly minor character as a child soldier, or targeting an explicitly minor character with realistic human or militarized violence'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'set minor_harm true and non_graphic_action false.'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'The general-audience fantasy exception does not cover child soldiers, realistic armed attacks on minors'
+    ),
+    true
+  );
+
+  assert.equal(
+    sentPrompt.includes(
+      'A 16-year-old enemy soldier or a child soldier is attacked in a militarized battle.'
     ),
     true
   );

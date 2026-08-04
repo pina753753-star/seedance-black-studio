@@ -70,6 +70,10 @@ test('複数バッチのcategory scoreは最大値、input typeは和集合で�
   );
   assert.equal(result.checkedInputCount, 3);
   assert.equal(result.checkedImageCount, 2);
+  assert.deepEqual(result.reviewImageUrls, [
+    'https://example.com/1.png',
+    'https://example.com/2.png'
+  ]);
 });
 
 test('文章と参照画像を別リクエストで判定し安全な画像を文章由来violenceへ混ぜない', async (t) => {
@@ -155,6 +159,10 @@ test('文章と参照画像を別リクエストで判定し安全な画像を�
   assert.deepEqual(result.categoryAppliedInputTypes.violence, ['text']);
   assert.equal(result.checkedInputCount, 3);
   assert.equal(result.checkedImageCount, 2);
+  assert.deepEqual(result.reviewImageUrls, [
+    'https://example.com/character.png',
+    'https://example.com/room.png'
+  ]);
 });
 
 test('文章だけのviolenceは入力元情報が欠落してもtext由来として保持', async (t) => {

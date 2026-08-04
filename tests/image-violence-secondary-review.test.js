@@ -158,7 +158,9 @@ for (const [name, blockedField] of [
   test(`${name}は二次判定でも422で拒否する`, async () => {
     const classification = safeClassification({
       [blockedField]: true,
-      non_graphic_action: blockedField === 'graphic_injury' ? false : true,
+      non_graphic_action: ['graphic_injury', 'minor_harm'].includes(blockedField)
+        ? false
+        : true,
       ...(blockedField === 'minor_harm' ? { adult_or_nonhuman_only: false } : {})
     });
 
@@ -215,7 +217,9 @@ for (const [name, prompt] of [
         apiKey: 'test-key',
         fetchImpl: async () => response({
           output_text: JSON.stringify(safeClassification({
-            adult_or_nonhuman_only: false
+            adult_or_nonhuman_only: false,
+            minor_harm: true,
+            non_graphic_action: false
           }))
         })
       }
@@ -227,6 +231,26 @@ for (const [name, prompt] of [
     assert.equal(result.reason, 'classification_blocked');
   });
 }
+
+test('小柄で幼く見える年齢不明の古代精霊は外見だけで拒否しない', async () => {
+  const result = await resolveModerationDecision(
+    '小柄で幼く見える年齢不明の古代の草の精霊が、怪物の攻撃を魔法の盾で防ぐ。負傷、流血、性的表現なし。',
+    moderationResult(),
+    {
+      apiKey: 'test-key',
+      fetchImpl: async () => response({
+        output_text: JSON.stringify(safeClassification({
+          adult_or_nonhuman_only: false
+        }))
+      })
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
+});
 
 test('実写・実在人物らしき画像には脇役ルールを適用せず従来通り拒否する', async () => {
   const result = await resolveModerationDecision(
