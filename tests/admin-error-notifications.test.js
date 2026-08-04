@@ -22,10 +22,10 @@ const context = {
   creditsCache: []
 };
 vm.createContext(context);
-vm.runInContext(`${logic}\nthis.taskFacts=taskFacts;this.currentTaskClass=currentTaskClass;this.classifyTaskIssue=classifyTaskIssue;this.issueKey=issueKey;this.automaticHandlingLabel=automaticHandlingLabel;this.issueCard=issueCard;`, context);
+vm.runInContext(`${logic}\nthis.taskFacts=taskFacts;this.currentTaskClass=currentTaskClass;this.classifyTaskIssue=classifyTaskIssue;this.issueKey=issueKey;this.handlingState=handlingState;this.automaticHandlingLabel=automaticHandlingLabel;this.buildSupportRequest=buildSupportRequest;this.issueCard=issueCard;`, context);
 
 test('終了済みの失敗を現在異常ではなく過去失敗として扱う', () => {
-  assert.equal(context.currentTaskClass({ status: 'failed' }), 'Historical');
+  assert.equal(context.currentTaskClass({ status: 'failed', credit_cost: 0 }), 'Historical');
   assert.equal(context.currentTaskClass({ status: 'queued', error_message: 'provider failed' }), 'Error');
 });
 
@@ -90,7 +90,7 @@ test('通知UIと閲覧専用の確認済み保存を備える', () => {
 
 test('初回以前の失敗を通知対象外にし、新しい失敗だけを通知できる', () => {
   assert.match(script, /writeAcknowledgedIssueKeys\(alertRowsCache\.map\(issueKey\)\)/);
-  assert.match(script, /alertRowsCache=rows\.filter/);
+  assert.match(script, /alertRowsCache=opsActionCache/);
 });
 
 test('返金記録と自動再生成なしを過去失敗へ表示する', () => {
@@ -98,6 +98,36 @@ test('返金記録と自動再生成なしを過去失敗へ表示する', () =>
   const task = { id: 'task-1', status: 'failed' };
   assert.match(context.automaticHandlingLabel(task), /自動対応済み/);
   assert.match(context.issueCard(task, '過去の失敗'), /自動再生成：なし/);
+});
+
+test('失敗を自動対応済み・対応必要へ安全に分ける', () => {
+  context.creditsCache.length = 0;
+  assert.equal(context.handlingState({ id: 'free', status: 'failed', credit_cost: 0 }).kind, 'resolved');
+  assert.equal(context.handlingState({ id: 'paid', status: 'failed', credit_cost: 80 }).kind, 'action');
+  assert.equal(context.handlingState({ id: 'unknown', status: 'failed' }).kind, 'action');
+  context.creditsCache.push({ related_task_id: 'paid', amount: 80, reason: 'generation_refund' });
+  assert.equal(context.handlingState({ id: 'paid', status: 'failed', credit_cost: 80 }).kind, 'resolved');
+});
+
+test('放置タスクは2時間15分までは自動復旧中、それを超えたら対応必要', () => {
+  const now = Date.now();
+  assert.equal(context.handlingState({ status: 'processing', updated_at: new Date(now - 60 * 60 * 1000).toISOString() }).kind, 'monitoring');
+  assert.equal(context.handlingState({ status: 'processing', updated_at: new Date(now - 136 * 60 * 1000).toISOString() }).kind, 'action');
+});
+
+test('対応依頼には調査情報と安全な停止条件をまとめる', () => {
+  const request = context.buildSupportRequest({ id: 'task-9', status: 'failed', credit_cost: 80, error_message: 'refund failed' });
+  assert.match(request, /タスクID: task-9/);
+  assert.match(request, /使用クレジット: 80/);
+  assert.match(request, /私の承認前に実行しないでください/);
+});
+
+test('赤いカードに再確認・コピー・確認済み操作と具体的な案内を出す', () => {
+  const html = context.issueCard({ id: 'task-10', status: 'failed', credit_cost: 80 });
+  assert.match(html, /あなたの対応/);
+  assert.match(html, /今すぐ再確認/);
+  assert.match(html, /対応依頼をコピー/);
+  assert.match(html, /通知を確認済みにする/);
 });
 
 test('画面表示中だけ60秒ごとに運用データを自動更新する', () => {
@@ -110,9 +140,20 @@ test('画面表示中だけ60秒ごとに運用データを自動更新する', 
 test('一覧に分類・要約・対処・ユーザー・生のエラーを表示する', () => {
   assert.match(script, /type\.label/);
   assert.match(script, /type\.summary/);
-  assert.match(script, /対処の目安/);
+  assert.match(script, /確認すること/);
   assert.match(script, /対象ユーザー/);
   assert.match(script, /生のエラー/);
+});
+
+test('通知は対応が必要な項目だけを数え、開くだけでは確認済みにしない', () => {
+  assert.match(script, /alertRowsCache=opsActionCache/);
+  assert.doesNotMatch(script, /if\(name==='ops'\)acknowledgeCurrentErrors/);
+  assert.match(script, /function acknowledgeIssue/);
+});
+
+test('再確認は既存の読み取り処理だけを呼び、書き込み処理を追加しない', () => {
+  assert.match(script, /async function recheckOpsNow[\s\S]*await loadOps\(\)/);
+  assert.doesNotMatch(script, /recheckOpsNow[\s\S]{0,500}client\.from\([^)]*\)\.(insert|update|delete)/);
 });
 
 test('スマホ幅では通知追加後もヘッダーを縮める指定がある', () => {
