@@ -221,6 +221,39 @@ function persistDraft(){
   d['prompt_'+mode]=$('prompt')?.value||'';
   writeDraft(d);
 }
+// 生成受付に成功したときだけ、送信に使った入力を初期化する。
+// 通信待ちの間に別のプロンプトや画像へ変更された場合は、新しい入力を消さない。
+function clearAcceptedGenerationInputs(submission){
+  const promptEl=$('prompt');
+  if(submission.storyboardLocked){
+    const unchanged=sbLocked&&mode===submission.mode&&promptEl?.value===submission.rawPrompt&&sbGenerationImageUrl===submission.storyboardImageUrl;
+    if(unchanged)resetStoryboardInputs();
+    return;
+  }
+  const currentAssetIds=currentModeAssetList().map(a=>a.id);
+  const inputsUnchanged=mode===submission.mode&&promptEl?.value===submission.rawPrompt&&JSON.stringify(currentAssetIds)===JSON.stringify(submission.assetIds);
+  if(!inputsUnchanged)return;
+  const draftAfterSubmit=readDraft();
+  promptEl.value='';
+  if(draftAfterSubmit['prompt_'+submission.mode]===submission.rawPrompt)delete draftAfterSubmit['prompt_'+submission.mode];
+
+  let imagesCleared=false;
+  if(submission.mode==='image_to_video'){
+    if(imgAsset?.objectUrl){try{URL.revokeObjectURL(imgAsset.objectUrl)}catch(_){}}
+    imgAsset=null;
+    imagesCleared=true;
+  }else if(submission.mode==='reference_to_video'){
+    assets.forEach(a=>{if(a.objectUrl){try{URL.revokeObjectURL(a.objectUrl)}catch(_){}}});
+    assets=[];
+    syncUrlsFromAssets();
+    draftAfterSubmit.referenceUrls=[];
+    imagesCleared=true;
+  }
+
+  localStorage.setItem(DRAFT_KEY,JSON.stringify(draftAfterSubmit));
+  if(imagesCleared&&$('file'))$('file').value='';
+  if(imagesCleared||submission.mode==='text_to_video')renderAssets();
+}
 function roundUpToFive(v){return Math.ceil(Math.max(50,Math.min(400,v))/5)*5;}
 const PRICING_SAFETY_MULTIPLIER=1.15;
 function creditEstimate(){const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const model=$('model')?.value||'bytedance/seedance-2.0-fast';
@@ -611,7 +644,7 @@ async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.sup
 function showCreditShortage(needed,balance){const el=$('creditStatus');if(!el)return;const shortage=needed-balance;el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="color:#fca5a5;font-weight:800;font-size:15px">クレジットが足りません</div><button type="button" onclick="hideCreditStatus()" aria-label="閉じる" style="background:none;border:none;color:#9ca3af;font-size:20px;line-height:1;cursor:pointer;padding:0 4px;flex-shrink:0">×</button></div><div style="color:#d1d5db;font-size:13px;line-height:1.9;margin-bottom:12px">必要: '+needed+' cr<br>現在: '+balance+' cr<br>不足: '+shortage+' cr</div><a href="./pricing.html#credit" style="display:inline-block;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:12px;padding:10px 18px;font-weight:800;text-decoration:none;font-size:14px">クレジットを購入 →</a>';el.style.display='block';setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50)}
 function hideCreditStatus(){const el=$('creditStatus');if(el)el.style.display='none'}
 
-async function start(){if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&currentModeAssetList().some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const prompt=$('prompt').value.trim();if(!prompt)return;const hasRequiredImage=mode==='text_to_video'?true:(sbLocked?!!sbGenerationImageUrl:(mode==='image_to_video'?!!(imgAsset&&imgAsset.status==='completed'&&imgAsset.url):!!urls.length));if(!hasRequiredImage)return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const _subMode=mode;const _subPrompt=prompt;try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});if($('prompt').value===_subPrompt)$('prompt').value='';const _d=readDraft();delete _d['prompt_'+_subMode];localStorage.setItem(DRAFT_KEY,JSON.stringify(_d));loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}}
+async function start(){if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&currentModeAssetList().some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const rawPrompt=$('prompt').value;const prompt=rawPrompt.trim();if(!prompt)return;const hasRequiredImage=mode==='text_to_video'?true:(sbLocked?!!sbGenerationImageUrl:(mode==='image_to_video'?!!(imgAsset&&imgAsset.status==='completed'&&imgAsset.url):!!urls.length));if(!hasRequiredImage)return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const submission={mode,rawPrompt,storyboardLocked:sbLocked,storyboardImageUrl:sbLocked?sbGenerationImageUrl:'',assetIds:sbLocked?[]:currentModeAssetList().map(a=>a.id)};try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});clearAcceptedGenerationInputs(submission);loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}}
 
 
 function restoreDraft(){draft=readDraft();const p=draft['prompt_'+mode]||'';if(p)$('prompt').value=p;[['model',draft.model],['aspect',draft.aspect],['duration',draft.duration],['resolution',draft.resolution]].forEach(([id,val])=>{if($(id)&&val)$(id).value=val});setAssetsFromUrls(Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):urls)}
@@ -1212,7 +1245,7 @@ function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution}){
 
 // 「作り直す」: プロンプト・画像・ロックをすべてリセットし、絵コンテタブの
 // 初期状態(画像選択前)へ戻して、再度「プロンプトを作る」を押せるようにする。
-$('sbRedoBtn').onclick=()=>{
+function resetStoryboardInputs(){
   sbApplyLock(false);
   sbFile=null;
   sbResizedBase64='';
@@ -1235,7 +1268,8 @@ $('sbRedoBtn').onclick=()=>{
   localStorage.removeItem(SB_DRAFT_KEY);
   renderAssets();
   persistDraft();
-};
+}
+$('sbRedoBtn').onclick=resetStoryboardInputs;
 // ========== END STORYBOARD ==========
 </script>
 </body>
