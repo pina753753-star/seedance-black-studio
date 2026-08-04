@@ -22,7 +22,7 @@ const context = {
   creditsCache: []
 };
 vm.createContext(context);
-vm.runInContext(`${logic}\nthis.taskFacts=taskFacts;this.currentTaskClass=currentTaskClass;this.classifyTaskIssue=classifyTaskIssue;this.issueKey=issueKey;this.handlingState=handlingState;this.automaticHandlingLabel=automaticHandlingLabel;this.buildSupportRequest=buildSupportRequest;this.issueCard=issueCard;`, context);
+vm.runInContext(`${logic}\nthis.taskFacts=taskFacts;this.taskLedgerFacts=taskLedgerFacts;this.currentTaskClass=currentTaskClass;this.classifyTaskIssue=classifyTaskIssue;this.issueKey=issueKey;this.handlingState=handlingState;this.automaticHandlingLabel=automaticHandlingLabel;this.buildSupportRequest=buildSupportRequest;this.issueCard=issueCard;`, context);
 
 test('終了済みの失敗を現在異常ではなく過去失敗として扱う', () => {
   assert.equal(context.currentTaskClass({ status: 'failed', credit_cost: 0 }), 'Historical');
@@ -35,8 +35,9 @@ test('完了済みで動画URLがないタスクを状態不整合として扱�
   assert.equal(context.classifyTaskIssue(task).label, '状態不整合');
 });
 
-test('生のエラーを運用向けの7分類へ変換する', () => {
+test('生のエラーを運用向けの8分類へ変換する', () => {
   const cases = [
+    ['InputImageSensitiveContentDetected.PrivacyInformation real person', '実在人物・プライバシー判定'],
     ['moderation policy flagged', '安全確認エラー'],
     ['OpenRouter generation failed', '生成元エラー'],
     ['request timeout 503', '通信エラー'],
@@ -94,7 +95,8 @@ test('初回以前の失敗を通知対象外にし、新しい失敗だけを�
 });
 
 test('返金記録と自動再生成なしを過去失敗へ表示する', () => {
-  context.creditsCache.push({ related_task_id: 'task-1', amount: 80, reason: 'generation_refund' });
+  context.creditsCache.push({ related_task_id: 'task-1', amount: -80, credit_type: 'free', reason: 'video_generation' });
+  context.creditsCache.push({ related_task_id: 'task-1', amount: 80, credit_type: 'free', reason: 'generation_refund' });
   const task = { id: 'task-1', status: 'failed' };
   assert.match(context.automaticHandlingLabel(task), /自動対応済み/);
   assert.match(context.issueCard(task, '過去の失敗'), /自動再生成：なし/);
@@ -103,10 +105,48 @@ test('返金記録と自動再生成なしを過去失敗へ表示する', () =>
 test('失敗を自動対応済み・対応必要へ安全に分ける', () => {
   context.creditsCache.length = 0;
   assert.equal(context.handlingState({ id: 'free', status: 'failed', credit_cost: 0 }).kind, 'resolved');
+  assert.equal(context.handlingState({ id: 'not-charged', status: 'failed', credit_cost: 245 }).kind, 'resolved');
+  context.creditsCache.push({ related_task_id: 'paid', amount: -80, credit_type: 'free', reason: 'video_generation' });
   assert.equal(context.handlingState({ id: 'paid', status: 'failed', credit_cost: 80 }).kind, 'action');
-  assert.equal(context.handlingState({ id: 'unknown', status: 'failed' }).kind, 'action');
-  context.creditsCache.push({ related_task_id: 'paid', amount: 80, reason: 'generation_refund' });
+  context.creditsCache.push({ related_task_id: 'paid', amount: 80, credit_type: 'free', reason: 'generation_refund' });
   assert.equal(context.handlingState({ id: 'paid', status: 'failed', credit_cost: 80 }).kind, 'resolved');
+});
+
+test('返金は合計だけでなくクレジット種類ごとの一致を確認する', () => {
+  context.creditsCache.length = 0;
+  context.creditsCache.push(
+    { related_task_id: 'task-pools', amount: -50, credit_type: 'subscription', reason: 'video_generation' },
+    { related_task_id: 'task-pools', amount: -30, credit_type: 'free', reason: 'video_generation' },
+    { related_task_id: 'task-pools', amount: 80, credit_type: 'free', reason: 'generation_refund' }
+  );
+  const ledger = context.taskLedgerFacts({ id: 'task-pools' });
+  assert.equal(ledger.charged, 80);
+  assert.equal(ledger.refunded, 80);
+  assert.equal(ledger.code, 'partial_refund');
+  assert.equal(context.handlingState({ id: 'task-pools', status: 'failed' }).kind, 'action');
+});
+
+test('料金差額返金と失敗返金の合計が消費額と一致すれば返金済みにする', () => {
+  context.creditsCache.length = 0;
+  context.creditsCache.push(
+    { related_task_id: 'task-cost-refund', amount: -100, credit_type: 'free', reason: 'video_generation' },
+    { related_task_id: 'task-cost-refund', amount: 20, credit_type: 'free', reason: 'cost_based_refund' },
+    { related_task_id: 'task-cost-refund', amount: 80, credit_type: 'free', reason: 'generation_refund' }
+  );
+  const ledger = context.taskLedgerFacts({ id: 'task-cost-refund' });
+  assert.equal(ledger.charged, 100);
+  assert.equal(ledger.refunded, 100);
+  assert.equal(ledger.code, 'refunded');
+  assert.equal(context.handlingState({ id: 'task-cost-refund', status: 'failed' }).kind, 'resolved');
+});
+
+test('不明なクレジット種類を消費なしと誤判定しない', () => {
+  context.creditsCache.length = 0;
+  context.creditsCache.push({ related_task_id: 'task-unknown-pool', amount: -80, credit_type: 'unknown', reason: 'video_generation' });
+  const ledger = context.taskLedgerFacts({ id: 'task-unknown-pool' });
+  assert.equal(ledger.charged, 80);
+  assert.equal(ledger.code, 'inconsistent');
+  assert.equal(context.handlingState({ id: 'task-unknown-pool', status: 'failed' }).kind, 'action');
 });
 
 test('放置タスクは2時間15分までは自動復旧中、それを超えたら対応必要', () => {
@@ -116,16 +156,23 @@ test('放置タスクは2時間15分までは自動復旧中、それを超え�
 });
 
 test('対応依頼には調査情報と安全な停止条件をまとめる', () => {
+  context.creditsCache.length = 0;
+  context.creditsCache.push({ related_task_id: 'task-9', amount: -80, credit_type: 'free', reason: 'video_generation' });
   const request = context.buildSupportRequest({ id: 'task-9', status: 'failed', credit_cost: 80, error_message: 'refund failed' });
   assert.match(request, /タスクID: task-9/);
-  assert.match(request, /使用クレジット: 80/);
+  assert.match(request, /予定クレジット: 80/);
+  assert.match(request, /消費記録: 80クレジット（1件）/);
+  assert.match(request, /返金記録: 0クレジット（0件）/);
+  assert.match(request, /クレジット判定: 返金記録なし/);
   assert.match(request, /私の承認前に実行しないでください/);
 });
 
-test('赤いカードに再確認・コピー・確認済み操作と具体的な案内を出す', () => {
+test('赤いカードはコピー・確認済みだけを出し、意味が曖昧な個別再確認を出さない', () => {
+  context.creditsCache.length = 0;
+  context.creditsCache.push({ related_task_id: 'task-10', amount: -80, credit_type: 'free', reason: 'video_generation' });
   const html = context.issueCard({ id: 'task-10', status: 'failed', credit_cost: 80 });
   assert.match(html, /あなたの対応/);
-  assert.match(html, /今すぐ再確認/);
+  assert.doesNotMatch(html, /今すぐ再確認/);
   assert.match(html, /対応依頼をコピー/);
   assert.match(html, /通知を確認済みにする/);
 });
@@ -154,6 +201,16 @@ test('通知は対応が必要な項目だけを数え、開くだけでは確�
 test('再確認は既存の読み取り処理だけを呼び、書き込み処理を追加しない', () => {
   assert.match(script, /async function recheckOpsNow[\s\S]*await loadOps\(\)/);
   assert.doesNotMatch(script, /recheckOpsNow[\s\S]{0,500}client\.from\([^)]*\)\.(insert|update|delete)/);
+  assert.match(source, /最新状態に更新/);
+});
+
+test('返金照合は全体最新50件ではなく最新100タスクのIDへ絞って読み取る', () => {
+  assert.match(script, /fetchTaskCreditRows\(opsRowsCache\.map\(t=>t\.id\)\.filter\(Boolean\)\)/);
+  assert.match(script, /\.in\('related_task_id',ids\)/);
+  assert.match(script, /\.in\('reason',reasons\)/);
+  assert.match(script, /cost_based_refund/);
+  assert.doesNotMatch(script, /credit_transactions'[\s\S]{0,220}\.limit\(50\)/);
+  assert.doesNotMatch(script, /fetchTaskCreditRows[\s\S]{0,900}\.(insert|update|delete)\(/);
 });
 
 test('スマホ幅では通知追加後もヘッダーを縮める指定がある', () => {
