@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>クレジット付与 | Pina Studio</title>
+<meta name="theme-color" content="#050506">
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{--bg:#050506;--card:#121216;--line:rgba(255,255,255,.14);--muted:rgba(255,255,255,.64);--gold:#d7b86a;--red:#fb7185;--ok:#86efac}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:620px;margin:0 auto;padding:16px 12px 44px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:26px}.brand{color:#fff;text-decoration:none;font-weight:950;font-size:20px}.back{color:#fff;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:9px 12px;font-size:13px}.hero p{margin:0 0 8px;color:var(--red);font-size:12px;letter-spacing:.16em}.hero h1{margin:0 0 9px;font-size:36px;letter-spacing:-.05em}.lead,.mini{color:var(--muted);font-size:13px;line-height:1.7}.notice,.card,.result,.confirm{border:1px solid var(--line);border-radius:22px;background:var(--card);padding:16px;margin-top:13px}.notice{border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}label{display:block;margin:14px 0 6px;color:var(--muted);font-size:13px}input,textarea{width:100%;border:1px solid var(--line);background:#18181d;color:#fff;border-radius:14px;padding:13px;font:inherit;outline:none}textarea{min-height:92px;resize:vertical}input:focus,textarea:focus{border-color:rgba(215,184,106,.7)}button{width:100%;margin-top:12px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(90deg,#fff,#f5dca4);color:#050506;padding:14px;font-weight:950;font-size:15px}button.secondary{background:rgba(255,255,255,.06);color:#fff}button.danger{background:rgba(251,113,133,.16);border-color:rgba(251,113,133,.55);color:#fff}button:disabled{opacity:.48}.user{border:1px solid var(--line);border-radius:16px;padding:13px;margin-top:10px;background:#18181d}.user b{overflow-wrap:anywhere}.balance{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:9px}.balance span{border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:9px;font-size:12px}.message{display:none;margin-top:13px;border-radius:16px;padding:12px;font-size:13px;line-height:1.65}.message.show{display:block}.message.error{background:rgba(251,113,133,.12);border:1px solid rgba(251,113,133,.4)}.message.ok{background:rgba(134,239,172,.10);border:1px solid rgba(134,239,172,.32)}.confirm{display:none}.confirm.show{display:block}.confirm strong{display:block;margin-bottom:8px}.request{font-family:ui-monospace,monospace;overflow-wrap:anywhere}.result{display:none}.result.show{display:block}@media(max-width:430px){.hero h1{font-size:31px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header class="top"><a class="brand" href="./index.html">Pina Studio</a><a class="back" href="./admin.html">管理画面へ戻る</a></header>
+<section class="hero"><p>ADMIN CREDIT GRANT</p><h1>無料クレジット付与</h1><div class="lead">対象者と付与後残高を確認してから、1回だけ実行します。</div></section>
+<div class="notice mini">この画面はクレジットを変更します。購入分・サブスク分・無料分のリセットは操作できません。通信が切れても、新しい受付IDでやり直さないでください。</div>
+<section class="card" id="app" hidden>
+  <h2>1. 対象者を検索</h2>
+  <label for="emailQuery">メールアドレス</label>
+  <input id="emailQuery" type="search" inputmode="email" autocomplete="off" maxlength="254" placeholder="メールアドレスを2文字以上入力">
+  <button id="searchBtn" class="secondary">検索する</button>
+  <div id="searchResults"></div>
+</section>
+<section class="card" id="grantCard" hidden>
+  <h2>2. 付与内容を入力</h2>
+  <div class="mini" id="selectedUser"></div>
+  <label for="amount">付与する無料クレジット（1〜10,000）</label>
+  <input id="amount" type="number" inputmode="numeric" min="1" max="10000" step="1" value="100">
+  <label for="reason">付与理由（必須・2〜200文字）</label>
+  <textarea id="reason" maxlength="200" placeholder="例：生成障害のお詫びとして付与"></textarea>
+  <button id="reviewBtn">内容を確認する</button>
+</section>
+<section class="confirm" id="confirmBox">
+  <strong>3. 最終確認</strong>
+  <div id="confirmText" class="mini"></div>
+  <div class="mini request" id="requestText"></div>
+  <button id="grantBtn" class="danger">この内容で付与する</button>
+  <button id="cancelBtn" class="secondary">入力へ戻る</button>
+</section>
+<section class="result" id="resultBox"></section>
+<div class="message" id="message"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./auth-config.js?v=4a1f0c1"></script>
+<script>
+const cfg=window.FLOWVID_AUTH||{},ADMIN_EMAIL='hinaran53@gmail.com';
+const client=cfg.supabaseUrl&&cfg.supabaseAnonKey?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
+const $=id=>document.getElementById(id);let session=null,selected=null,pending=null,submitting=false;
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function message(text,type='error'){$('message').textContent=text;$('message').className='message show '+type}
+function clearMessage(){$('message').className='message'}
+function total(b){return Number(b.free||0)+Number(b.subscription||0)+Number(b.purchased||0)}
+async function callApi(body){let response;try{response=await fetch('/api/admin-credit-grant',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(body)})}catch(_){throw Object.assign(new Error('通信が完了しませんでした。'),{uncertain:body.action==='grant'})}const data=await response.json().catch(()=>null);if(!response.ok||!data?.ok)throw Object.assign(new Error(data?.message||'処理結果を確認できません。'),{uncertain:body.action==='grant'&&(response.status>=500||!data),data});return data}
+function resetReview(){pending=null;$('confirmBox').classList.remove('show');$('grantBtn').textContent='この内容で付与する'}
+function selectUser(user){selected=user;resetReview();$('grantCard').hidden=false;$('selectedUser').textContent=`${user.email}｜現在の無料 ${user.balance?.free??'確認不可'}｜合計 ${user.balance?total(user.balance):'確認不可'}`;$('grantCard').scrollIntoView({behavior:'smooth',block:'start'})}
+function renderUsers(users){const box=$('searchResults');if(!users.length){box.innerHTML='<div class="mini" style="margin-top:12px">該当するユーザーはいません。</div>';return}box.innerHTML=users.map((u,i)=>`<div class="user"><b>${esc(u.email)}</b><div class="mini">プラン：${esc(u.plan||'-')}</div>${u.balance?`<div class="balance"><span>無料 ${u.balance.free}</span><span>サブスク ${u.balance.subscription}</span><span>購入 ${u.balance.purchased}</span><span>合計 ${total(u.balance)}</span></div><button class="secondary" data-user-index="${i}">この人を選ぶ</button>`:'<div class="mini">残高レコードがないため付与できません。</div>'}</div>`).join('');box.querySelectorAll('[data-user-index]').forEach(btn=>btn.onclick=()=>selectUser(users[Number(btn.dataset.userIndex)]))}
+async function search(){clearMessage();const query=$('emailQuery').value.trim();$('searchBtn').disabled=true;try{const data=await callApi({action:'search',query});renderUsers(data.users||[])}catch(error){message(error.message)}finally{$('searchBtn').disabled=false}}
+function review(){clearMessage();if(!selected?.balance){message('残高を確認できる対象者を選んでください。');return}const amount=Number($('amount').value),reason=$('reason').value.trim();if(!Number.isInteger(amount)||amount<1||amount>10000){message('付与額は1〜10,000の整数で入力してください。');return}if(reason.length<2||reason.length>200){message('付与理由は2〜200文字で入力してください。');return}pending={action:'grant',requestId:crypto.randomUUID(),targetUserId:selected.userId,amount,reason};$('confirmText').textContent=`対象：${selected.email}｜無料 ${selected.balance.free} → ${selected.balance.free+amount}｜付与：${amount}｜理由：${reason}`;$('requestText').textContent='受付ID：'+pending.requestId;$('confirmBox').classList.add('show');$('confirmBox').scrollIntoView({behavior:'smooth',block:'start'})}
+async function grant(){if(!pending||submitting)return;submitting=true;$('grantBtn').disabled=true;$('cancelBtn').disabled=true;clearMessage();try{const data=await callApi(pending),result=data.result;$('resultBox').className='result show';$('resultBox').innerHTML=`<strong>${result.duplicate?'付与済みの受付IDを確認しました':'付与が完了しました'}</strong><div class="mini">無料クレジット ${result.balanceBefore} → ${result.balanceAfter}<br>付与：${result.amount}<br>受付ID：${esc(result.requestId)}</div>`;selected.balance.free=Number(result.balanceAfter);resetReview();$('grantCard').hidden=true;message('完了しました。同じ受付IDで二重付与はされません。','ok')}catch(error){$('grantBtn').textContent='同じ受付IDで結果を再確認';message(error.uncertain?'結果を確認できません。同じ受付IDのまま「結果を再確認」を押してください。新しくやり直さないでください。':error.message)}finally{submitting=false;$('grantBtn').disabled=false;$('cancelBtn').disabled=false}}
+$('searchBtn').onclick=search;$('reviewBtn').onclick=review;$('grantBtn').onclick=grant;$('cancelBtn').onclick=resetReview;$('amount').oninput=resetReview;$('reason').oninput=resetReview;$('emailQuery').onkeydown=e=>{if(e.key==='Enter')search()};
+(async()=>{if(!client){message('Supabase設定を確認できません。');return}const result=await client.auth.getSession();session=result.data?.session||null;if(!session?.user||String(session.user.email||'').toLowerCase()!==ADMIN_EMAIL){location.href='./admin-login.html';return}const profile=await client.from('profiles').select('role').eq('id',session.user.id).maybeSingle();if(profile.error||profile.data?.role!=='admin'){location.href='./admin-login.html';return}$('app').hidden=false})().catch(()=>{location.href='./admin-login.html'});
+</script>
+</body>
+</html>
