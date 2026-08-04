@@ -18,13 +18,14 @@ const context = {
   },
   fmt: (value) => String(value),
   statusLabel: (value) => String(value),
-  profilesCache: []
+  profilesCache: [],
+  creditsCache: []
 };
 vm.createContext(context);
-vm.runInContext(`${logic}\nthis.taskFacts=taskFacts;this.currentTaskClass=currentTaskClass;this.classifyTaskIssue=classifyTaskIssue;this.issueKey=issueKey;this.issueCard=issueCard;`, context);
+vm.runInContext(`${logic}\nthis.taskFacts=taskFacts;this.currentTaskClass=currentTaskClass;this.classifyTaskIssue=classifyTaskIssue;this.issueKey=issueKey;this.automaticHandlingLabel=automaticHandlingLabel;this.issueCard=issueCard;`, context);
 
-test('失敗状態とエラー記録を現在異常として扱う', () => {
-  assert.equal(context.currentTaskClass({ status: 'failed' }), 'Error');
+test('終了済みの失敗を現在異常ではなく過去失敗として扱う', () => {
+  assert.equal(context.currentTaskClass({ status: 'failed' }), 'Historical');
   assert.equal(context.currentTaskClass({ status: 'queued', error_message: 'provider failed' }), 'Error');
 });
 
@@ -81,8 +82,29 @@ test('通知UIと閲覧専用の確認済み保存を備える', () => {
   assert.match(source, /id="notificationBtn"/);
   assert.match(source, /id="notificationCount"/);
   assert.match(source, /pinaAdminAcknowledgedIssuesV1/);
+  assert.match(source, /pinaAdminAlertsInitializedV1/);
+  assert.match(script, /initializeAlertBaseline\(\)/);
   assert.match(source, /localStorage\.setItem/);
   assert.doesNotMatch(source, /localStorage[\s\S]{0,200}client\.from\([^)]*\)\.(insert|update|delete)/);
+});
+
+test('初回以前の失敗を通知対象外にし、新しい失敗だけを通知できる', () => {
+  assert.match(script, /writeAcknowledgedIssueKeys\(alertRowsCache\.map\(issueKey\)\)/);
+  assert.match(script, /alertRowsCache=rows\.filter/);
+});
+
+test('返金記録と自動再生成なしを過去失敗へ表示する', () => {
+  context.creditsCache.push({ related_task_id: 'task-1', amount: 80, reason: 'generation_refund' });
+  const task = { id: 'task-1', status: 'failed' };
+  assert.match(context.automaticHandlingLabel(task), /自動対応済み/);
+  assert.match(context.issueCard(task, '過去の失敗'), /自動再生成：なし/);
+});
+
+test('画面表示中だけ60秒ごとに運用データを自動更新する', () => {
+  assert.match(script, /OPS_REFRESH_MS=60000/);
+  assert.match(script, /document\.visibilityState==='hidden'/);
+  assert.match(script, /setInterval\(autoRefreshOps,OPS_REFRESH_MS\)/);
+  assert.match(script, /opsRefreshInFlight/);
 });
 
 test('一覧に分類・要約・対処・ユーザー・生のエラーを表示する', () => {
