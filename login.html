@@ -242,7 +242,7 @@
           result=await client.auth.signInWithPassword(loginOptions?{email:mail,password:pass,options:loginOptions}:{email:mail,password:pass});
         }else{
           const signupData={birth_date:birthDate.value};
-          const signupOptions={emailRedirectTo:location.origin+'/profile.html',data:signupData};
+          const signupOptions={emailRedirectTo:'https://www.pinastudio.jp/profile.html',data:signupData};
           if(turnstileSiteKey)signupOptions.captchaToken=captchaToken;
           result=await client.auth.signUp({
             email:mail,
