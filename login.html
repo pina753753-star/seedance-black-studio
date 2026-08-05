@@ -48,6 +48,7 @@
             <input id="birthDate" type="date" autocomplete="bday">
             <p class="fieldHint">18歳未満の方は登録できません。</p>
           </div>
+          <div class="field" id="captchaField" hidden><div id="captchaWidget"></div></div>
           <button class="primary" id="submitBtn">ログインする</button>
           <div class="message" id="message"></div>
         </form>
@@ -58,6 +59,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-config.js?v=4a1f0c1"></script>
   <script src="./auth-guard.js?v=1"></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <script>
     let mode='login';
     const loginTab=document.getElementById('loginTab');
@@ -74,6 +76,29 @@
     const authReady=Boolean(client);
     function setMessage(text,type='error'){message.textContent=text;message.className='message show '+type;}
     function clearMessage(){message.textContent='';message.className='message';}
+
+    // Cloudflare Turnstile。turnstileSiteKeyが未設定(空文字)の間はウィジェットを
+    // 描画せず、captchaTokenもauth呼び出しへ一切追加しない(既存フローと完全に同一)。
+    const turnstileSiteKey=String(cfg.turnstileSiteKey||'').trim();
+    const captchaField=document.getElementById('captchaField');
+    const captchaWidget=document.getElementById('captchaWidget');
+    let captchaToken='';
+    window.flowvidCaptchaSuccess=function(token){captchaToken=token||'';};
+    window.flowvidCaptchaExpired=function(){captchaToken='';};
+    if(turnstileSiteKey&&captchaField&&captchaWidget){
+      captchaField.hidden=false;
+      captchaWidget.className='cf-turnstile';
+      captchaWidget.setAttribute('data-sitekey',turnstileSiteKey);
+      captchaWidget.setAttribute('data-callback','flowvidCaptchaSuccess');
+      captchaWidget.setAttribute('data-expired-callback','flowvidCaptchaExpired');
+      captchaWidget.setAttribute('data-error-callback','flowvidCaptchaExpired');
+    }
+    function resetCaptcha(){
+      captchaToken='';
+      if(turnstileSiteKey&&window.turnstile&&typeof window.turnstile.reset==='function'){
+        try{window.turnstile.reset(captchaWidget);}catch(_){}
+      }
+    }
     function formatDateParts(parts){
       const year=String(parts.year).padStart(4,'0');
       const month=String(parts.month).padStart(2,'0');
@@ -206,21 +231,30 @@
         if(age===null){setMessage('正しい生年月日を入力してください。','error');birthDate.focus();return;}
         if(age<18){setMessage('18歳未満の方は登録できません。','error');birthDate.focus();return;}
       }
+      if(turnstileSiteKey&&!captchaToken){
+        setMessage('CAPTCHA認証を完了してください。','error');
+        return;
+      }
       submitBtn.disabled=true;
       try{
         if(mode==='login'){
-          result=await client.auth.signInWithPassword({email:mail,password:pass});
+          const loginOptions=turnstileSiteKey?{captchaToken}:undefined;
+          result=await client.auth.signInWithPassword(loginOptions?{email:mail,password:pass,options:loginOptions}:{email:mail,password:pass});
         }else{
+          const signupData={birth_date:birthDate.value};
+          const signupOptions={emailRedirectTo:location.origin+'/profile.html',data:signupData};
+          if(turnstileSiteKey)signupOptions.captchaToken=captchaToken;
           result=await client.auth.signUp({
             email:mail,
             password:pass,
-            options:{emailRedirectTo:location.origin+'/profile.html',data:{birth_date:birthDate.value}}
+            options:signupOptions
           });
         }
       }catch(error){
         result={error:{message:error?.message||'認証エラーが発生しました。'}};
       }finally{
         submitBtn.disabled=false;
+        resetCaptcha();
       }
       if(result.error){setMessage(authMessage(result.error.message),'error');return;}
 
