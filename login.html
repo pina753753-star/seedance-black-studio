@@ -214,7 +214,7 @@
           result=await client.auth.signUp({
             email:mail,
             password:pass,
-            options:{emailRedirectTo:location.origin+'/profile.html',data:{birth_date:birthDate.value}}
+            options:{emailRedirectTo:'https://www.pinastudio.jp/profile.html',data:{birth_date:birthDate.value}}
           });
         }
       }catch(error){
