@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <title>メールアドレスの確認 | Pina Studio</title>
+  <link rel="icon" type="image/png" href="/assets/brand/pina-icon-v2-favicon.png" />
+  <meta name="theme-color" content="#050506" />
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:#050506;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}
+    body{display:grid;place-items:center;padding:24px}
+    main{width:min(100%,520px);text-align:center}
+    .brand{display:inline-block;margin-bottom:28px}
+    .brand img{display:block;width:132px;height:auto}
+    .card{border:1px solid rgba(255,255,255,.13);border-radius:28px;background:rgba(255,255,255,.05);padding:28px 22px}
+    h1{margin:0 0 14px;font-size:27px;line-height:1.35}
+    p{margin:0;color:rgba(255,255,255,.65);font-size:14px;line-height:1.8}
+    button,.link{display:block;width:100%;margin-top:22px;border:0;border-radius:18px;padding:15px 16px;font:inherit;font-size:16px;font-weight:800;text-decoration:none;cursor:pointer}
+    button{background:linear-gradient(90deg,#fff,#e2c978,#7c3aed);color:#050506}
+    button:disabled{cursor:default;opacity:.55}
+    .link{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#fff}
+    .message{display:none;margin-top:18px;border-radius:16px;padding:12px 13px;text-align:left}
+    .message.show{display:block}
+    .message.error{border:1px solid rgba(251,113,133,.35);background:rgba(251,113,133,.1);color:#fecdd3}
+    .message.ok{border:1px solid rgba(134,239,172,.3);background:rgba(134,239,172,.1);color:#dcfce7}
+  </style>
+</head>
+<body>
+  <main>
+    <a class="brand" href="./index.html" aria-label="Pina Studio トップへ">
+      <img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" />
+    </a>
+    <section class="card">
+      <h1>メールアドレスを確認します</h1>
+      <p>下のボタンを押すと確認が完了し、マイページへ移動します。</p>
+      <button id="confirmBtn" type="button">メールアドレスを確認する</button>
+      <div id="message" class="message" role="status" aria-live="polite"></div>
+      <a id="loginLink" class="link" href="./login.html" hidden>ログイン画面へ</a>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-config.js?v=4a1f0c1"></script>
+  <script>
+    (function(){
+      const params=new URLSearchParams(location.search);
+      const tokenHash=params.get('token_hash')||'';
+      const confirmBtn=document.getElementById('confirmBtn');
+      const message=document.getElementById('message');
+      const loginLink=document.getElementById('loginLink');
+      let running=false;
+
+      function showMessage(text,type){
+        message.textContent=text;
+        message.className='message show '+type;
+      }
+
+      function showLogin(){
+        loginLink.hidden=false;
+      }
+
+      function finishWithoutRetry(text){
+        showMessage(text,'error');
+        showLogin();
+        confirmBtn.hidden=true;
+      }
+
+      function allowRetry(){
+        showMessage('通信できませんでした。時間をおいて、もう一度お試しください。','error');
+        confirmBtn.disabled=false;
+        confirmBtn.textContent='もう一度試す';
+      }
+
+      if(!tokenHash){
+        confirmBtn.disabled=true;
+        showMessage('確認情報が見つかりません。確認メール内のリンクをもう一度開いてください。','error');
+        showLogin();
+        return;
+      }
+
+      confirmBtn.addEventListener('click',async()=>{
+        if(running)return;
+        running=true;
+        confirmBtn.disabled=true;
+        confirmBtn.textContent='確認しています…';
+        try{history.replaceState(null,'',location.pathname);}catch(_){}
+
+        const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
+        if(!client){
+          allowRetry();
+          running=false;
+          return;
+        }
+
+        let result;
+        try{
+          result=await client.auth.verifyOtp({
+            token_hash:tokenHash,
+            type:'email'
+          });
+        }catch(_){
+          allowRetry();
+          running=false;
+          return;
+        }
+
+        if(!result||result.error){
+          finishWithoutRetry('確認できませんでした。リンクが使用済み、または期限切れの可能性があります。すでに確認済みの場合は、そのままログインできます。');
+          running=false;
+          return;
+        }
+
+        if(!result.data?.session){
+          finishWithoutRetry('メール確認は完了しましたが、ログイン情報を保存できませんでした。ログイン画面からログインしてください。');
+          running=false;
+          return;
+        }
+
+        let savedSession;
+        try{
+          savedSession=await client.auth.getSession();
+        }catch(_){
+          savedSession=null;
+        }
+
+        if(savedSession?.error||!savedSession?.data?.session){
+          finishWithoutRetry('メール確認は完了しましたが、ログイン情報を保存できませんでした。ログイン画面からログインしてください。');
+          running=false;
+          return;
+        }
+
+        showMessage('確認が完了しました。マイページへ移動します。','ok');
+        location.replace('./profile.html');
+      });
+    })();
+  </script>
+</body>
+</html>
