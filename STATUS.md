@@ -328,3 +328,27 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 ### 参照画像モードの現状再確認(2026-07-25)
 
 2026-07-25、参照画像モードの現状を再確認した。一時停止処理(PR #85、`api/seedance-start-priced.js`)は現在も有効で、一般利用者は引き続き503でブロックされる。実在人物なりすまし対策(Amazon Rekognition等)・CSAM専用検知(PhotoDNA、Thorn Safer等)は、コード上確認した結果、依然として未実装。2026-07-23〜25に本番DBで確認された`reference_to_video`モードの完了タスクは、すべて`TEST_BYPASS_USER_ID`(PR #99)による運営者本人のテストアカウント(`hinaran53@gmail.com`、`user_id: 0e9708d6-3c74-41e0-9cc8-944a6f6c939b`)経由のものであり、一般利用者向けの再開ではない。上記2つの検知機能が実装され本番稼働するまで、この状態を維持する。
+
+## 2026年8月7日 作業ログ
+
+### 完了した項目
+- 新規登録へのCAPTCHA(Cloudflare Turnstile)実装。site key未設定の間は既存フローと同一動作。
+- pricing.htmlに利用規約・返金ポリシーへのリンクを追加。
+- 独自SMTP設定(Resend)完了。ドメイン認証(DKIM/SPF/DMARC)済み、実際のメール到達を確認済み。
+- Supabase Site URL / Redirect URLsをpinastudio.jp(www統一)に更新。
+- 自動ログイン退行の修正:emailRedirectToをwww.pinastudio.jp固定に変更。
+- 確認メールの着地をSupabase標準リダイレクトから独自ページ(confirm-signup.html)方式に変更。ボタン押下でトークン検証しマイページへ遷移する設計。
+- メールテンプレートのスペルミス(confirm-singup.html → confirm-signup.html)を修正。
+- 新規登録→確認メール→マイページ到達までの一連の動作を実機で確認済み(hinaran53+brandnew001@gmail.com)。
+
+### 判明した重要な注意点
+- 同一メールアドレスで未確認のまま複数回登録すると、Supabaseは最初に生成した確認メール(古いテンプレート内容のまま)を再送する。テンプレート変更後の動作確認は、必ず未使用の新しいメールアドレスで行うこと。
+
+### 未対応・残タスク
+- ブランチfeat/signup-captcha-and-policy-links-20260804のmainへの最終マージ未実施。
+- 非公開バケット化+実削除(reference-imagesバケットの公開設定、履歴削除の実体化)は未着手。
+- 外部プロバイダ(OpenRouter)に残る生成済み動画の削除手段は依然として存在しない。規約・プライバシーポリシーへの開示が必要。
+- reference-images内、過去に生成済みの動画・参照画像は引き続き公開URLでアクセス可能な状態。
+- CAPTCHAのsite key(Cloudflare Turnstile)は未設定のまま(空文字)。
+
+※confirm-signup.html、独自SMTP設定、Supabase Site URL変更は、feat/signup-captcha-and-policy-links-20260804ブランチには反映されていない。mainへのマージ前に、mainの最新状態(confirm-signup.html含む)とこのブランチの差分を確認する必要がある。
