@@ -3,7 +3,14 @@ window.FLOWVID_AUTH = {
   supabaseAnonKey: "sb_publishable_YbRKnQh1fCVO5VDJyVWfyQ_sNzHqvCE",
   redirectTo: "https://flowvid-studio.vercel.app/profile.html",
   adminRedirectTo: "https://flowvid-studio.vercel.app/admin.html",
-  adminEmails: ["hinaran53@gmail.com"]
+  adminEmails: ["hinaran53@gmail.com"],
+  // Cloudflare Turnstileのsite key(非秘密、公開して問題ない値)。
+  // 空文字のままの間はlogin.html側でCAPTCHAウィジェットを描画せず、
+  // 既存のログイン・新規登録フローに一切影響しない。
+  // 有効化する場合は、SupabaseダッシュボードのAuthentication > Attack
+  // Protection > CAPTCHA protectionでTurnstileを選択しsecret keyを設定した上で、
+  // Cloudflareダッシュボードで発行したsite keyをここへ設定する。
+  turnstileSiteKey: ""
 };
 
 window.flowvidSupabaseClient = function(){
