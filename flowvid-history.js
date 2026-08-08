@@ -69,7 +69,29 @@
   let _lastFilterMode;
   async function loadHistory(filterMode){const h=$('history');if(!h)return;_lastFilterMode=filterMode;style();h.innerHTML='<div class="empty">履歴を読み込み中...</div>';try{let _fvToken='';try{const _fvCfg=window.FLOWVID_AUTH||{};if(window.supabase&&_fvCfg.supabaseUrl&&_fvCfg.supabaseAnonKey){if(!window.__flowvidUserClient)window.__flowvidUserClient=window.supabase.createClient(_fvCfg.supabaseUrl,_fvCfg.supabaseAnonKey);const{data:_fvSd}=await window.__flowvidUserClient.auth.getSession();_fvToken=_fvSd?.session?.access_token||''}}catch(_){}const res=await originalFetch('/api/generated-videos?limit=50&t='+Date.now(),{cache:'no-store',headers:_fvToken?{'Authorization':'Bearer '+_fvToken}:{}});const data=await res.json();const hidden=hiddenSet();let items=(data?.rows||[]).map(normalize).filter(it=>it&&!hidden.has(it.url)&&!hidden.has(it.jobId));if(filterMode)items=items.filter(it=>it.mode===filterMode);renderHistory(items)}catch(_){const list=safeJson(localStorage.getItem(HISTORY_KEY),'[]')||[];const hidden2=hiddenSet();let items=list.map(normalize).filter(it=>it&&!hidden2.has(it.url)&&!hidden2.has(it.jobId));if(filterMode)items=items.filter(it=>it.mode===filterMode);renderHistory(items)}}
   window.flowvidLoadHistory=loadHistory;
-  function deleteHistory(jobId,url){if(!jobId&&!url)return;if(!confirm('この動画を履歴から削除しますか？\n動画ファイル本体は削除しません。'))return;hideVideo(url||'',jobId||'');loadHistory(_lastFilterMode)}
+  async function fvAuthToken(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return'';if(!window.__flowvidUserClient)window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);const{data}=await window.__flowvidUserClient.auth.getSession();return data?.session?.access_token||''}catch(_){return''}}
+  async function deleteHistory(jobId,url,button){
+    if(!jobId&&!url)return;
+    if(!confirm('この動画を削除しますか？\nデータベースと保存先の動画ファイルが完全に削除され、元に戻せません。'))return;
+    const originalText=button?.innerHTML;
+    if(button){button.disabled=true;button.innerHTML='削除中'}
+    try{
+      const token=await fvAuthToken();
+      if(!token){alert('ログイン状態を確認できませんでした。再読み込みしてからもう一度お試しください。');if(button){button.disabled=false;if(originalText!=null)button.innerHTML=originalText}return}
+      const res=await originalFetch('/api/delete-generated-video',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({taskId:jobId})});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok||!data.ok){
+        alert('削除に失敗しました。'+(data?.error?'（'+data.error+'）':'')+'時間をおいてもう一度お試しください。');
+        if(button){button.disabled=false;if(originalText!=null)button.innerHTML=originalText}
+        return;
+      }
+      hideVideo(url||'',jobId||'');
+      loadHistory(_lastFilterMode);
+    }catch(_){
+      alert('削除中に通信エラーが発生しました。時間をおいてもう一度お試しください。');
+      if(button){button.disabled=false;if(originalText!=null)button.innerHTML=originalText}
+    }
+  }
   async function saveVideo(url,jobId,button){
     if(!url)return;
     const originalText=button?.innerHTML||'保存';
@@ -170,7 +192,7 @@
   function install(){
     style();loadHistory();
     const clear=$('clear');if(clear){clear.textContent='再読込';clear.onclick=()=>loadHistory()}
-    document.addEventListener('click',e=>{const save=e.target?.closest?.('.fv-save');if(save){e.preventDefault();e.stopPropagation();saveVideo(save.dataset.url||'',save.dataset.jobId||'',save);return}const del=e.target?.closest?.('.fv-delete-one');if(del){e.preventDefault();e.stopPropagation();deleteHistory(del.dataset.jobId||'',del.dataset.url||'');return}const copy=e.target?.closest?.('.fv-copy');if(copy){e.preventDefault();e.stopPropagation();const p=copy.dataset.prompt||'';if(p)navigator.clipboard?.writeText(p).then(()=>{const t=copy.innerHTML;copy.innerHTML='コピー済';setTimeout(()=>{copy.innerHTML=t},1500)});return}const fav=e.target?.closest?.('.fv-fav-btn');if(fav){e.preventDefault();e.stopPropagation();toggleFav(fav.dataset.jobId||'');return}const promptEl=e.target?.closest?.('.fv-prompt');if(promptEl){e.preventDefault();e.stopPropagation();openPromptModal(promptEl.dataset.fullPrompt||promptEl.textContent||'');return}const frame=e.target?.closest?.('.fv-video-frame');if(frame&&!e.target?.closest?.('.fv-expand-btn')){const v=frame.querySelector('video');if(v){v.paused?v.play().catch(()=>{}):v.pause()}}});
+    document.addEventListener('click',e=>{const save=e.target?.closest?.('.fv-save');if(save){e.preventDefault();e.stopPropagation();saveVideo(save.dataset.url||'',save.dataset.jobId||'',save);return}const del=e.target?.closest?.('.fv-delete-one');if(del){e.preventDefault();e.stopPropagation();deleteHistory(del.dataset.jobId||'',del.dataset.url||'',del);return}const copy=e.target?.closest?.('.fv-copy');if(copy){e.preventDefault();e.stopPropagation();const p=copy.dataset.prompt||'';if(p)navigator.clipboard?.writeText(p).then(()=>{const t=copy.innerHTML;copy.innerHTML='コピー済';setTimeout(()=>{copy.innerHTML=t},1500)});return}const fav=e.target?.closest?.('.fv-fav-btn');if(fav){e.preventDefault();e.stopPropagation();toggleFav(fav.dataset.jobId||'');return}const promptEl=e.target?.closest?.('.fv-prompt');if(promptEl){e.preventDefault();e.stopPropagation();openPromptModal(promptEl.dataset.fullPrompt||promptEl.textContent||'');return}const frame=e.target?.closest?.('.fv-video-frame');if(frame&&!e.target?.closest?.('.fv-expand-btn')){const v=frame.querySelector('video');if(v){v.paused?v.play().catch(()=>{}):v.pause()}}});
     setTimeout(()=>{const create=$('create');if(create)create.onclick=window.flowvidCreateHandler||robustStart;updateCreate()},800);
     ['duration','resolution','model','aspect'].forEach(id=>$(id)?.addEventListener('change',()=>setTimeout(updateCreate,0)));
   }
