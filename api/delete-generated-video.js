@@ -98,16 +98,31 @@ module.exports = async function handler(req, res) {
   // least disappears from history; report the storage failure so it isn't
   // silently swallowed. The row is re-scoped to user_id here too, defense in
   // depth against a race where ownership changed between the lookup and here.
+  //
+  // .select('id') is required here: without it, supabase-js/PostgREST reports
+  // no error even when the WHERE clause matches zero rows, so a delete that
+  // silently affected nothing would still look like success. Checking the
+  // returned rows is the only way to confirm a row was actually removed.
   const del = await db
     .from('generation_tasks')
     .delete()
     .eq('id', row.id)
-    .eq('user_id', auth.user.id);
+    .eq('user_id', auth.user.id)
+    .select('id');
 
   if (del.error) {
     return res.status(500).json({
       ok: false,
       error: del.error.message,
+      storageErrors: storageErrors.length ? storageErrors : undefined
+    });
+  }
+
+  if (!del.data || del.data.length === 0) {
+    return res.status(500).json({
+      ok: false,
+      error: 'DELETE_NOT_APPLIED',
+      message: '削除対象が見つかりませんでした。',
       storageErrors: storageErrors.length ? storageErrors : undefined
     });
   }
