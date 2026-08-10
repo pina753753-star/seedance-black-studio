@@ -482,6 +482,20 @@ function prepareImageForUpload(file){
   });
 }
 
+// prepareImageForUploadが返すdata URLを、Storageへ直接アップロードするためのBlobへ変換する。
+function dataUrlToBlob(dataUrl){
+  const match=String(dataUrl||'').match(/^data:([^;]+);base64,(.+)$/);
+  if(!match)return null;
+  try{
+    const contentType=match[1];
+    const binary=atob(match[2]);
+    const len=binary.length;
+    const bytes=new Uint8Array(len);
+    for(let i=0;i<len;i++)bytes[i]=binary.charCodeAt(i);
+    return new Blob([bytes],{type:contentType});
+  }catch(_){return null}
+}
+
 // 選択された画像を追加する。
 // - reference_to_video: 現在表示中のassetsへ追加する(既存の成功済み画像は消さない、合計最大9枚)。
 // - image_to_video: 使用する画像は常に1枚だけ。新しく選ぶと既存の1枚を置き換える
@@ -514,23 +528,54 @@ function addAssets(fs){
 // syncReferenceState=falseのとき(image_to_video用)は、reference_to_video専用の
 // urls/draft.referenceUrls同期を行わない(image_to_videoの画像をリファレンス下書きへ
 // 混入させないため)。
+//
+// アップロードは3段階: ①署名付きURLの発行(/api/reference-image-upload-url)
+// ②ブラウザからSupabase Storage(非公開の隔離バケット)へ直接PUT
+// ③アップロード完了通知(/api/reference-image-confirm-upload)で再検証・公開URL発行
+// base64本体はどの段階でもVercelサーバーレス関数の本文を通らないため、
+// 既定の本文サイズ上限(約4.5MB)を経由しない。
 async function uploadOneAsset(asset,token,syncReferenceState=true){
   asset.status='uploading';asset.error='';
   renderAssets();
   try{
     const prepared=await prepareImageForUpload(asset.file);
     if(!prepared){asset.status='failed';asset.error='画像の変換に失敗しました';return}
-    let res,data=null;
+    const blob=dataUrlToBlob(prepared.dataUrl);
+    if(!blob){asset.status='failed';asset.error='画像の変換に失敗しました';return}
+    const filename=(asset.file&&asset.file.name)||'reference.jpg';
+
+    let urlRes,urlData=null;
     try{
-      res=await fetch('/api/upload-reference-image',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({dataUrl:prepared.dataUrl,filename:(asset.file&&asset.file.name)||'reference.jpg',contentType:prepared.contentType})});
+      urlRes=await fetch('/api/reference-image-upload-url',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({filename,contentType:prepared.contentType,byteSize:blob.size})});
     }catch(_){asset.status='failed';asset.error='通信エラーが発生しました';return}
-    try{data=await res.json()}catch(_){data=null}
-    if(!res.ok||!data||!data.ok||!(data.publicUrl||data.url)){
+    try{urlData=await urlRes.json()}catch(_){urlData=null}
+    if(!urlRes.ok||!urlData||!urlData.ok||!urlData.signedUrl||!urlData.token||!urlData.path){
       asset.status='failed';
-      asset.error=(data&&typeof data.message==='string'&&data.message)||(data&&typeof data.error==='string'&&data.error)||('アップロードに失敗しました（'+res.status+'）');
+      asset.error=(urlData&&typeof urlData.message==='string'&&urlData.message)||(urlData&&typeof urlData.error==='string'&&urlData.error)||('アップロードに失敗しました（'+urlRes.status+'）');
       return;
     }
-    asset.url=data.publicUrl||data.url;
+
+    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
+    if(!client){asset.status='failed';asset.error='Supabase接続情報が未設定です。';return}
+    const{error:uploadError}=await client.storage.from(urlData.bucket||'reference-image-quarantine').uploadToSignedUrl(urlData.path,urlData.token,blob,{contentType:prepared.contentType});
+    if(uploadError){
+      asset.status='failed';
+      asset.error='画像のアップロードに失敗しました：'+(uploadError.message||String(uploadError));
+      return;
+    }
+
+    let confirmRes,confirmData=null;
+    try{
+      confirmRes=await fetch('/api/reference-image-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({path:urlData.path})});
+    }catch(_){asset.status='failed';asset.error='通信エラーが発生しました';return}
+    try{confirmData=await confirmRes.json()}catch(_){confirmData=null}
+    if(!confirmRes.ok||!confirmData||!confirmData.ok||!(confirmData.publicUrl||confirmData.url)){
+      asset.status='failed';
+      asset.error=(confirmData&&typeof confirmData.message==='string'&&confirmData.message)||(confirmData&&typeof confirmData.error==='string'&&confirmData.error)||('アップロードに失敗しました（'+confirmRes.status+'）');
+      return;
+    }
+
+    asset.url=confirmData.publicUrl||confirmData.url;
     asset.status='completed';
     if(asset.objectUrl){try{URL.revokeObjectURL(asset.objectUrl)}catch(_){}asset.objectUrl=''}
     asset.file=null;
