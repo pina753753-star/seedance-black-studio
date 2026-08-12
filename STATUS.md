@@ -352,3 +352,17 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - CAPTCHAのsite key(Cloudflare Turnstile)は未設定のまま(空文字)。
 
 ※confirm-signup.html、独自SMTP設定、Supabase Site URL変更は、feat/signup-captcha-and-policy-links-20260804ブランチには反映されていない。mainへのマージ前に、mainの最新状態(confirm-signup.html含む)とこのブランチの差分を確認する必要がある。
+
+## 2026年8月10日 作業ログ
+
+### 完了した項目
+- 削除ボタンの実体化(api/delete-generated-video.js新規追加)。DB行・Storageファイルを実際に削除する処理に変更。削除件数を検証し、0件の場合はエラー扱いにする修正も追加。本番でDBレコード数の減少を確認済み。
+- Stripe決済画面の請求元表示名を「CHANO」から「pina studio」に統一。
+- 参照画像アップロードを署名付きURL方式に刷新(api/reference-image-upload-url.js, api/reference-image-confirm-upload.js新規追加)。Vercelのリクエストボディ上限(約4.5MB)を経由しない設計に変更。上限を10MB→20MBに引き上げ。reference-image-quarantineバケットのfile_size_limitも20MBへ変更済み(適用済み)。本番で24MP画像のアップロード→生成→再生まで確認済み。
+
+### 未対応・残タスク
+- CAPTCHA(Cloudflare Turnstile)のsite keyは引き続き未設定(空文字)。
+- 非公開バケット化(reference-imagesの公開設定)は見送り。既存の公開URL方式のまま運用継続の判断。
+- 参照画像アップロード機能は引き続きTEST_BYPASS_USER_ID限定で、一般ユーザーには503のまま無効化されている。一般公開する場合は解放が必要。
+- 隔離バケット(reference-image-quarantine)の孤立オブジェクト自動クリーンアップは未実装。
+- 絵コンテ機能(sbAnalyzeBtn)の画像アップロードは旧方式(base64直送)のまま。今回の直接アップロード方式への移行対象外。
