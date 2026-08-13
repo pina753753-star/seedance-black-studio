@@ -470,6 +470,25 @@ module.exports = async function handler(req, res) {
         'reason:',
         moderationDecision.reason
       );
+      // Record the block for admin.html visibility. Best-effort only: a
+      // logging failure must never change the rejection response the user
+      // already gets above/below, so errors here are swallowed after being
+      // logged. This does not alter the moderation decision itself.
+      try {
+        const { error: logInsertError } = await db.from('moderation_blocks').insert({
+          user_id: user.id,
+          mode,
+          categories: moderation.categories || [],
+          reason: moderationDecision.reason,
+          classification: moderationDecision.classification || null,
+          prompt
+        });
+        if (logInsertError) {
+          console.error('[seedance-start] failed to record moderation_blocks row:', logInsertError.message);
+        }
+      } catch (logError) {
+        console.error('[seedance-start] failed to record moderation_blocks row:', logError?.message || logError);
+      }
       return res.status(422).json({
         ok: false,
         error: 'content_policy_violation',
