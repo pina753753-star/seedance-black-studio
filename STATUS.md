@@ -1,6 +1,23 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-08-03)
+# FlowVid Studio 完成までの全体像(最終更新: 2026-08-10)
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
+
+## 2026年8月10日 作業ログ
+
+### 完了した項目
+
+- 削除ボタンの実体化(`api/delete-generated-video.js`新規追加)。DB行・Storageファイルを実際に削除する処理に変更。削除件数を検証し、0件の場合はエラー扱いにする修正も追加。本番でDBレコード数の減少を確認済み。
+- Stripe決済画面の請求元表示名を「CHANO」から「pina studio」に統一。
+- 参照画像アップロードを署名付きURL方式に刷新(`api/reference-image-upload-url.js`、`api/reference-image-confirm-upload.js`新規追加)。Vercelのリクエストボディ上限(約4.5MB)を経由しない設計に変更。上限を10MB→20MBに引き上げ。本番で24MP画像のアップロード→生成→再生まで確認済み。
+- content_policy_violationでブロックされたリクエストの記録機能を追加(`moderation_blocks`テーブル新規作成、`api/_lib/seedance-start.js`に記録処理追加、`admin.html`に一覧表示セクション追加)。本番デプロイ済み(commit `fa627f3`)。実機での動作確認(admin.htmlでの表示確認)は未実施。
+
+### 未対応・残タスク
+
+- CAPTCHA(Cloudflare Turnstile)のsite keyは引き続き未設定(空文字)。
+- 非公開バケット化(reference-imagesの公開設定)は見送り。既存の公開URL方式のまま運用継続の判断。
+- 参照画像アップロード機能は引き続きTEST_BYPASS_USER_ID限定で、一般ユーザーには503のまま無効化されている。
+- プロンプトフィルタ(fictional-action-classifier.js)が通常のアニメアクション表現を誤ってブロックする問題は未解決。moderation_blocksの記録が溜まり次第、実際のブロック傾向を分析して調整する予定。
+- moderation_blocks機能の本番実機確認(admin.htmlでの表示確認)は未実施。
 
 ## 2026-08-03 追加分: 完了・本番適用済み
 
