@@ -28,7 +28,10 @@
 /* ---- Video edit tab ---- */
 #videoEditSection .old{position:relative}#videoEditSection .old.ve-selected{border-color:rgba(142,216,255,.6);background:#161c26}.ve-select-btn{position:absolute;right:10px;top:10px;z-index:5;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;cursor:pointer}.ve-select-btn.on{background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-color:transparent}#veSelectedBar{display:flex;gap:8px;overflow-x:auto;padding:2px 0}
 .ve-slider-wrap{position:relative;height:44px;margin-top:6px}.ve-filmstrip-viewport{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:36px;border-radius:8px;overflow:hidden;background:#2a2f3a;pointer-events:none}.ve-filmstrip-fallback{position:absolute;inset:0;background:linear-gradient(90deg,#8ed8ff,#8b5cf6);opacity:.3}.ve-filmstrip{position:absolute;inset:0;display:flex}.ve-filmstrip canvas{flex:1 1 0%;min-width:0;width:100%;height:100%;display:block}.ve-slider-range{position:absolute;top:0;bottom:0;background:transparent;box-shadow:0 0 0 9999px rgba(0,0,0,.55)}.ve-range{position:absolute;left:0;top:0;width:100%;height:44px;margin:0;background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none}.ve-range::-webkit-slider-runnable-track{-webkit-appearance:none;height:44px;background:transparent}.ve-range::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;cursor:pointer;width:6px;height:28px;border-style:solid;border-color:transparent;border-width:7px 19px;border-radius:3px;background-clip:padding-box;background-color:#fff}.ve-range.ve-range-start::-webkit-slider-thumb{background-color:#8ed8ff;background-image:linear-gradient(to right,rgba(5,5,6,.45) 0 1px,transparent 1px 100%)}.ve-range.ve-range-end::-webkit-slider-thumb{background-color:#8b5cf6;background-image:linear-gradient(to left,rgba(5,5,6,.45) 0 1px,transparent 1px 100%)}.ve-range::-moz-range-track{height:4px;background:transparent}.ve-range::-moz-range-thumb{pointer-events:auto;cursor:pointer;box-sizing:content-box;width:6px;height:28px;border-style:solid;border-color:transparent;border-width:7px 19px;border-radius:3px;background-clip:padding-box;background-color:#fff}.ve-range.ve-range-start::-moz-range-thumb{background-color:#8ed8ff}.ve-range.ve-range-end::-moz-range-thumb{background-color:#8b5cf6}.ve-time-row{display:flex;justify-content:space-between;gap:6px;color:#9ca3af;font-size:11px;font-weight:700;margin-top:2px}.ve-time-row [data-ve-dur-label]{color:#c8cad6}
-.ve-move-btn,.ve-remove-btn{border:1px solid rgba(255,255,255,.14);background:#1e2230;color:#b8bcc8;border-radius:10px;width:34px;height:34px;font-size:14px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}.ve-move-btn:disabled{opacity:.3;cursor:default}.ve-remove-btn{color:#fca5a5;border-color:rgba(251,113,133,.3)}.ve-clip-head{display:flex;justify-content:space-between;align-items:center}.ve-clip-num{font-weight:800;font-size:13px;color:#c8cad6}.ve-clip-actions{display:flex;gap:6px}
+.ve-move-btn,.ve-remove-btn{border:1px solid rgba(255,255,255,.14);background:#1e2230;color:#b8bcc8;border-radius:10px;width:34px;height:34px;font-size:14px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}.ve-move-btn:disabled{opacity:.3;cursor:default}.ve-remove-btn{color:#fca5a5;border-color:rgba(251,113,133,.3)}.ve-clip-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}.ve-clip-num{font-weight:800;font-size:13px;color:#c8cad6}.ve-clip-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ve-delmode-toggle{border:1px solid rgba(251,113,133,.35);background:#241820;color:#fca5a5;border-radius:10px;height:34px;padding:0 10px;font-size:11px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}.ve-delmode-toggle.on{background:linear-gradient(90deg,#fca5a5,#fb7185);color:#050506;border-color:transparent}
+.ve-slider-range-delete{position:absolute;top:0;bottom:0;background:rgba(251,113,133,.32);border-left:2px solid #fca5a5;border-right:2px solid #fca5a5}.ve-range.ve-range-delstart::-webkit-slider-thumb{background-color:#fca5a5;background-image:linear-gradient(to right,rgba(5,5,6,.45) 0 1px,transparent 1px 100%)}.ve-range.ve-range-delend::-webkit-slider-thumb{background-color:#fb7185;background-image:linear-gradient(to left,rgba(5,5,6,.45) 0 1px,transparent 1px 100%)}.ve-range.ve-range-delstart::-moz-range-thumb{background-color:#fca5a5}.ve-range.ve-range-delend::-moz-range-thumb{background-color:#fb7185}
+.ve-delmode-actions{display:flex;margin-top:8px}.ve-delmode-confirm{width:100%;min-height:40px;border:1px solid rgba(251,113,133,.4);background:linear-gradient(90deg,#fca5a5,#fb7185);color:#050506;border-radius:10px;font-size:12px;font-weight:900;cursor:pointer}.ve-delmode-error{color:#fca5a5;font-size:11px;font-weight:700;margin-top:6px}
 </style>
 </head>
 <body>
@@ -743,6 +746,23 @@ function veTrimEditorHtml(clip){const dur=clip.duration||5;const startPct=dur>0?
   +'<input type="range" class="ve-range ve-range-end" min="0" max="'+dur+'" step="0.1" value="'+clip.end+'" aria-label="終了秒">'
   +'</div>'
   +'<div class="ve-time-row"><span data-ve-start-label>'+veFmtTime(clip.start)+'</span><span data-ve-dur-label>使用: '+veFmtTime(clip.end-clip.start)+'</span><span data-ve-end-label>'+veFmtTime(clip.end)+'</span></div>';}
+// 区間削除モードのUI。トリムと違い、ハンドルで挟んだ中央(delStart〜delEnd)が
+// 「削除される区間」になる(トリムは中央が「残る区間」なので見た目が逆)。
+// delStart/delEndはこのクリップのduration全体(0〜duration)を基準にした値で、
+// 既存のstart/end(トリム範囲)とは独立して保持する。確定するまでveSelectedの
+// start/endは書き換えない。
+function veDeleteEditorHtml(clip){const dur=Math.max(.2,clip.duration||5);const ds=Number.isFinite(clip.delStart)?clip.delStart:dur/3;const de=Number.isFinite(clip.delEnd)?clip.delEnd:dur*2/3;const sp=dur>0?(ds/dur*100):33;const ep=dur>0?(de/dur*100):66;return '<div class="ve-slider-wrap">'
+  +'<div class="ve-filmstrip-viewport" data-ve-filmstrip-viewport>'
+  +'<div class="ve-filmstrip-fallback" data-ve-filmstrip-fallback></div>'
+  +'<div class="ve-filmstrip" data-ve-filmstrip></div>'
+  +'<div class="ve-slider-range-delete" data-ve-delrange-bar style="left:'+sp+'%;right:'+(100-ep)+'%"></div>'
+  +'</div>'
+  +'<input type="range" class="ve-range ve-range-delstart" min="0" max="'+dur+'" step="0.1" value="'+ds+'" aria-label="削除開始秒">'
+  +'<input type="range" class="ve-range ve-range-delend" min="0" max="'+dur+'" step="0.1" value="'+de+'" aria-label="削除終了秒">'
+  +'</div>'
+  +'<div class="ve-time-row"><span data-ve-delstart-label>削除範囲: '+veFmtTime(ds)+'</span><span class="used" data-ve-deldur-label>削除される長さ: '+veFmtTime(Math.max(0,de-ds))+'</span><span data-ve-delend-label>〜 '+veFmtTime(de)+'</span></div>'
+  +'<div class="ve-delmode-actions"><button type="button" class="ve-delmode-confirm" data-ve-delconfirm="'+esc(clip.clipId)+'">この区間を削除</button></div>'
+  +'<div class="ve-delmode-error" data-ve-delerror style="display:none"></div>';}
 // 素材一覧のカード。タップするたびに新しいクリップを追加する(選択状態のトグルではない)。
 // 同じ動画が既に何回か追加済みなら「＋」の代わりに追加済み回数を表示する。
 function veMaterialCard(v){const dur=Number(v.duration_seconds)||5;const count=veSelected.filter(c=>c.videoId===v.id).length;return '<article class="old" data-ve-material-id="'+esc(v.id)+'" style="padding:12px;border-radius:20px;display:grid;gap:10px">'
@@ -753,16 +773,17 @@ function veMaterialCard(v){const dur=Number(v.duration_seconds)||5;const count=v
   +'<div style="color:#6b7280;font-size:11px">尺: '+dur+'秒</div>'
   +'</article>';}
 // 編集リストの各クリップカード。clipIdで一意に識別する(同じvideoIdの重複クリップも独立して扱う)。
-function veClipCard(clip,index){const v=veVideos.find(x=>x.id===clip.videoId);const first=index===0;const last=index===veSelected.length-1;return '<article class="old ve-selected" data-ve-clip-id="'+esc(clip.clipId)+'" data-ve-video-id="'+esc(clip.videoId)+'" style="padding:12px;border-radius:20px;display:grid;gap:10px">'
+function veClipCard(clip,index){const v=veVideos.find(x=>x.id===clip.videoId);const first=index===0;const last=index===veSelected.length-1;const delMode=!!clip.deleteMode;return '<article class="old ve-selected" data-ve-clip-id="'+esc(clip.clipId)+'" data-ve-video-id="'+esc(clip.videoId)+'" style="padding:12px;border-radius:20px;display:grid;gap:10px">'
   +'<div class="ve-clip-head"><span class="ve-clip-num">クリップ '+(index+1)+'</span><div class="ve-clip-actions">'
   +'<button type="button" class="ve-move-btn" data-ve-move-up="'+esc(clip.clipId)+'"'+(first?' disabled':'')+' aria-label="上へ">↑</button>'
   +'<button type="button" class="ve-move-btn" data-ve-move-down="'+esc(clip.clipId)+'"'+(last?' disabled':'')+' aria-label="下へ">↓</button>'
+  +'<button type="button" class="ve-delmode-toggle'+(delMode?' on':'')+'" data-ve-delmode-toggle="'+esc(clip.clipId)+'" aria-label="区間削除">'+(delMode?'↩ トリムに戻す':'✂ 区間削除')+'</button>'
   +'<button type="button" class="ve-remove-btn" data-ve-remove="'+esc(clip.clipId)+'" aria-label="削除">✕</button>'
   +'</div></div>'
   +'<div style="width:100%;height:168px;background:#050506;border-radius:14px;overflow:hidden;position:relative">'
   +'<video muted playsinline preload="metadata" src="'+esc(v?.video_url||'')+'#t=0.2" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none"></video>'
   +'</div>'
-  +veTrimEditorHtml(clip)
+  +(delMode?veDeleteEditorHtml(clip):veTrimEditorHtml(clip))
   +'</article>';}
 function veRenderList(){
   const list=$('veList');
@@ -911,18 +932,111 @@ function veRenderBar(){const bar=$('veBar');if(!bar)return;if(!veSelected.length
 function veAddClip(videoId){if(veSelected.length>=VE_MAX_CLIPS)return;const v=veVideos.find(x=>x.id===videoId);if(!v)return;const dur=Number(v.duration_seconds)||5;const clip={clipId:crypto.randomUUID(),videoId,start:0,end:dur,duration:dur};veClampClip(clip,dur);veSelected.push(clip);veRenderList();veRenderBar()}
 function veRemoveClip(clipId){const idx=veSelected.findIndex(c=>c.clipId===clipId);if(idx<0)return;veSelected.splice(idx,1);veRenderList();veRenderBar()}
 function veMoveClip(clipId,dir){const idx=veSelected.findIndex(c=>c.clipId===clipId);if(idx<0)return;const t=idx+(dir==='up'?-1:1);if(t<0||t>=veSelected.length)return;const tmp=veSelected[idx];veSelected[idx]=veSelected[t];veSelected[t]=tmp;veRenderList();veRenderBar()}
+// ---- 区間削除(トリムの反転): クリップの「トリム」⇔「区間削除」表示モードを切り替える ----
+// deleteMode/delStart/delEndはUI専用の一時状態で、veSubmit()の送信ペイロード
+// (videoId/start/end)には含まれない。確定(veApplyDeleteRange)するまでは
+// 既存のstart/end(トリム範囲)を一切変更しない。
+function veToggleDeleteMode(clipId){const clip=veSelected.find(c=>c.clipId===clipId);if(!clip)return;clip.deleteMode=!clip.deleteMode;if(clip.deleteMode){const dur=Math.max(.2,clip.duration||5);if(!Number.isFinite(clip.delStart))clip.delStart=Math.round(dur/3*10)/10;if(!Number.isFinite(clip.delEnd))clip.delEnd=Math.round(dur*2/3*10)/10}veRenderList()}
+// 「この区間を削除」確定時の処理。
+// - 削除範囲が動画の端(0秒 or 末尾)に達している場合は分割せず、残る片側だけの
+//   通常トリム1クリップとして扱う(要件5)。
+// - 両側とも残る場合は、対象クリップを2クリップ(0〜削除開始点 / 削除終了点〜末尾)
+//   に分割し、通常のクリップとしてveSelectedへ反映する(要件3)。分割後の2クリップは
+//   deleteMode等のUI専用フィールドを持たない、通常のトリム表示に戻る。
+// - 最小区間長(0.2秒、サーバー側server.jsのCLIP_TRIM_INVALIDと同じ閾値)と
+//   クリップ上限(VE_MAX_CLIPS)は、ここで事前チェックする(要件4)。
+function veApplyDeleteRange(clipId){
+  const idx=veSelected.findIndex(c=>c.clipId===clipId);
+  if(idx<0)return;
+  const clip=veSelected[idx];
+  const dur=Math.max(.2,Number(clip.duration)||5);
+  const card=document.querySelector('[data-ve-clip-id="'+CSS.escape(clipId)+'"]');
+  const errEl=card?.querySelector('[data-ve-delerror]');
+  const showErr=msg=>{if(errEl){errEl.textContent=msg;errEl.style.display='block'}};
+  if(errEl)errEl.style.display='none';
+
+  let ds=Number(clip.delStart),de=Number(clip.delEnd);
+  if(!Number.isFinite(ds))ds=0;
+  if(!Number.isFinite(de))de=dur;
+  ds=Math.max(0,Math.min(ds,dur));
+  de=Math.max(0,Math.min(de,dur));
+  if(de<=ds){showErr('削除範囲が不正です。開始・終了位置を選び直してください。');return}
+
+  const MIN_SEG=0.2; // server.js CLIP_TRIM_INVALID(最小0.2秒)と同じ閾値
+  const frontEmpty=ds<=0.001;
+  const backEmpty=de>=dur-0.001;
+
+  if(frontEmpty&&backEmpty){showErr('動画全体を削除することはできません。');return}
+
+  if(frontEmpty){
+    if(dur-de<MIN_SEG){showErr('残る区間が短すぎます（最小0.2秒）。');return}
+    clip.start=de;clip.end=dur;clip.deleteMode=false;delete clip.delStart;delete clip.delEnd;
+    veClampClip(clip,dur);
+    veRenderList();veRenderBar();
+    return;
+  }
+  if(backEmpty){
+    if(ds<MIN_SEG){showErr('残る区間が短すぎます（最小0.2秒）。');return}
+    clip.start=0;clip.end=ds;clip.deleteMode=false;delete clip.delStart;delete clip.delEnd;
+    veClampClip(clip,dur);
+    veRenderList();veRenderBar();
+    return;
+  }
+
+  if(ds<MIN_SEG||dur-de<MIN_SEG){showErr('分割後の区間が短すぎます（それぞれ最小0.2秒必要です）。');return}
+  if(veSelected.length>=VE_MAX_CLIPS){showErr('クリップの上限（'+VE_MAX_CLIPS+'個）に達しているため、これ以上区間削除できません。');return}
+
+  const front={clipId:crypto.randomUUID(),videoId:clip.videoId,start:0,end:ds,duration:dur};
+  veClampClip(front,dur);
+  const back={clipId:crypto.randomUUID(),videoId:clip.videoId,start:de,end:dur,duration:dur};
+  veClampClip(back,dur);
+  veSelected.splice(idx,1,front,back);
+  veRenderList();veRenderBar();
+}
 async function veLoadVideos(){$('veLoading').style.display='block';$('veList').innerHTML='';$('veEmpty').style.display='none';$('veError').style.display='none';$('veResult').style.display='none';$('veProcessing').style.display='none';const token=await getToken();if(!token){location.href='./login.html';return}try{const res=await fetch('/api/generated-videos?limit=50',{headers:{'Authorization':'Bearer '+token}});if(res.status===401){location.href='./login.html';return}const data=await res.json();veVideos=(data.rows||[]).filter(r=>r.video_url&&r.status==='completed');veRenderList()}catch(_){$('veEmpty').style.display='block';$('veEmpty').textContent='読み込みに失敗しました。もう一度お試しください。'}finally{$('veLoading').style.display='none'}}
 
 // ---- スライダーUI同期・プレビューシーク（veSelectedが正本、DOMは都度同期）----
 function veUpdateSliderDom(card,clip){if(!card||!clip)return;const dur=clip.duration||5;const startInput=card.querySelector('.ve-range-start');const endInput=card.querySelector('.ve-range-end');const bar=card.querySelector('[data-ve-range-bar]');const startLbl=card.querySelector('[data-ve-start-label]');const endLbl=card.querySelector('[data-ve-end-label]');const durLbl=card.querySelector('[data-ve-dur-label]');const startOnTop=clip.start>dur/2;if(startInput){startInput.max=String(dur);startInput.value=String(clip.start);startInput.style.zIndex=startOnTop?'3':'2'}if(endInput){endInput.max=String(dur);endInput.value=String(clip.end);endInput.style.zIndex=startOnTop?'2':'3'}if(bar){const sp=dur>0?clip.start/dur*100:0;const ep=dur>0?clip.end/dur*100:100;bar.style.left=sp+'%';bar.style.right=(100-ep)+'%'}if(startLbl)startLbl.textContent=veFmtTime(clip.start);if(endLbl)endLbl.textContent=veFmtTime(clip.end);if(durLbl)durLbl.textContent='使用: '+veFmtTime(clip.end-clip.start)}
+// 区間削除モード用。トリム(veUpdateSliderDom)と対になる、delStart/delEnd表示の更新。
+// veApplyDeleteRangeでの確定検証は行わない(ここはドラッグ中の見た目の同期のみ)。
+function veUpdateDelSliderDom(card,clip){if(!card||!clip)return;const dur=Math.max(.2,clip.duration||5);const startInput=card.querySelector('.ve-range-delstart');const endInput=card.querySelector('.ve-range-delend');const bar=card.querySelector('[data-ve-delrange-bar]');const startLbl=card.querySelector('[data-ve-delstart-label]');const endLbl=card.querySelector('[data-ve-delend-label]');const durLbl=card.querySelector('[data-ve-deldur-label]');const ds=Number.isFinite(clip.delStart)?clip.delStart:0;const de=Number.isFinite(clip.delEnd)?clip.delEnd:dur;const startOnTop=ds>dur/2;if(startInput){startInput.max=String(dur);startInput.value=String(ds);startInput.style.zIndex=startOnTop?'3':'2'}if(endInput){endInput.max=String(dur);endInput.value=String(de);endInput.style.zIndex=startOnTop?'2':'3'}if(bar){const sp=dur>0?ds/dur*100:0;const ep=dur>0?de/dur*100:100;bar.style.left=sp+'%';bar.style.right=(100-ep)+'%'}if(startLbl)startLbl.textContent='削除範囲: '+veFmtTime(ds);if(endLbl)endLbl.textContent='〜 '+veFmtTime(de);if(durLbl)durLbl.textContent='削除される長さ: '+veFmtTime(Math.max(0,de-ds))}
 const _veSeekLast={}; // clipIdごとの直近シーク時刻。input中は30〜60ms間引き、change確定時は強制シーク
 function veSeekPreview(card,clipId,time,force){const now=Date.now();if(!force&&_veSeekLast[clipId]&&now-_veSeekLast[clipId]<40)return;_veSeekLast[clipId]=now;const video=card.querySelector('video');if(video&&Number.isFinite(time))video.currentTime=Math.max(0,time)}
-function veHandleSliderInput(e,commit){const input=e.target;const isStart=input.classList?.contains('ve-range-start');const isEnd=input.classList?.contains('ve-range-end');if(!isStart&&!isEnd)return;const card=input.closest('[data-ve-clip-id]');if(!card)return;const clipId=card.getAttribute('data-ve-clip-id');const clip=veSelected.find(s=>s.clipId===clipId);if(!clip)return;const val=Number(input.value);if(!Number.isFinite(val))return;if(isStart)clip.start=val;else clip.end=val;veClampClip(clip,clip.duration);veUpdateSliderDom(card,clip);veSeekPreview(card,clipId,isStart?clip.start:clip.end,commit===true);const costEl=$('veCost');if(costEl)costEl.textContent=String(veCreditEstimate())}
+function veHandleSliderInput(e,commit){
+  const input=e.target;
+  const isStart=input.classList?.contains('ve-range-start');
+  const isEnd=input.classList?.contains('ve-range-end');
+  const isDelStart=input.classList?.contains('ve-range-delstart');
+  const isDelEnd=input.classList?.contains('ve-range-delend');
+  if(!isStart&&!isEnd&&!isDelStart&&!isDelEnd)return;
+  const card=input.closest('[data-ve-clip-id]');if(!card)return;
+  const clipId=card.getAttribute('data-ve-clip-id');
+  const clip=veSelected.find(s=>s.clipId===clipId);if(!clip)return;
+  const val=Number(input.value);if(!Number.isFinite(val))return;
+  if(isStart||isEnd){
+    if(isStart)clip.start=val;else clip.end=val;
+    veClampClip(clip,clip.duration);
+    veUpdateSliderDom(card,clip);
+    veSeekPreview(card,clipId,isStart?clip.start:clip.end,commit===true);
+    const costEl=$('veCost');if(costEl)costEl.textContent=String(veCreditEstimate());
+    return;
+  }
+  // 区間削除モード: ここではduration範囲へのクランプとdelStart<=delEndの維持のみ行う。
+  // 最小区間長・上限チェックはveApplyDeleteRange(確定ボタン)側でまとめて行う。
+  const dur=Math.max(.2,Number(clip.duration)||5);
+  const v=Math.max(0,Math.min(val,dur));
+  if(isDelStart)clip.delStart=v;else clip.delEnd=v;
+  if(Number(clip.delStart)>Number(clip.delEnd)){if(isDelStart)clip.delEnd=clip.delStart;else clip.delStart=clip.delEnd}
+  veUpdateDelSliderDom(card,clip);
+  veSeekPreview(card,clipId,isDelStart?clip.delStart:clip.delEnd,commit===true);
+}
 $('veList').addEventListener('click',e=>{const btn=e.target.closest('[data-ve-add]');if(!btn)return;veAddClip(btn.getAttribute('data-ve-add'))});
 const veClipListEl=$('veClipList');
 veClipListEl.addEventListener('click',e=>{
   const up=e.target.closest('[data-ve-move-up]');if(up){veMoveClip(up.getAttribute('data-ve-move-up'),'up');return}
   const down=e.target.closest('[data-ve-move-down]');if(down){veMoveClip(down.getAttribute('data-ve-move-down'),'down');return}
+  const delToggle=e.target.closest('[data-ve-delmode-toggle]');if(delToggle){veToggleDeleteMode(delToggle.getAttribute('data-ve-delmode-toggle'));return}
+  const delConfirm=e.target.closest('[data-ve-delconfirm]');if(delConfirm){veApplyDeleteRange(delConfirm.getAttribute('data-ve-delconfirm'));return}
   const rm=e.target.closest('[data-ve-remove]');if(rm){veRemoveClip(rm.getAttribute('data-ve-remove'));return}
 });
 veClipListEl.addEventListener('input',e=>veHandleSliderInput(e,false));
