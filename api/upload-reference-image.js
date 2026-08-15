@@ -33,20 +33,11 @@ module.exports = async function handler(req, res) {
     return res.status(auth.status).json(auth.body);
   }
 
-  const testBypassUserId = String(process.env.TEST_BYPASS_USER_ID || '').trim();
-  const isApprovedTestUser = Boolean(
-    testBypassUserId &&
-    auth.user &&
-    auth.user.id === testBypassUserId
-  );
-
-  if (!isApprovedTestUser) {
-    return res.status(503).json({
-      ok: false,
-      error: 'REFERENCE_IMAGE_UPLOAD_DISABLED',
-      message: '参照画像機能は安全確認中のため、現在利用できません。'
-    });
-  }
+  // 2026-08-14: TEST_BYPASS_USER_ID限定のベータ提供を解除。URLを直接共有した
+  // 相手だけが使うという制限は運用上の判断であり、コード側では行わない。
+  // sexual/minors検査(api/reference-image-confirm-upload.js)は維持しているが、
+  // CSAM既知ハッシュ照合等の専用検知は引き続き未実装
+  // (docs/operations/REFERENCE-IMAGE-SAFETY-DESIGN.md参照)。
 
   const supabase = auth.supabase || createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false }

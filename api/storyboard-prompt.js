@@ -95,21 +95,7 @@ module.exports = async function handler(req, res) {
     return res.status(generationControl.status).json(generationControl.body);
   }
 
-  // Reference-image generation is still temporarily paused site-wide
-  // (see api/seedance-start-priced.js). Mirror the same bypass so a
-  // non-bypass user cannot use this endpoint to get a free analysis that
-  // can never actually be turned into a video (it would always 503 later
-  // at the real generation step). Apply this check before calling Claude.
-  const bypassUserId = String(process.env.TEST_BYPASS_USER_ID || '').trim();
-  const bypassed = Boolean(bypassUserId) && auth.user?.id === bypassUserId;
-  if (!bypassed) {
-    return res.status(503).json({
-      ok: false,
-      error: 'reference_image_temporarily_disabled',
-      errorCategory: 'reference_image_temporarily_disabled',
-      message: '現在、参照画像を使った動画生成は一時的に停止しております。テキストのみでの動画生成は通常通りご利用いただけます。再開時期は追ってお知らせします。'
-    });
-  }
+  // 2026-08-14: TEST_BYPASS_USER_ID限定のベータ提供を解除(api/seedance-start-priced.js参照)。
 
   // Simple best-effort cooldown to prevent rapid repeat calls from the same user.
   const userId = auth.user.id;

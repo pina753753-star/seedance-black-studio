@@ -34,23 +34,8 @@ module.exports = async function handler(req, res) {
     return res.status(auth.status).json(auth.body);
   }
 
-  // api/upload-reference-image.jsと同じ制限: 安全確認の専用検知が本番で
-  // 動作することを確認するまで、一般ユーザーには参照画像アップロードを開放しない。
-  // (docs/operations/REFERENCE-IMAGE-SAFETY-DESIGN.md §16)
-  const testBypassUserId = String(process.env.TEST_BYPASS_USER_ID || '').trim();
-  const isApprovedTestUser = Boolean(
-    testBypassUserId &&
-    auth.user &&
-    auth.user.id === testBypassUserId
-  );
-
-  if (!isApprovedTestUser) {
-    return res.status(503).json({
-      ok: false,
-      error: 'REFERENCE_IMAGE_UPLOAD_DISABLED',
-      message: '参照画像機能は安全確認中のため、現在利用できません。'
-    });
-  }
+  // 2026-08-14: TEST_BYPASS_USER_ID限定のベータ提供を解除
+  // (api/upload-reference-image.js参照)。
 
   const supabase = auth.supabase || createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false }
