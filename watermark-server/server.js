@@ -236,11 +236,35 @@ function isAllowedEditVideoUrl(raw) {
   return true;
 }
 
+// BGM(stage 3): クリップとは別のバケット(video-edit-audio、公開)のみ許可する。
+// 同じSSRFガードの考え方をクリップ用allowlistとは独立して適用する
+// (api/video-edit-audio-confirm-upload.jsが実体検証(ffprobe)後に複製する先)。
+const EDIT_ALLOWED_BGM_PATH_PREFIX = '/storage/v1/object/public/video-edit-audio/';
+
+function isAllowedEditBgmUrl(raw) {
+  if (typeof raw !== 'string') return false;
+  let u;
+  try {
+    u = new URL(raw);
+  } catch (_) {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  if (!EDIT_ALLOWED_VIDEO_HOST || u.host !== EDIT_ALLOWED_VIDEO_HOST) return false;
+  if (!u.pathname.startsWith(EDIT_ALLOWED_BGM_PATH_PREFIX)) return false;
+  return true;
+}
+
 // Per-clip download cap. Generated clips are short (seconds to low minutes)
 // so this comfortably covers legitimate use while bounding worst-case
 // memory/disk from a single request.
 const EDIT_MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024; // 200MB
 const EDIT_DOWNLOAD_TIMEOUT_MS = 60000;
+// BGM音声用のダウンロード上限。video-edit-audioバケットのfile_size_limit(15MB、
+// api/video-edit-audio-upload-url.js参照)と揃える。
+const EDIT_MAX_BGM_DOWNLOAD_BYTES = 15 * 1024 * 1024; // 15MB
+// 固定音量比率。BGM音量調整UIは今回未実装(段階2の設計決定通り)。
+const EDIT_DEFAULT_BGM_VOLUME = 0.25;
 
 // Duration limits, checked after ffprobe.
 // Generated clips are short-form (typically up to ~15s each), so these
@@ -286,18 +310,24 @@ function editParseFps(rFrameRate) {
   return Number.isFinite(fps) && fps > 0 && fps <= 120 ? fps : 24;
 }
 
-async function editDownload(url, filePath, deadline) {
+// options: BGM(stage 3)用に、クリップと別のサイズ上限・エラーコードを
+// 指定できるようにした(既存のクリップ呼び出しは省略時のデフォルトのまま動く)。
+async function editDownload(url, filePath, deadline, options = {}) {
+  const maxBytes = options.maxBytes || EDIT_MAX_DOWNLOAD_BYTES;
+  const downloadFailedCode = options.downloadFailedCode || 'CLIP_DOWNLOAD_FAILED';
+  const tooLargeCode = options.tooLargeCode || 'CLIP_TOO_LARGE';
+
   const timeoutMs = Math.max(1000, Math.min(EDIT_DOWNLOAD_TIMEOUT_MS, remainingMs(deadline)));
   // redirect: 'manual' means a 3xx response is returned as-is (not
   // followed) instead of being validated against the host allowlist again,
   // so it simply fails the !response.ok check below rather than letting a
   // clip source redirect us to an arbitrary off-allowlist host.
   const response = await fetch(url, { timeout: timeoutMs, redirect: 'manual' });
-  if (!response.ok) throw editError('CLIP_DOWNLOAD_FAILED', `Download failed: ${response.status}`);
+  if (!response.ok) throw editError(downloadFailedCode, `Download failed: ${response.status}`);
 
   const contentLength = Number(response.headers.get('content-length') || 0);
-  if (contentLength && contentLength > EDIT_MAX_DOWNLOAD_BYTES) {
-    throw editError('CLIP_TOO_LARGE', `clip content-length ${contentLength} exceeds ${EDIT_MAX_DOWNLOAD_BYTES}`);
+  if (contentLength && contentLength > maxBytes) {
+    throw editError(tooLargeCode, `content-length ${contentLength} exceeds ${maxBytes}`);
   }
 
   await new Promise((resolve, reject) => {
@@ -313,8 +343,8 @@ async function editDownload(url, filePath, deadline) {
     };
     response.body.on('data', (chunk) => {
       total += chunk.length;
-      if (total > EDIT_MAX_DOWNLOAD_BYTES) {
-        fail(editError('CLIP_TOO_LARGE', `clip body exceeded ${EDIT_MAX_DOWNLOAD_BYTES} bytes`));
+      if (total > maxBytes) {
+        fail(editError(tooLargeCode, `body exceeded ${maxBytes} bytes`));
       }
     });
     response.body.on('error', fail);
@@ -344,6 +374,8 @@ const EDIT_PUBLIC_ERRORS = {
   PROCESSING_TIMEOUT: 'Video processing exceeded its time limit',
   UPLOAD_FAILED: 'Failed to store the edited video',
   PROCESSING_FAILED: 'Video processing failed',
+  BGM_DOWNLOAD_FAILED: 'Failed to download the BGM audio file',
+  BGM_TOO_LARGE: 'The BGM audio file exceeds the maximum allowed file size',
 };
 
 function editError(code, detail) {
@@ -360,7 +392,7 @@ function safeEditErrorMessage(err) {
   return EDIT_PUBLIC_ERRORS[code] || EDIT_PUBLIC_ERRORS.PROCESSING_FAILED;
 }
 
-async function runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId }) {
+async function runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId, bgm }) {
   // Single deadline for the whole request, created before any work starts.
   const deadline = Date.now() + EDIT_REQUEST_TIMEOUT_MS;
   // uid is only used to namespace this job's own /tmp scratch files, so
@@ -606,9 +638,56 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
       }
     }
 
+    // 5.5) BGM(任意)をミックス。指定が無ければfinalFileをそのまま使う。
+    let mixedFile = finalFile;
+    if (bgm && bgm.url) {
+      assertDeadlineNotPassed(deadline, 'bgm download');
+      const bgmFile = path.join('/tmp', `edit_bgm_${uid}.mp3`);
+      tempFiles.push(bgmFile);
+      await editDownload(bgm.url, bgmFile, deadline, {
+        maxBytes: EDIT_MAX_BGM_DOWNLOAD_BYTES,
+        downloadFailedCode: 'BGM_DOWNLOAD_FAILED',
+        tooLargeCode: 'BGM_TOO_LARGE',
+      });
+
+      const volume = Number.isFinite(bgm.volume) && bgm.volume > 0 && bgm.volume <= 1
+        ? bgm.volume
+        : EDIT_DEFAULT_BGM_VOLUME;
+      const mixedOut = makeTmp('edit_bgm_mixed');
+
+      // BGMは-stream_loopで無限ループ入力にしておき、amixのduration=firstで
+      // 動画側(finalFile)の長さに合わせて切り詰める。BGMが動画より短くても
+      // 途中で途切れず、長くてもはみ出した分は使わない。映像は再エンコード
+      // せず(-c:v copy)、音声ミックス結果だけを差し替える。
+      const buildMixCmd = () =>
+        ffmpeg(finalFile)
+          .input(bgmFile)
+          .inputOptions(['-stream_loop', '-1'])
+          .complexFilter([
+            `[1:a]volume=${volume}[bgm]`,
+            '[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]',
+          ])
+          .outputOptions([
+            '-map', '0:v',
+            '-map', '[aout]',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-movflags', '+faststart',
+          ])
+          .output(mixedOut);
+
+      try {
+        await runFfmpeg(buildMixCmd, remainingMs(deadline));
+      } catch (err) {
+        throw ffmpegStageError(err, 'bgm mix');
+      }
+      mixedFile = mixedOut;
+    }
+
     // 6) Supabase Storage にアップロード（ユーザー/ジョブ単位でパスを分離）
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
-    const fileBuffer = fs.readFileSync(finalFile);
+    const fileBuffer = fs.readFileSync(mixedFile);
     const storagePath = `edited/${ownerSegment}/${outputId}.mp4`;
 
     const { error: uploadError } = await supabase.storage
@@ -647,7 +726,7 @@ app.post('/edit', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
   }
 
-  const { clips, transition = 'cut', transitionDuration, userId, taskId } = req.body || {};
+  const { clips, transition = 'cut', transitionDuration, userId, taskId, bgm } = req.body || {};
 
   if (!Array.isArray(clips) || clips.length < 1 || clips.length > EDIT_MAX_CLIPS) {
     return res.status(400).json({ ok: false, error: `clips must be an array of 1-${EDIT_MAX_CLIPS} items` });
@@ -659,6 +738,21 @@ app.post('/edit', async (req, res) => {
     if (!clip || !isAllowedEditVideoUrl(clip.videoUrl)) {
       return res.status(400).json({ ok: false, error: 'each clip requires a valid videoUrl from Supabase Storage' });
     }
+  }
+
+  // BGM(stage 3、任意)。指定時のみ検証する。api/video-edit.js側でも同じ
+  // allowlist検証を行っているが、Railwayはapi/video-edit.js以外からも
+  // 直接呼ばれうる構成のため、ここでも独立して検証する(クリップと同じ方針)。
+  let validatedBgm = null;
+  if (bgm !== undefined && bgm !== null) {
+    if (!bgm || !isAllowedEditBgmUrl(bgm.url)) {
+      return res.status(400).json({ ok: false, error: 'bgm.url must be a valid audio URL from Supabase Storage' });
+    }
+    const volume = Number(bgm.volume);
+    validatedBgm = {
+      url: bgm.url,
+      volume: Number.isFinite(volume) && volume > 0 && volume <= 1 ? volume : EDIT_DEFAULT_BGM_VOLUME,
+    };
   }
 
   // taskId is required and must be a UUID: it becomes the Storage output
@@ -679,7 +773,7 @@ app.post('/edit', async (req, res) => {
   await acquireSlot('edit');
   let result;
   try {
-    result = await runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId });
+    result = await runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId, bgm: validatedBgm });
   } finally {
     releaseSlot('edit');
   }

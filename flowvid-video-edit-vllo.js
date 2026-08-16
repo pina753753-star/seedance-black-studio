@@ -106,6 +106,15 @@
       #veBar{position:fixed!important;z-index:45;left:max(12px,calc((100vw - 736px)/2));right:max(12px,calc((100vw - 736px)/2));bottom:calc(8px + env(safe-area-inset-bottom,0px));margin:0!important;box-shadow:0 14px 40px rgba(0,0,0,.55)}
       #veSelectedBar{display:none!important}
       #veSubmit{margin-top:0!important;padding:14px!important;font-size:18px!important}
+      #veBgmBox{display:none!important}
+      .ve-vllo-bgm{margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px}
+      .ve-vllo-bgm-empty,.ve-vllo-bgm-selected{display:flex;justify-content:space-between;align-items:center;gap:10px}
+      .ve-vllo-bgm-empty span,.ve-vllo-bgm-selected span{color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .ve-vllo-bgm-selected span{color:#d5d9e1;font-weight:700}
+      .ve-vllo-bgm-pick{flex:0 0 auto;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:800}
+      .ve-vllo-bgm-remove{flex:0 0 auto;border:1px solid rgba(251,113,133,.3);background:#241820;color:#fca5a5;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:800}
+      .ve-vllo-bgm-uploading{color:#9ca3af;font-size:12px;margin-top:6px}
+      .ve-vllo-bgm-error{color:#fca5a5;font-size:12px;margin-top:6px}
       @media(max-width:520px){.wrap{padding-left:8px;padding-right:8px}.ve-vllo-stage{padding:9px}.ve-vllo-actions{gap:5px}}
     `;
     document.head.appendChild(style);
@@ -118,7 +127,7 @@
 
     const shell=document.createElement('div');
     shell.className='ve-vllo-shell';
-    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div><div class="ve-vllo-history" id="veVlloHistorySection"><div class="ve-vllo-history-title">編集済み動画</div><div class="ve-vllo-history-empty" id="veVlloHistoryEmpty" style="display:none">まだ編集済みの動画はありません。</div><div class="ve-vllo-history-list" id="veVlloHistoryList"></div><button type="button" class="ve-vllo-history-more" id="veVlloHistoryMore" style="display:none">もっと見る</button></div>`;
+    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div><div class="ve-vllo-bgm" id="veVlloBgmBox"><input id="veVlloBgmFile" type="file" accept="audio/mpeg" style="display:none"><div class="ve-vllo-bgm-empty" id="veVlloBgmEmpty"><span>BGM（任意・mp3・最大15MB）</span><button type="button" class="ve-vllo-bgm-pick" id="veVlloBgmPick">追加</button></div><div class="ve-vllo-bgm-selected" id="veVlloBgmSelected" style="display:none"><span id="veVlloBgmName"></span><button type="button" class="ve-vllo-bgm-remove" id="veVlloBgmRemove">削除</button></div><div class="ve-vllo-bgm-uploading" id="veVlloBgmUploading" style="display:none">アップロード中…</div><div class="ve-vllo-bgm-error" id="veVlloBgmError" style="display:none"></div></div><div class="ve-vllo-history" id="veVlloHistorySection"><div class="ve-vllo-history-title">編集済み動画</div><div class="ve-vllo-history-empty" id="veVlloHistoryEmpty" style="display:none">まだ編集済みの動画はありません。</div><div class="ve-vllo-history-list" id="veVlloHistoryList"></div><button type="button" class="ve-vllo-history-more" id="veVlloHistoryMore" style="display:none">もっと見る</button></div>`;
 
     const shade=document.createElement('div');
     shade.className='ve-vllo-material-shade';
@@ -353,7 +362,7 @@
     // そもそもドラッグ中に確定処理を持たない)。
     function installDeleteDrag(clipId){const root=document.querySelector('#veVlloTrim [data-ve-clip-id="'+CSS.escape(clipId)+'"]');const track=root?.querySelector('.ve-vllo-trim-track-delete');if(!track)return;let kind=null,pointerId=null;const apply=(clientX,commit,force)=>{const clip=getClip(clipId);if(!clip)return;const r=track.getBoundingClientRect();if(!r.width)return;const dur=Math.max(.2,clip.duration||5);const raw=Math.max(0,Math.min(1,(clientX-r.left)/r.width))*dur;let ds=Number.isFinite(clip.delStart)?clip.delStart:dur/3;let de=Number.isFinite(clip.delEnd)?clip.delEnd:dur*2/3;if(kind==='delStart')ds=Math.min(raw,de);else de=Math.max(raw,ds);clip.delStart=Math.max(0,Math.min(ds,dur));clip.delEnd=Math.max(0,Math.min(de,dur));syncDeleteTrimDom(clip);throttledSeekPreview(clip,kind==='delStart'?clip.delStart:clip.delEnd,force===true||commit===true)};track.addEventListener('pointerdown',e=>{e.preventDefault();const clip=getClip(clipId);if(!clip)return;const handle=e.target.closest('[data-handle]');if(handle)kind=handle.dataset.handle;else{const dur=Math.max(.2,clip.duration||5);const r=track.getBoundingClientRect();const t=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*dur;const ds=Number.isFinite(clip.delStart)?clip.delStart:dur/3;const de=Number.isFinite(clip.delEnd)?clip.delEnd:dur*2/3;kind=Math.abs(t-ds)<=Math.abs(t-de)?'delStart':'delEnd'}pointerId=e.pointerId;track.setPointerCapture?.(pointerId);apply(e.clientX,false,true)});track.addEventListener('pointermove',e=>{if(pointerId!==e.pointerId)return;e.preventDefault();apply(e.clientX,false,false)});const finish=e=>{if(pointerId!==e.pointerId)return;e.preventDefault();apply(e.clientX,true);try{track.releasePointerCapture(pointerId)}catch(_){}pointerId=null;kind=null};track.addEventListener('pointerup',finish);track.addEventListener('pointercancel',e=>{if(pointerId===e.pointerId){pointerId=null;kind=null}})}
     function syncButtons(c){const i=c?veSelected.findIndex(x=>x.clipId===c.clipId):-1;document.getElementById('veVlloUp').disabled=i<=0;document.getElementById('veVlloDown').disabled=i<0||i>=veSelected.length-1;document.getElementById('veVlloRemove').disabled=i<0}
-    function renderAll(){const c=selected();renderPreview(c);renderTimeline();renderTrim(c);syncButtons(c);syncFilmstrips();if(empty)empty.style.display=veVideos.length?'none':'block';setLegacyVisibility();saveDraft()}
+    function renderAll(){const c=selected();renderPreview(c);renderTimeline();renderTrim(c);syncButtons(c);syncFilmstrips();if(empty)empty.style.display=veVideos.length?'none':'block';setLegacyVisibility();saveDraft();if(typeof veRenderBgm==='function')veRenderBgm()}
 
     async function playClipForSequence(clip,token){
       activeClipId=clip.clipId;
@@ -394,6 +403,26 @@
     }
 
     veRenderList=function(){restoreDraftOnce();if(!veVideos.length){if(empty)empty.style.display='block';list.innerHTML=''}else{if(empty)empty.style.display='none';list.innerHTML=veVideos.map(v=>veMaterialCard(v)).join('')}renderAll()};
+    // BGM(任意)のUI更新。generate-prod.html側のveUploadBgm()がグローバルの
+    // veRenderBgm()を呼ぶため、ここで上書きしてVLLOの見た目(#veVlloBgmBox)へ
+    // 反映する。#veBgmBox本体はこのファイルのCSSで常に非表示にしている。
+    veRenderBgm=function(){
+      const empty2=document.getElementById('veVlloBgmEmpty');
+      const selected=document.getElementById('veVlloBgmSelected');
+      const uploading=document.getElementById('veVlloBgmUploading');
+      if(!empty2||!selected||!uploading)return;
+      uploading.style.display=veBgmUploading?'block':'none';
+      if(veBgm){
+        empty2.style.display='none';
+        selected.style.display='flex';
+        const nameEl=document.getElementById('veVlloBgmName');
+        if(nameEl)nameEl.textContent=veBgm.name||'BGM';
+      }else{
+        empty2.style.display=veBgmUploading?'none':'flex';
+        selected.style.display='none';
+      }
+      if(typeof veRenderBar==='function')veRenderBar();
+    };
     veAddClip=function(id){stopSequence(false);const before=veSelected.length;originalAddClip(id);if(veSelected.length>before){const added=veSelected[veSelected.length-1];veSelected[veSelected.length-1]={clipId:added.clipId||crypto.randomUUID(),videoId:added.videoId,start:Number(added.start)||0,end:Number(added.end)||Number(added.duration)||5,duration:Number(added.duration)||5};activeClipId=veSelected[veSelected.length-1].clipId;shade.classList.remove('open');renderAll();if(typeof veRenderBar==='function')veRenderBar();setTimeout(()=>document.getElementById('veVlloTimelineWrap')?.scrollTo({left:99999,behavior:'smooth'}),0)}};
 
     shell.onclick=e=>{
@@ -407,6 +436,8 @@
       const sel=e.target.closest('[data-select]');
       if(sel){stopSequence(false);activeClipId=sel.dataset.select;renderAll();return}
       if(e.target.closest('#veVlloAdd')||e.target.closest('#veVlloTimelineAdd')){stopSequence(false);shade.classList.add('open');return}
+      if(e.target.closest('#veVlloBgmPick')){document.getElementById('veVlloBgmFile')?.click();return}
+      if(e.target.closest('#veVlloBgmRemove')){veBgm=null;const err=document.getElementById('veVlloBgmError');if(err)err.style.display='none';veRenderBgm();return}
       const c=selected();if(!c)return;
       if(e.target.closest('#veVlloUp')){stopSequence(false);veMoveClip(c.clipId,'up');renderAll()}
       else if(e.target.closest('#veVlloDown')){stopSequence(false);veMoveClip(c.clipId,'down');renderAll()}
@@ -415,6 +446,8 @@
 
     shade.querySelector('.ve-vllo-close').onclick=()=>shade.classList.remove('open');
     shade.onclick=e=>{if(e.target===shade)shade.classList.remove('open')};
+
+    document.getElementById('veVlloBgmFile').onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f&&typeof veUploadBgm==='function')veUploadBgm(f)};
 
     document.getElementById('veVlloHistoryMore').onclick=()=>loadVlloHistory(true);
     loadVlloHistory(false);

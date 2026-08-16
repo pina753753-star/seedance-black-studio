@@ -46,6 +46,12 @@ const VIDEO_EDIT_TIMEOUT_MS = Number(process.env.VIDEO_EDIT_TIMEOUT_MS) || 18000
 const CLIP_DURATION_TOLERANCE_SECONDS = 1; // rounding/encoding slack when comparing against stored duration_seconds
 const CLIENT_REQUEST_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 const EDIT_SOURCE_PATH_PREFIX = '/storage/v1/object/public/reference-images/';
+// BGM(stage 2): api/video-edit-audio-confirm-upload.jsが複製する公開バケット
+// (video-edit-audio)のURLのみを受け付ける。任意のURLをRailwayへ渡させない
+// ため、クリップURLと同じくホスト・パスプレフィックスをここで検証する。
+const EDIT_BGM_PATH_PREFIX = '/storage/v1/object/public/video-edit-audio/';
+// 固定音量比率。音量調整UIはstage 3で対応予定(段階2の設計決定通り)。
+const BGM_FIXED_VOLUME = 0.25;
 
 function dbClient() {
   if (!SUPABASE_URL || !SERVICE_KEY) return null;
@@ -68,6 +74,35 @@ function isAllowedSourceUrl(url) {
   return parsed.protocol === 'https:'
     && parsed.host === supabaseHost
     && parsed.pathname.startsWith(EDIT_SOURCE_PATH_PREFIX);
+}
+
+function isAllowedBgmUrl(url) {
+  if (typeof url !== 'string' || !url) return false;
+  let parsed;
+  try { parsed = new URL(url); } catch (_) { return false; }
+  let supabaseHost;
+  try { supabaseHost = new URL(SUPABASE_URL).host; } catch (_) { return false; }
+  return parsed.protocol === 'https:'
+    && parsed.host === supabaseHost
+    && parsed.pathname.startsWith(EDIT_BGM_PATH_PREFIX);
+}
+
+// body.bgmが指定されていなければBGM無しとして扱う(既存の動画編集は無変更で
+// 動く)。指定されていれば、api/video-edit-audio-confirm-upload.jsが発行した
+// 公開URLかどうかだけをここで検証する(実体検証・ffprobeは既にアップロード
+// 確定時点で完了済みのため、ここでは再度行わない)。
+function validateBgm(rawBgm) {
+  if (rawBgm === undefined || rawBgm === null) {
+    return { ok: true, bgm: null };
+  }
+  if (typeof rawBgm !== 'object') {
+    return { ok: false, status: 400, body: { ok: false, error: 'invalid_bgm', message: 'bgmの形式が不正です。' } };
+  }
+  const url = String(rawBgm.url || '').trim();
+  if (!isAllowedBgmUrl(url)) {
+    return { ok: false, status: 400, body: { ok: false, error: 'invalid_bgm_url', message: 'bgm.urlが不正です。' } };
+  }
+  return { ok: true, bgm: { url, volume: BGM_FIXED_VOLUME } };
 }
 
 // Validates and normalizes the request body's clips array. Returns
@@ -217,19 +252,24 @@ module.exports = async function handler(req, res) {
   if (!clipsCheck.ok) return res.status(clipsCheck.status).json(clipsCheck.body);
   const { clips, totalDuration } = clipsCheck;
 
+  const bgmCheck = validateBgm(body.bgm);
+  if (!bgmCheck.ok) return res.status(bgmCheck.status).json(bgmCheck.body);
+  const { bgm } = bgmCheck;
+
   const sourcesCheck = await resolveClipSources(db, user.id, clips);
   if (!sourcesCheck.ok) return res.status(sourcesCheck.status).json(sourcesCheck.body);
   const resolvedClips = sourcesCheck.resolved;
 
   let creditCost;
   try {
-    creditCost = calculateVideoEditCreditCost({ clipCount: clips.length, totalDurationSeconds: totalDuration });
+    creditCost = calculateVideoEditCreditCost({ clipCount: clips.length, totalDurationSeconds: totalDuration, hasBgm: bgm !== null });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.code || 'pricing_error', message: err.message });
   }
 
   const inputManifest = {
-    clips: resolvedClips.map((c) => ({ videoId: c.videoId, start: c.start, end: c.end, sourceUrl: c.sourceUrl }))
+    clips: resolvedClips.map((c) => ({ videoId: c.videoId, start: c.start, end: c.end, sourceUrl: c.sourceUrl })),
+    bgm
   };
 
   // Source lookup and pricing can take place after the request's first stop
@@ -314,7 +354,10 @@ module.exports = async function handler(req, res) {
       // the Railway side — see watermark-server/server.js's outputId
       // handling). Lets api/_lib/video-edit-reconcile.js find the finished
       // file even if this request never gets a response back from Railway.
-      taskId
+      taskId,
+      // bgmはnullの場合そのまま渡す。Railway側(watermark-server/server.js)
+      // はbgmが無ければ従来通りミックス処理をスキップする。
+      bgm
     };
 
     // Final check immediately before the Railway request. If the stop was

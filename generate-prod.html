@@ -111,6 +111,21 @@
   <div id="veClipEmpty" class="empty" style="display:block">上の一覧からタップして動画を追加してください。</div>
   <div id="veClipList" class="history"></div>
 
+  <div class="section"><h2 style="font-size:15px">BGM（任意）</h2></div>
+  <div id="veBgmBox" style="margin-bottom:14px;border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px;background:#101319">
+    <input id="veBgmFile" type="file" accept="audio/mpeg" style="display:none">
+    <div id="veBgmEmpty" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="color:#9ca3af;font-size:12px">BGMを追加すると動画に音楽を重ねられます（mp3、最大15MB）</span>
+      <button type="button" id="veBgmPick" style="flex:0 0 auto;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:800">追加</button>
+    </div>
+    <div id="veBgmSelected" style="display:none;justify-content:space-between;align-items:center;gap:10px">
+      <span id="veBgmName" style="color:#d5d9e1;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <button type="button" id="veBgmRemove" style="flex:0 0 auto;border:1px solid rgba(251,113,133,.3);background:#241820;color:#fca5a5;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:800">削除</button>
+    </div>
+    <div id="veBgmUploading" style="display:none;color:#9ca3af;font-size:12px;margin-top:6px">アップロード中…</div>
+    <div id="veBgmError" style="display:none;color:#fca5a5;font-size:12px;margin-top:6px"></div>
+  </div>
+
   <div id="veBar" style="display:none;position:sticky;bottom:0;margin-top:16px;background:#0b0d13;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:14px">
     <div id="veSelectedBar"></div>
     <button class="create" id="veSubmit" style="margin-top:12px">編集する ✦ <span id="veCost">10</span></button>
@@ -688,6 +703,8 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset
 // ---- 動画編集: 過去動画一覧・選択・トリム・実行 ----
 const VE_MAX_CLIPS=6;
 let veVideos=[],veSelected=[]; // veSelected: [{clipId,videoId,start,end,duration}] (同じvideoIdを複数クリップとして持てる)
+let veBgm=null; // {url,name} 確定済みのBGM(1本のみ)。未選択はnull。api/video-edit-audio-*.jsで実体検証済みのURLのみを保持する。
+let veBgmUploading=false;
 function veFmtTime(s){s=Math.max(0,Number(s)||0);return s.toFixed(1)+'s'}
 // veSelectedを唯一の正本として、常にstart/endをduration内・最小0.1秒差に丸める
 // start/endを0.1秒単位に丸める際、四捨五入(Math.round)だとend側がdurationを
@@ -904,8 +921,72 @@ function veFilmstripSyncSelected(){
     }
   });
 }
-function veCreditEstimate(){const count=veSelected.length;const total=veSelected.reduce((s,c)=>s+Math.max(0,c.end-c.start),0);return(count>3||total>30)?15:10}
+// api/_lib/video-edit-pricing.jsのcalculateVideoEditCreditCostと同じ計算式
+// (base 10/15 + BGMありなら+5、上限25)。サーバー側の最終判定はAPI側で
+// 別途行われるため、ここはあくまで画面表示用の見積り。
+function veCreditEstimate(){const count=veSelected.length;const total=veSelected.reduce((s,c)=>s+Math.max(0,c.end-c.start),0);const base=(count>3||total>30)?15:10;const withBgm=base+(veBgm?5:0);return Math.min(withBgm,25)}
 function veRenderBar(){const bar=$('veBar');if(!bar)return;if(!veSelected.length){bar.style.display='none';return}bar.style.display='block';$('veCost').textContent=String(veCreditEstimate());const strip=$('veSelectedBar');strip.innerHTML=veSelected.map((c,i)=>{const v=veVideos.find(x=>x.id===c.videoId);return '<div style="flex:0 0 auto;width:56px;height:80px;border-radius:10px;overflow:hidden;position:relative;background:#050506;border:1px solid rgba(255,255,255,.1)"><video muted playsinline preload="metadata" src="'+esc(v?.video_url||'')+'#t=0.2" style="width:100%;height:100%;object-fit:cover;pointer-events:none"></video><span style="position:absolute;left:3px;top:3px;background:rgba(0,0,0,.7);border-radius:6px;padding:1px 5px;font-size:10px;font-weight:800">'+(i+1)+'</span></div>'}).join('')}
+
+// ---- 動画編集: BGM(任意)アップロード。参照画像アップロード
+// (uploadOneAsset、/api/reference-image-upload-url→/api/reference-image-confirm-upload)
+// と同じ、署名付きURL経由の直接アップロード方式
+// (/api/video-edit-audio-upload-url→/api/video-edit-audio-confirm-upload)を流用する。
+const VE_BGM_MAX_BYTES=15*1024*1024;
+function veRenderBgm(){
+  const empty=$('veBgmEmpty'),selected=$('veBgmSelected'),uploading=$('veBgmUploading');
+  if(!empty||!selected||!uploading)return;
+  uploading.style.display=veBgmUploading?'block':'none';
+  if(veBgm){
+    empty.style.display='none';
+    selected.style.display='flex';
+    $('veBgmName').textContent=veBgm.name||'BGM';
+  }else{
+    empty.style.display=veBgmUploading?'none':'flex';
+    selected.style.display='none';
+  }
+  veRenderBar();
+}
+async function veUploadBgm(file){
+  const errorEl=$('veBgmError');
+  if(errorEl)errorEl.style.display='none';
+  if(!file)return;
+  if(file.type!=='audio/mpeg'){if(errorEl){errorEl.textContent='mp3ファイルを選択してください。';errorEl.style.display='block'}return}
+  if(file.size>VE_BGM_MAX_BYTES){if(errorEl){errorEl.textContent='ファイルサイズが上限（15MB）を超えています。';errorEl.style.display='block'}return}
+  const token=await getToken();
+  if(!token){location.href='./login.html';return}
+  veBgmUploading=true;veRenderBgm();
+  try{
+    let urlRes,urlData=null;
+    try{
+      urlRes=await fetch('/api/video-edit-audio-upload-url',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({filename:file.name,contentType:file.type,byteSize:file.size})});
+    }catch(_){throw new Error('通信エラーが発生しました')}
+    try{urlData=await urlRes.json()}catch(_){urlData=null}
+    if(!urlRes.ok||!urlData||!urlData.ok||!urlData.signedUrl||!urlData.token||!urlData.path){
+      throw new Error((urlData&&(urlData.message||urlData.error))||('アップロードに失敗しました（'+urlRes.status+'）'));
+    }
+
+    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
+    if(!client)throw new Error('Supabase接続情報が未設定です。');
+    const{error:uploadError}=await client.storage.from(urlData.bucket||'video-edit-audio-quarantine').uploadToSignedUrl(urlData.path,urlData.token,file,{contentType:file.type});
+    if(uploadError)throw new Error('BGMのアップロードに失敗しました：'+(uploadError.message||String(uploadError)));
+
+    let confirmRes,confirmData=null;
+    try{
+      confirmRes=await fetch('/api/video-edit-audio-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({path:urlData.path})});
+    }catch(_){throw new Error('通信エラーが発生しました')}
+    try{confirmData=await confirmRes.json()}catch(_){confirmData=null}
+    if(!confirmRes.ok||!confirmData||!confirmData.ok||!(confirmData.publicUrl||confirmData.url)){
+      throw new Error((confirmData&&(confirmData.message||confirmData.error))||('アップロードに失敗しました（'+confirmRes.status+'）'));
+    }
+
+    veBgm={url:confirmData.publicUrl||confirmData.url,name:file.name};
+  }catch(e){
+    const errorEl2=$('veBgmError');
+    if(errorEl2){errorEl2.textContent=e.message||'BGMのアップロードに失敗しました。';errorEl2.style.display='block'}
+  }finally{
+    veBgmUploading=false;veRenderBgm();
+  }
+}
 // 素材をタップするたびに新しいクリップ(start:0、end:全長)を編集リストの末尾に追加する。
 // 同じvideoIdを何度でも追加できる。上限(VE_MAX_CLIPS)は総クリップ数で判定する。
 function veAddClip(videoId){if(veSelected.length>=VE_MAX_CLIPS)return;const v=veVideos.find(x=>x.id===videoId);if(!v)return;const dur=Number(v.duration_seconds)||5;const clip={clipId:crypto.randomUUID(),videoId,start:0,end:dur,duration:dur};veClampClip(clip,dur);veSelected.push(clip);veRenderList();veRenderBar()}
@@ -1022,9 +1103,12 @@ veClipListEl.addEventListener('input',e=>veHandleSliderInput(e,false));
 veClipListEl.addEventListener('change',e=>veHandleSliderInput(e,true));
 // loadedmetadataはバブリングしないため、キャプチャフェーズで委譲して実測durationにより補正する
 veClipListEl.addEventListener('loadedmetadata',e=>{const video=e.target;if(!video||video.tagName!=='VIDEO')return;const card=video.closest('[data-ve-clip-id]');if(!card)return;const clipId=card.getAttribute('data-ve-clip-id');const clip=veSelected.find(s=>s.clipId===clipId);if(!clip)return;const real=video.duration;if(Number.isFinite(real)&&real>0){veClampClip(clip,real);veUpdateSliderDom(card,clip)}},true);
+$('veBgmPick').onclick=()=>$('veBgmFile').click();
+$('veBgmFile').onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f)veUploadBgm(f)};
+$('veBgmRemove').onclick=()=>{veBgm=null;$('veBgmError').style.display='none';veRenderBgm()};
 
 let _veClientRequestId='';
-async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){const dur=Number(c.duration)||0;if(!(c.end>c.start)||!(c.start>=0)||!(c.end<=dur)||!(c.end-c.start>=0.1)){err.textContent='トリム範囲が不正です。開始・終了位置を選び直してください。';err.style.display='block';return}}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};await veSend(body,token)}
+async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){const dur=Number(c.duration)||0;if(!(c.end>c.start)||!(c.start>=0)||!(c.end<=dur)||!(c.end-c.start>=0.1)){err.textContent='トリム範囲が不正です。開始・終了位置を選び直してください。';err.style.display='block';return}}if(veBgmUploading){err.textContent='BGMのアップロード完了までお待ちください。';err.style.display='block';return}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};if(veBgm)body.bgm={url:veBgm.url};await veSend(body,token)}
 async function veSend(body,token,attempt){attempt=attempt||0;try{const res=await fetch('/api/video-edit',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});if(res.status===401){location.href='./login.html';return}if(res.status===403){$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;showVideoEditModal();return}if(res.status===402){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='クレジットが不足しています（必要: '+(data.required||veCreditEstimate())+' cr）。クレジットを購入してください。';$('veError').style.display='block';return}if(res.status===409){const data=await res.json().catch(()=>({}));$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||'現在処理中の動画編集があります。完了後にもう一度お試しください。';$('veError').style.display='block';return}const data=await res.json().catch(()=>({}));if(data.status==='queued'||data.status==='processing'){vePollStatus(data.taskId,token);return}if(data.status==='completed'){veShowCompleted(data.editedUrl);return}if(data.status==='failed'){veShowFailed(data.message||data.error,data.refunded,data.taskId);return}if(res.status===502){veShowFailed(data.detail||data.error,data.refunded,data.taskId);return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent=data.message||data.error||('編集の開始に失敗しました（'+res.status+'）');$('veError').style.display='block'}catch(e){if(attempt<3){setTimeout(()=>veSend(body,token,attempt+1),1500*(attempt+1));return}$('veProcessing').style.display='none';$('veBar').style.display='block';$('veSubmit').disabled=false;$('veError').textContent='通信エラーが発生しました。もう一度お試しください。';$('veError').style.display='block'}}
 function veShowCompleted(url){
   $('veProcessing').style.display='none';
@@ -1033,10 +1117,12 @@ function veShowCompleted(url){
   $('veResultSave').href=url;
   $('veResultSave').dataset.videoUrl=url;
   veSelected=[];
+  veBgm=null;
   _veClientRequestId='';
   $('veSubmit').disabled=false;
   veRenderList();
   veRenderBar();
+  veRenderBgm();
 }
 
 async function veSaveEditedVideo(event){
