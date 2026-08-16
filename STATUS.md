@@ -1,6 +1,22 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-08-14)
+# FlowVid Studio 完成までの全体像(最終更新: 2026-08-15)
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
+
+## 2026年8月15日 作業ログ
+
+### 完了した項目
+
+- 参照画像アップロードにOpenAI Moderation(sexual/minorsカテゴリ)による児童保護検査を追加(PR #169)。隔離バケットへのアップロード後、署名付きURL経由で検査し、合格したもののみ公開バケットへコピー。ブロック時はmoderation_blocksテーブルに記録(mode: reference_image_upload)。
+- TEST_BYPASS_USER_ID限定だった参照画像アップロード機能を一般ユーザーに解放(PR #170)。対象: api/upload-reference-image.js、api/reference-image-upload-url.js、api/reference-image-confirm-upload.js、api/storyboard-prompt.js、api/seedance-start-priced.js、generate-prod.html。認証チェック・sexual/minors検査・通常の生成時モデレーションは維持。自動テスト140件成功。
+- ベータ提供を開始。オープンチャット経由で3人を限定募集し、フィードバックを収集する運用。対象者には新規登録時800クレジットを自動付与、既存の付与済み17人分は変更なし。
+- 本番反映・表示確認済み(main SHA: 8cdf7db)。
+
+### 未対応・残タスク・重要な注意点
+
+- CSAM既知ハッシュ照合(PhotoDNA/Thorn Safer Match等)、正確な年齢確認、実在人物・有名人検知は依然として未実装。sexual/minorsという汎用モデレーションカテゴリのみに依存している状態。
+- 「URLを知っている人限定」は運用上の案内であり、コード上のアクセス制限ではない。メール確認済みの認証ユーザーであれば技術的には誰でも参照画像機能にアクセス可能。
+- moderation_blocksテーブルの記録を定期的に確認し、想定外の利用がないか監視する運用が必要。
+- ベータの反応・moderation_blocksの記録傾向を見て、専門の画像モデレーションサービス(Hive Moderation等)導入の要否を今後判断する。
 
 ## 2026年8月14日 作業ログ
 
