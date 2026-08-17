@@ -119,9 +119,11 @@
       <button type="button" id="veBgmPick" style="flex:0 0 auto;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:800">追加</button>
     </div>
     <div id="veBgmSelected" style="display:none;justify-content:space-between;align-items:center;gap:10px">
-      <span id="veBgmName" style="color:#d5d9e1;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <span id="veBgmName" style="color:#d5d9e1;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto"></span>
+      <button type="button" id="veBgmPlay" style="flex:0 0 auto;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:800">▶ 試聴</button>
       <button type="button" id="veBgmRemove" style="flex:0 0 auto;border:1px solid rgba(251,113,133,.3);background:#241820;color:#fca5a5;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:800">削除</button>
     </div>
+    <audio id="veBgmAudio" style="display:none"></audio>
     <div id="veBgmUploading" style="display:none;color:#9ca3af;font-size:12px;margin-top:6px">アップロード中…</div>
     <div id="veBgmError" style="display:none;color:#fca5a5;font-size:12px;margin-top:6px"></div>
   </div>
@@ -943,8 +945,25 @@ function veRenderBgm(){
   }else{
     empty.style.display=veBgmUploading?'none':'flex';
     selected.style.display='none';
+    veStopBgmPreview();
   }
   veRenderBar();
+}
+// 確定前の試聴用。既存の動画プレビュー(videoタグ)とは無関係の、音声専用の
+// audioタグ(#veBgmAudio)を使い回す。videoIdごとの再生管理はしていない
+// (BGMは常に1本のみ選択可能なため)。
+function veStopBgmPreview(){
+  const audio=$('veBgmAudio');
+  if(audio){audio.pause();audio.removeAttribute('src');audio.load()}
+  const btn=$('veBgmPlay');
+  if(btn)btn.textContent='▶ 試聴';
+}
+function veToggleBgmPreview(){
+  const audio=$('veBgmAudio'),btn=$('veBgmPlay');
+  if(!audio||!btn||!veBgm)return;
+  if(!audio.paused&&audio.src){audio.pause();return}
+  if(audio.src!==veBgm.url)audio.src=veBgm.url;
+  audio.play().catch(()=>{});
 }
 async function veUploadBgm(file){
   const errorEl=$('veBgmError');
@@ -1106,6 +1125,10 @@ veClipListEl.addEventListener('loadedmetadata',e=>{const video=e.target;if(!vide
 $('veBgmPick').onclick=()=>$('veBgmFile').click();
 $('veBgmFile').onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f)veUploadBgm(f)};
 $('veBgmRemove').onclick=()=>{veBgm=null;$('veBgmError').style.display='none';veRenderBgm()};
+$('veBgmPlay').onclick=()=>veToggleBgmPreview();
+$('veBgmAudio').addEventListener('play',()=>{const btn=$('veBgmPlay');if(btn)btn.textContent='⏸ 停止'});
+$('veBgmAudio').addEventListener('pause',()=>{const btn=$('veBgmPlay');if(btn)btn.textContent='▶ 試聴'});
+$('veBgmAudio').addEventListener('ended',()=>{const btn=$('veBgmPlay');if(btn)btn.textContent='▶ 試聴'});
 
 let _veClientRequestId='';
 async function veSubmit(){const err=$('veError');err.style.display='none';if(!veSelected.length)return;for(const c of veSelected){const dur=Number(c.duration)||0;if(!(c.end>c.start)||!(c.start>=0)||!(c.end<=dur)||!(c.end-c.start>=0.1)){err.textContent='トリム範囲が不正です。開始・終了位置を選び直してください。';err.style.display='block';return}}if(veBgmUploading){err.textContent='BGMのアップロード完了までお待ちください。';err.style.display='block';return}if(!_veClientRequestId)_veClientRequestId=crypto.randomUUID();const token=await getToken();if(!token){location.href='./login.html';return}$('veSubmit').disabled=true;$('veBar').style.display='none';$('veProcessing').style.display='block';const body={clientRequestId:_veClientRequestId,transition:'cut',clips:veSelected.map(c=>({videoId:c.videoId,start:c.start,end:c.end}))};if(veBgm)body.bgm={url:veBgm.url};await veSend(body,token)}

@@ -112,6 +112,7 @@
       .ve-vllo-bgm-empty span,.ve-vllo-bgm-selected span{color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .ve-vllo-bgm-selected span{color:#d5d9e1;font-weight:700}
       .ve-vllo-bgm-pick{flex:0 0 auto;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:800}
+      .ve-vllo-bgm-play{flex:0 0 auto;border:1px solid rgba(255,255,255,.14);background:#1a1f29;color:#d5d9e1;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:800}
       .ve-vllo-bgm-remove{flex:0 0 auto;border:1px solid rgba(251,113,133,.3);background:#241820;color:#fca5a5;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:800}
       .ve-vllo-bgm-uploading{color:#9ca3af;font-size:12px;margin-top:6px}
       .ve-vllo-bgm-error{color:#fca5a5;font-size:12px;margin-top:6px}
@@ -127,7 +128,7 @@
 
     const shell=document.createElement('div');
     shell.className='ve-vllo-shell';
-    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div><div class="ve-vllo-bgm" id="veVlloBgmBox"><input id="veVlloBgmFile" type="file" accept="audio/mpeg" style="display:none"><div class="ve-vllo-bgm-empty" id="veVlloBgmEmpty"><span>BGM（任意・mp3・最大15MB）</span><button type="button" class="ve-vllo-bgm-pick" id="veVlloBgmPick">追加</button></div><div class="ve-vllo-bgm-selected" id="veVlloBgmSelected" style="display:none"><span id="veVlloBgmName"></span><button type="button" class="ve-vllo-bgm-remove" id="veVlloBgmRemove">削除</button></div><div class="ve-vllo-bgm-uploading" id="veVlloBgmUploading" style="display:none">アップロード中…</div><div class="ve-vllo-bgm-error" id="veVlloBgmError" style="display:none"></div></div><div class="ve-vllo-history" id="veVlloHistorySection"><div class="ve-vllo-history-title">編集済み動画</div><div class="ve-vllo-history-empty" id="veVlloHistoryEmpty" style="display:none">まだ編集済みの動画はありません。</div><div class="ve-vllo-history-list" id="veVlloHistoryList"></div><button type="button" class="ve-vllo-history-more" id="veVlloHistoryMore" style="display:none">もっと見る</button></div>`;
+    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div><div class="ve-vllo-bgm" id="veVlloBgmBox"><input id="veVlloBgmFile" type="file" accept="audio/mpeg" style="display:none"><div class="ve-vllo-bgm-empty" id="veVlloBgmEmpty"><span>BGM（任意・mp3・最大15MB）</span><button type="button" class="ve-vllo-bgm-pick" id="veVlloBgmPick">追加</button></div><div class="ve-vllo-bgm-selected" id="veVlloBgmSelected" style="display:none"><span id="veVlloBgmName"></span><button type="button" class="ve-vllo-bgm-play" id="veVlloBgmPlay">▶ 試聴</button><button type="button" class="ve-vllo-bgm-remove" id="veVlloBgmRemove">削除</button></div><audio id="veVlloBgmAudio" style="display:none"></audio><div class="ve-vllo-bgm-uploading" id="veVlloBgmUploading" style="display:none">アップロード中…</div><div class="ve-vllo-bgm-error" id="veVlloBgmError" style="display:none"></div></div><div class="ve-vllo-history" id="veVlloHistorySection"><div class="ve-vllo-history-title">編集済み動画</div><div class="ve-vllo-history-empty" id="veVlloHistoryEmpty" style="display:none">まだ編集済みの動画はありません。</div><div class="ve-vllo-history-list" id="veVlloHistoryList"></div><button type="button" class="ve-vllo-history-more" id="veVlloHistoryMore" style="display:none">もっと見る</button></div>`;
 
     const shade=document.createElement('div');
     shade.className='ve-vllo-material-shade';
@@ -420,9 +421,25 @@
       }else{
         empty2.style.display=veBgmUploading?'none':'flex';
         selected.style.display='none';
+        stopVlloBgmPreview();
       }
       if(typeof veRenderBar==='function')veRenderBar();
     };
+    // 確定前の試聴用。#veVlloBgmAudioは動画プレビュー(#veVlloPreview)とは
+    // 無関係の、音声専用audioタグ。
+    function stopVlloBgmPreview(){
+      const audio=document.getElementById('veVlloBgmAudio');
+      if(audio){audio.pause();audio.removeAttribute('src');audio.load()}
+      const btn=document.getElementById('veVlloBgmPlay');
+      if(btn)btn.textContent='▶ 試聴';
+    }
+    function toggleVlloBgmPreview(){
+      const audio=document.getElementById('veVlloBgmAudio'),btn=document.getElementById('veVlloBgmPlay');
+      if(!audio||!btn||!veBgm)return;
+      if(!audio.paused&&audio.src){audio.pause();return}
+      if(audio.src!==veBgm.url)audio.src=veBgm.url;
+      audio.play().catch(()=>{});
+    }
     veAddClip=function(id){stopSequence(false);const before=veSelected.length;originalAddClip(id);if(veSelected.length>before){const added=veSelected[veSelected.length-1];veSelected[veSelected.length-1]={clipId:added.clipId||crypto.randomUUID(),videoId:added.videoId,start:Number(added.start)||0,end:Number(added.end)||Number(added.duration)||5,duration:Number(added.duration)||5};activeClipId=veSelected[veSelected.length-1].clipId;shade.classList.remove('open');renderAll();if(typeof veRenderBar==='function')veRenderBar();setTimeout(()=>document.getElementById('veVlloTimelineWrap')?.scrollTo({left:99999,behavior:'smooth'}),0)}};
 
     shell.onclick=e=>{
@@ -437,6 +454,7 @@
       if(sel){stopSequence(false);activeClipId=sel.dataset.select;renderAll();return}
       if(e.target.closest('#veVlloAdd')||e.target.closest('#veVlloTimelineAdd')){stopSequence(false);shade.classList.add('open');return}
       if(e.target.closest('#veVlloBgmPick')){document.getElementById('veVlloBgmFile')?.click();return}
+      if(e.target.closest('#veVlloBgmPlay')){toggleVlloBgmPreview();return}
       if(e.target.closest('#veVlloBgmRemove')){veBgm=null;const err=document.getElementById('veVlloBgmError');if(err)err.style.display='none';veRenderBgm();return}
       const c=selected();if(!c)return;
       if(e.target.closest('#veVlloUp')){stopSequence(false);veMoveClip(c.clipId,'up');renderAll()}
@@ -448,6 +466,10 @@
     shade.onclick=e=>{if(e.target===shade)shade.classList.remove('open')};
 
     document.getElementById('veVlloBgmFile').onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f&&typeof veUploadBgm==='function')veUploadBgm(f)};
+    const veVlloBgmAudio=document.getElementById('veVlloBgmAudio');
+    veVlloBgmAudio.addEventListener('play',()=>{const btn=document.getElementById('veVlloBgmPlay');if(btn)btn.textContent='⏸ 停止'});
+    veVlloBgmAudio.addEventListener('pause',()=>{const btn=document.getElementById('veVlloBgmPlay');if(btn)btn.textContent='▶ 試聴'});
+    veVlloBgmAudio.addEventListener('ended',()=>{const btn=document.getElementById('veVlloBgmPlay');if(btn)btn.textContent='▶ 試聴'});
 
     document.getElementById('veVlloHistoryMore').onclick=()=>loadVlloHistory(true);
     loadVlloHistory(false);
