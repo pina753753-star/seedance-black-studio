@@ -265,12 +265,20 @@
     if(!main)return;
     const section=document.createElement('section');
     section.className='section';
-    section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button><div id="fv-history-count-note" style="display:none;margin-top:6px;color:rgba(255,255,255,.45);font-size:12px;line-height:1.5"></div>';
+    section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button>';
+    // .sectionはdisplay:flexで見出し・ボタンを横並びにするレイアウトのため、
+    // 件数案内をsection内に置くと同じ行に詰まって窮屈になる(マイページ側で
+    // 問題がなかったのは、profile.htmlの案内が.tabsの外側の独立行に
+    // 置かれているため)。ここでもsectionの外に独立した行として置く。
+    const countNote=document.createElement('div');
+    countNote.id='fv-history-count-note';
+    countNote.style.cssText='display:none;margin:8px 2px 10px;color:rgba(255,255,255,.45);font-size:12px;line-height:1.5';
     const historyDiv=document.createElement('div');
     historyDiv.className='history';
     historyDiv.id='history';
     historyDiv.innerHTML='<div class="empty">履歴を読み込み中...</div>';
     main.appendChild(section);
+    main.appendChild(countNote);
     main.appendChild(historyDiv);
     const getMode=()=>document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
     if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode());
