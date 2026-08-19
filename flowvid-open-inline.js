@@ -240,6 +240,24 @@
     syncCreditButton();
   }
 
+  // 「過去動画」欄の表示件数案内。APIは最大50件までしか返さないため、
+  // flowvid-history.jsが発行するflowvid:history-countイベント(生の取得件数)を
+  // 元に、50件未満なら「現在○件」、ちょうど50件なら「これより古い動画は
+  // 表示されない」旨を出す。countがnull(API失敗時のローカルフォールバック)の
+  // 場合は件数が確認できないため、案内自体を出さない。
+  function updateHistoryCountNote(count){
+    const note=document.getElementById('fv-history-count-note');
+    if(!note)return;
+    if(count===null||count===undefined||!Number.isFinite(count)){
+      note.textContent='';
+      note.style.display='none';
+      return;
+    }
+    note.style.display='block';
+    note.textContent=count>=50
+      ?'最新50件を表示中です。これより古い動画がある場合、この一覧には表示されません。'
+      :'現在'+count+'件を表示中（最大50件）';
+  }
   function ensureGenerateHistory(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.getElementById('history'))return;
@@ -247,7 +265,7 @@
     if(!main)return;
     const section=document.createElement('section');
     section.className='section';
-    section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button>';
+    section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button><div id="fv-history-count-note" style="display:none;margin-top:6px;color:rgba(255,255,255,.45);font-size:12px;line-height:1.5"></div>';
     const historyDiv=document.createElement('div');
     historyDiv.className='history';
     historyDiv.id='history';
@@ -256,6 +274,8 @@
     main.appendChild(historyDiv);
     const getMode=()=>document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
     if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode());
+    if(Number.isFinite(window.flowvidHistoryFetchedCount))updateHistoryCountNote(window.flowvidHistoryFetchedCount);
+    window.addEventListener('flowvid:history-count',e=>updateHistoryCountNote(e?.detail?.count));
     section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode())};
   }
 
