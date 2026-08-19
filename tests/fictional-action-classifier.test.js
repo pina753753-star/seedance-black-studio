@@ -140,7 +140,6 @@ for (const [name, overrides] of [
   ['実在人物への攻撃', { real_person_target: true }],
   ['未成年への危害', { minor_harm: true }],
   ['残虐な負傷', { graphic_injury: true }],
-  ['殺害または切断', { lethal_or_maiming_action: true }],
   ['拷問または処刑', { torture_or_execution: true }],
   ['性的暴力', { sexual_violence: true }],
   ['武器の殺傷指南', { weapon_instruction: true }],
@@ -323,6 +322,28 @@ test('全11項目が安全なら矛盾なし、再判定なしで即座に許可
   assert.equal(result.ok, true);
   assert.equal(result.allow, true);
   assert.equal(logs.length, 0);
+});
+
+test('架空の非グラフィックな決着はlethal診断だけで拒否しない', () => {
+  const result = validateClassification(safeAllow({
+    lethal_or_maiming_action: true,
+    non_graphic_action: true
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
+});
+
+test('lethal診断があっても非グラフィック条件を満たさなければ拒否', () => {
+  const result = validateClassification(safeAllow({
+    lethal_or_maiming_action: true,
+    non_graphic_action: false
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, false);
+  assert.equal(result.reason, 'classification_blocked');
 });
 
 test('ハード矛盾は1回だけ再判定し、整合すれば許可', async (t) => {
@@ -693,6 +714,27 @@ test('二次判定指示文は蚊・害虫のコミカルな対峙を非グラ�
   ]) {
     assert.equal(sentPrompt.includes(boundary), true);
   }
+});
+
+test('二次判定指示文は装甲獣への非グラフィックな決着を許可対象として明文化する', async () => {
+  const sentPrompt = await captureClassifierPrompt(
+    '日本アニメ調。成人の主人公と黒豹が連携し、赤い装甲獣の胸部コアへ精密射撃する。火花が飛び、装甲獣は停止する。流血、傷、欠損、苦痛、処刑はない。'
+  );
+
+  for (const phrase of [
+    'lethal_or_maiming_action and non_graphic_action are independent diagnostics',
+    'fantasy monster, armored beast, robot, drone, or machine',
+    'fictional core, armor, joints, controls, or weak points',
+    'Do not set non_graphic_action false solely because a fictional enemy is defeated',
+    'shot counts, fictional weak points, action choreography, camera directions',
+    'an adult heroine and a black panther coordinate precise shots against the glowing core of a red armored beast'
+  ]) {
+    assert.equal(sentPrompt.includes(phrase), true);
+  }
+
+  assert.equal(sentPrompt.includes('real-person targeting'), true);
+  assert.equal(sentPrompt.includes('actual injury or abuse of minors'), true);
+  assert.equal(sentPrompt.includes('practical real-world weapon instruction'), true);
 });
 
 test('二次判定指示文は明示された成人記述を信頼する', async () => {
