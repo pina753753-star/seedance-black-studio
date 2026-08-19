@@ -332,7 +332,7 @@ function setMode(m){
     if(modeHintEl){
       const hint=MODE_HINTS[m];
       if(hint){
-        modeHintEl.innerHTML=esc(hint.main)+(hint.sub?'<br><span style="color:#6b7280">'+esc(hint.sub)+'</span>':'');
+        modeHintEl.innerHTML=esc(hint.main)+(hint.sub?'<br>'+esc(hint.sub):'');
         modeHintEl.style.display='block';
       }else{
         modeHintEl.textContent='';
