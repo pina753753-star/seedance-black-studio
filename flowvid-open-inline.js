@@ -241,14 +241,17 @@
   }
 
   // 「過去動画」欄の表示件数案内。APIは最大50件までしか返さないため、
-  // flowvid-history.jsが発行するflowvid:history-countイベント(生の取得件数)を
-  // 元に、50件未満なら「現在○件」、ちょうど50件なら「これより古い動画は
-  // 表示されない」旨を出す。countがnull(API失敗時のローカルフォールバック)の
-  // 場合は件数が確認できないため、案内自体を出さない。
-  function updateHistoryCountNote(count){
+  // flowvid-history.jsが発行するflowvid:history-countイベント(生の取得件数と
+  // 実際に画面へ描画された件数の両方)を元に、50件未満なら「現在○件」、
+  // ちょうど50件なら「これより古い動画は表示されない」旨を出す。
+  // displayedCount(現在のモードタブでの絞り込み後の実描画件数)が0の場合は、
+  // 一覧が「まだ動画がありません」と空表示になっているのに「最新50件を表示中
+  // です」等の矛盾した案内が出ないよう、案内自体を非表示にする。countがnull
+  // (API失敗時のローカルフォールバック)の場合も件数が確認できないため出さない。
+  function updateHistoryCountNote(count,displayedCount){
     const note=document.getElementById('fv-history-count-note');
     if(!note)return;
-    if(count===null||count===undefined||!Number.isFinite(count)){
+    if(count===null||count===undefined||!Number.isFinite(count)||!displayedCount){
       note.textContent='';
       note.style.display='none';
       return;
@@ -282,8 +285,8 @@
     main.appendChild(historyDiv);
     const getMode=()=>document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
     if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode());
-    if(Number.isFinite(window.flowvidHistoryFetchedCount))updateHistoryCountNote(window.flowvidHistoryFetchedCount);
-    window.addEventListener('flowvid:history-count',e=>updateHistoryCountNote(e?.detail?.count));
+    if(Number.isFinite(window.flowvidHistoryFetchedCount))updateHistoryCountNote(window.flowvidHistoryFetchedCount,window.flowvidHistoryDisplayedCount);
+    window.addEventListener('flowvid:history-count',e=>updateHistoryCountNote(e?.detail?.count,e?.detail?.displayedCount));
     section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode())};
   }
 
