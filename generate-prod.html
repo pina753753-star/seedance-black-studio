@@ -61,7 +61,8 @@
 <section class="card" id="mainCard">
 <div id="sbLockNotice" style="display:none;margin-bottom:12px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.28);border-radius:14px;padding:12px 14px;color:#8ed8ff;font-size:12px;font-weight:700;line-height:1.6">画像・秒数・アスペクト比は、生成したプロンプトの内容と対応しているため変更できません。変更する場合は下の「絵コンテを作り直す」を押してください。</div>
 <button class="create" id="sbRedoBtn" type="button" style="display:none;margin-bottom:12px;background:#2b303a;color:#fff;font-size:14px;padding:12px 14px">絵コンテを作り直す ↺</button>
-<div class="assets" id="assets"><label class="add"><input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple><div><b>＋</b><span>画像追加</span></div></label></div>
+<div id="modeHint" style="display:none;margin-bottom:10px;color:#9ca3af;font-size:12px;line-height:1.6"></div>
+<div class="assets" id="assets"><label class="add"><input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple><div><b>＋</b><span id="assetsLabel">画像追加</span></div></label></div>
 <div id="uploadProgress" style="display:none"></div>
 <div class="prompt"><textarea id="prompt" placeholder="キャラクター、商品、シーン、動きを入力してください。"></textarea></div>
 <details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
@@ -317,6 +318,29 @@ function setMode(m){
     // 独立しており、バックグラウンドでアップロード中の場合もあるため一切触れない。
     if(wasSbLocked){sbGenerationImageUrl='';files=[];}
     const modeLabelEl=$('modeLabel');if(modeLabelEl)modeLabelEl.textContent=modeName(m);
+    // 「画像から動画」と「リファレンス」の違いがわかりにくいというベータ
+    // フィードバックへの対応。admin-seedance.htmlのsetMode()にある説明文
+    // (最初のフレーム/キャラ・商品・雰囲気を参考)を踏襲しつつ、本画面向けに
+    // 文言を調整。テキストから動画・絵コンテでは画像追加欄自体が非表示のため
+    // ヒントも出さない。
+    const MODE_HINTS={
+      image_to_video:{main:'1枚の画像を最初のフレームとして、その続きの動きを作ります'},
+      reference_to_video:{main:'最大9枚の画像から、キャラ・服・商品・背景の特徴を参考に新しい動画を作ります',sub:'参考画像と同じ構図から始まるとは限りません'}
+    };
+    const ASSETS_LABELS={image_to_video:'開始画像を選ぶ',reference_to_video:'参考画像を追加（最大9枚）'};
+    const modeHintEl=$('modeHint');
+    if(modeHintEl){
+      const hint=MODE_HINTS[m];
+      if(hint){
+        modeHintEl.innerHTML=esc(hint.main)+(hint.sub?'<br>'+esc(hint.sub):'');
+        modeHintEl.style.display='block';
+      }else{
+        modeHintEl.textContent='';
+        modeHintEl.style.display='none';
+      }
+    }
+    const assetsLabelEl=$('assetsLabel');
+    if(assetsLabelEl)assetsLabelEl.textContent=ASSETS_LABELS[m]||'画像追加';
     $('assets').style.display=m==='text_to_video'?'none':'grid';
     $('file').multiple=m==='reference_to_video';
     const savedPrompt=readDraft()['prompt_'+m]||'';
