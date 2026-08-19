@@ -240,6 +240,27 @@
     syncCreditButton();
   }
 
+  // 「過去動画」欄の表示件数案内。APIは最大50件までしか返さないため、
+  // flowvid-history.jsが発行するflowvid:history-countイベント(生の取得件数と
+  // 実際に画面へ描画された件数の両方)を元に、50件未満なら「現在○件」、
+  // ちょうど50件なら「これより古い動画は表示されない」旨を出す。
+  // displayedCount(現在のモードタブでの絞り込み後の実描画件数)が0の場合は、
+  // 一覧が「まだ動画がありません」と空表示になっているのに「最新50件を表示中
+  // です」等の矛盾した案内が出ないよう、案内自体を非表示にする。countがnull
+  // (API失敗時のローカルフォールバック)の場合も件数が確認できないため出さない。
+  function updateHistoryCountNote(count,displayedCount){
+    const note=document.getElementById('fv-history-count-note');
+    if(!note)return;
+    if(count===null||count===undefined||!Number.isFinite(count)||!displayedCount){
+      note.textContent='';
+      note.style.display='none';
+      return;
+    }
+    note.style.display='block';
+    note.textContent=count>=50
+      ?'最新50件を表示中です。これより古い動画がある場合、この一覧には表示されません。'
+      :'現在'+count+'件を表示中（最大50件）';
+  }
   function ensureGenerateHistory(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.getElementById('history'))return;
@@ -248,14 +269,24 @@
     const section=document.createElement('section');
     section.className='section';
     section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button>';
+    // .sectionはdisplay:flexで見出し・ボタンを横並びにするレイアウトのため、
+    // 件数案内をsection内に置くと同じ行に詰まって窮屈になる(マイページ側で
+    // 問題がなかったのは、profile.htmlの案内が.tabsの外側の独立行に
+    // 置かれているため)。ここでもsectionの外に独立した行として置く。
+    const countNote=document.createElement('div');
+    countNote.id='fv-history-count-note';
+    countNote.style.cssText='display:none;margin:8px 2px 10px;color:rgba(255,255,255,.45);font-size:12px;line-height:1.5';
     const historyDiv=document.createElement('div');
     historyDiv.className='history';
     historyDiv.id='history';
     historyDiv.innerHTML='<div class="empty">履歴を読み込み中...</div>';
     main.appendChild(section);
+    main.appendChild(countNote);
     main.appendChild(historyDiv);
     const getMode=()=>document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
     if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode());
+    if(Number.isFinite(window.flowvidHistoryFetchedCount))updateHistoryCountNote(window.flowvidHistoryFetchedCount,window.flowvidHistoryDisplayedCount);
+    window.addEventListener('flowvid:history-count',e=>updateHistoryCountNote(e?.detail?.count,e?.detail?.displayedCount));
     section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode())};
   }
 
