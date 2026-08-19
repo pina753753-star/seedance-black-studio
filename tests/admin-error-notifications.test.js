@@ -83,18 +83,30 @@ test('通知UIと閲覧専用の確認済み保存を備える', () => {
   assert.match(source, /id="notificationBtn"/);
   assert.match(source, /id="notificationCount"/);
   assert.match(source, /pinaAdminAcknowledgedIssuesV1/);
-  // moderation_blocksを通知対象へ合算したことに伴い、初回基準化のキーを
-  // V2へ更新した(導入前の既存ブロックが一斉に未確認扱いになるのを防ぐため)。
-  assert.match(source, /pinaAdminAlertsInitializedV2/);
-  assert.match(script, /initializeAlertBaseline\(\)/);
+  // 生成エラーの初回基準化キーはV1のまま維持する。moderation_blocksは
+  // 別系統のデータのため、専用の初回基準化キー(MOD_ALERT_INITIALIZED_KEY)
+  // を独立して持つ(片方の基準化がもう片方の既存の未確認状態を消さない)。
+  assert.match(source, /pinaAdminAlertsInitializedV1/);
+  assert.match(source, /pinaAdminModAlertsInitializedV1/);
+  assert.match(script, /function initializeAlertBaseline\(\)/);
+  assert.match(script, /function initializeModAlertBaseline\(\)/);
   assert.match(source, /localStorage\.setItem/);
   assert.doesNotMatch(source, /localStorage[\s\S]{0,200}client\.from\([^)]*\)\.(insert|update|delete)/);
 });
 
-test('初回以前の失敗を通知対象外にし、新しい失敗だけを通知できる', () => {
-  assert.match(script, /writeAcknowledgedIssueKeys\(alertRowsCache\.map\(issueKey\)\)/);
-  // 通知対象は「対応が必要な生成エラー + moderation_blocks」の合算。
+test('初回以前の失敗を通知対象外にし、新しい失敗だけを通知できる(生成エラー・moderation_blocksは別基準)', () => {
+  assert.match(script, /writeAcknowledgedIssueKeys\(\[\.\.\.readAcknowledgedIssueKeys\(\),\.\.\.opsActionCache\.map\(issueKey\)\]\)/);
+  assert.match(script, /writeAcknowledgedIssueKeys\(\[\.\.\.readAcknowledgedIssueKeys\(\),\.\.\.modBlocksCache\.map\(issueKey\)\]\)/);
+  // 通知バッジの集計対象は「対応が必要な生成エラー + moderation_blocks」の合算。
   assert.match(script, /alertRowsCache=\[\.\.\.opsActionCache,\.\.\.modBlocksCache\]/);
+});
+
+test('moderation_blocksの初回基準化は読み込み成功時のみ実行する', () => {
+  assert.match(script, /const modLoaded=await loadModerationBlocks\(\);/);
+  assert.match(script, /if\(modLoaded\)initializeModAlertBaseline\(\);/);
+  // loadModerationBlocks自体は失敗時にfalseを返し、その結果をloadOpsが
+  // 見て判断する(黙って基準化フラグを立てない)。
+  assert.match(script, /async function loadModerationBlocks\(\)\{[\s\S]{0,400}return false/);
 });
 
 test('返金記録と自動再生成なしを過去失敗へ表示する', () => {
@@ -254,11 +266,41 @@ test('classification詳細をブロックカードのdetailsに表示する', ()
   assert.match(script, /classification,prompt,created_at/);
 });
 
-test('同一カテゴリが30分以内に2件以上発生した場合を過剰ブロックの疑いとして検出する', () => {
+test('同一カテゴリが30分以内に2件以上発生した場合を過剰ブロックの疑いとして検出し、対象時間帯外の同カテゴリカードは対象にしない', () => {
   assert.match(script, /EXCESSIVE_BLOCK_WINDOW_MS=30\*60\*1000/);
-  assert.match(script, /function detectExcessiveCategories\(rows\)/);
+  assert.match(script, /function detectExcessiveRowIds\(rows\)/);
   assert.match(script, /過剰ブロックの疑い/);
-  assert.match(script, /modExcessiveCategories=detectExcessiveCategories\(modBlocksCache\)/);
+  assert.match(script, /modExcessiveRowIds=detectExcessiveRowIds\(modBlocksCache\)/);
+  // カテゴリ単位のSetをそのまま各カードの判定に使っていた実装(修正前)を
+  // 復活させていないことを確認する。行id単位のSetへ切り替えたことで、
+  // 同じカテゴリでも30分の対象時間帯から外れたカードは強調されない。
+  assert.doesNotMatch(script, /categories\.some\(c=>modExcessiveRowIds\.has\(c\)\)/);
+  assert.match(script, /excessive=modExcessiveRowIds\.has\(r\.id\)/);
+
+  const detectSource = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  const detectMatch = detectSource.match(/function detectExcessiveRowIds\(rows\)\{([\s\S]*?)\n\}/);
+  assert.ok(detectMatch, 'detectExcessiveRowIdsの本体が見つかりません');
+  const detectFn = new Function('EXCESSIVE_BLOCK_WINDOW_MS', `${detectMatch[0]}\nreturn detectExcessiveRowIds;`)(30 * 60 * 1000);
+  const base = new Date('2026-08-20T00:00:00Z').getTime();
+  const rows = [
+    { id: 'old-1', categories: ['sexual'], created_at: new Date(base).toISOString() },
+    { id: 'old-2', categories: ['sexual'], created_at: new Date(base + 5 * 60 * 1000).toISOString() },
+    // old-1/old-2から3時間後: 同じカテゴリだが対象時間帯の外
+    { id: 'recent-1', categories: ['sexual'], created_at: new Date(base + 3 * 60 * 60 * 1000).toISOString() }
+  ];
+  const flagged = detectFn(rows);
+  assert.equal(flagged.has('old-1'), true);
+  assert.equal(flagged.has('old-2'), true);
+  assert.equal(flagged.has('recent-1'), false, '対象時間帯外の同カテゴリカードまでflaggedにしてはいけない');
+});
+
+test('ブロックカードにも確認済みボタンと通知キーがある', () => {
+  assert.match(script, /function modBlockCard\(r\)\{[\s\S]{0,600}data-issue-action="ack"/);
+  assert.match(script, /key=issueKey\(r\)/);
+  assert.match(script, /通知を確認済みにする/);
+  // acknowledgeIssue()はopsActionList(renderOpsGroups)とmodBlockList
+  // (renderModBlocks)の両方を再描画し、確認済みボタンの表示を即時反映する。
+  assert.match(script, /function acknowledgeIssue\(key\)\{[\s\S]{0,200}renderOpsGroups\(\);renderModBlocks\(\);/);
 });
 
 test('ブロック理由・モード・ユーザーで絞り込める', () => {
@@ -270,11 +312,11 @@ test('ブロック理由・モード・ユーザーで絞り込める', () => {
   assert.match(script, /data-mod-mode-filter/);
 });
 
-test('生成エラー一覧・ブロック一覧の両方に最新100件表示中の案内を出す', () => {
+test('生成エラー一覧・ブロック一覧の両方に、取得件数に関わらず100件上限の案内を出す', () => {
   assert.match(source, /id="opsActionCountNote"/);
   assert.match(source, /id="modBlockCountNote"/);
-  assert.match(script, /opsRowsCache\.length>=100\?'最新100件を表示中です/);
-  assert.match(script, /modBlocksCache\.length>=100\?`最新100件を表示中です/);
+  assert.match(script, /最新100件までを取得します。現在\$\{opsRowsCache\.length\}件を取得/);
+  assert.match(script, /最新100件までを取得します。現在\$\{modBlocksCache\.length\}件を取得/);
 });
 
 test('新規追加分もDBへのinsert/update/deleteを一切行わない(読み取り専用を維持)', () => {

@@ -62,13 +62,17 @@
 <script>
 const cfg=window.FLOWVID_AUTH||{},ADMIN_EMAIL='hinaran53@gmail.com';
 const client=cfg.supabaseUrl&&cfg.supabaseAnonKey?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
-const $=id=>document.getElementById(id);let currentUser=null,profilesCache=[],balancesCache=[],tasksCache=[],opsRowsCache=[],opsActionCache=[],opsMonitoringCache=[],opsResolvedCache=[],alertRowsCache=[],creditsCache=[],modBlocksCache=[],modExcessiveCategories=new Set(),taskVisible=20,opsVisible=20,creditsVisible=20,modBlocksVisible=20,taskFilter='all',modReasonFilter='all',modModeFilter='all',opsRefreshInFlight=false;
+const $=id=>document.getElementById(id);let currentUser=null,profilesCache=[],balancesCache=[],tasksCache=[],opsRowsCache=[],opsActionCache=[],opsMonitoringCache=[],opsResolvedCache=[],alertRowsCache=[],creditsCache=[],modBlocksCache=[],modExcessiveRowIds=new Set(),taskVisible=20,opsVisible=20,creditsVisible=20,modBlocksVisible=20,taskFilter='all',modReasonFilter='all',modModeFilter='all',opsRefreshInFlight=false;
 const ALERT_STORAGE_KEY='pinaAdminAcknowledgedIssuesV1';
-// v1では対応が必要な生成エラーだけを初回基準化していたが、通知対象へ
-// moderation_blocksを合算したことで、既存の管理者ブラウザでは導入前の
-// ブロック記録が一斉に未確認扱いになってしまう。バージョンを上げて、
-// 合算後の一覧を対象に基準を取り直す(一度だけ)。
-const ALERT_INITIALIZED_KEY='pinaAdminAlertsInitializedV2';
+// 対応が必要な生成エラーの初回基準化キー。v1のまま維持する(通知対象へ
+// moderation_blocksを合算しても、生成エラー側の既存の未確認状態を
+// 一括で確認済みにしてしまわないため)。
+const ALERT_INITIALIZED_KEY='pinaAdminAlertsInitializedV1';
+// moderation_blocks専用の初回基準化キー。生成エラーとは別系統のデータ
+// (取得元テーブルも読み込みタイミングも異なる)のため、基準化フラグも
+// 独立させる。moderation_blocksの読み込みが失敗した回はこのフラグを
+// 立てない(loadOps内でawait loadModerationBlocks()の成否を見て判断)。
+const MOD_ALERT_INITIALIZED_KEY='pinaAdminModAlertsInitializedV1';
 const OPS_REFRESH_MS=60000;
 // moderation_blocks.classification(jsonb)に記録される11項目。
 // api/_lib/fictional-action-classifier.jsのREQUIRED_BOOLEAN_FIELDSと一致
@@ -94,9 +98,14 @@ function classifyTaskIssue(t){const f=taskFacts(t),message=String(t.error_messag
 function issueKey(t){return[String(t.id||''),String(t.updated_at||t.created_at||''),String(t.status||'blocked')].join('|')}
 function readAcknowledgedIssueKeys(){try{const value=JSON.parse(localStorage.getItem(ALERT_STORAGE_KEY)||'[]');return Array.isArray(value)?value.filter(x=>typeof x==='string'):[]}catch{return[]}}
 function writeAcknowledgedIssueKeys(keys){try{localStorage.setItem(ALERT_STORAGE_KEY,JSON.stringify([...new Set(keys)].slice(-500)))}catch{}}
-function initializeAlertBaseline(){try{if(localStorage.getItem(ALERT_INITIALIZED_KEY)==='1')return;writeAcknowledgedIssueKeys(alertRowsCache.map(issueKey));localStorage.setItem(ALERT_INITIALIZED_KEY,'1')}catch{}}
+// 生成エラー(opsActionCache)とmoderation_blocks(modBlocksCache)は、それぞれ
+// 独立した初回基準化キーを持つ。どちらも「既存の確認済みキー一覧に追記する」
+// (上書きしない)ため、片方が既に基準化済みでも、もう片方の基準化で
+// 既存の確認済み状態を消さない。
+function initializeAlertBaseline(){try{if(localStorage.getItem(ALERT_INITIALIZED_KEY)==='1')return;writeAcknowledgedIssueKeys([...readAcknowledgedIssueKeys(),...opsActionCache.map(issueKey)]);localStorage.setItem(ALERT_INITIALIZED_KEY,'1')}catch{}}
+function initializeModAlertBaseline(){try{if(localStorage.getItem(MOD_ALERT_INITIALIZED_KEY)==='1')return;writeAcknowledgedIssueKeys([...readAcknowledgedIssueKeys(),...modBlocksCache.map(issueKey)]);localStorage.setItem(MOD_ALERT_INITIALIZED_KEY,'1')}catch{}}
 function updateNotificationBadge(){const acknowledged=new Set(readAcknowledgedIssueKeys()),count=alertRowsCache.filter(t=>!acknowledged.has(issueKey(t))).length,badge=$('notificationCount'),button=$('notificationBtn');badge.textContent=count>99?'99+':String(count);badge.hidden=count===0;button.classList.toggle('hasAlert',count>0);button.setAttribute('aria-label',count?`未確認の対応が必要な項目が${count}件あります（生成エラー・コンテンツフィルタブロック）`:'未確認の対応が必要な項目はありません')}
-function acknowledgeIssue(key){writeAcknowledgedIssueKeys([...readAcknowledgedIssueKeys(),key]);updateNotificationBadge();renderOpsGroups();$('opsStatus').textContent='通知を確認済みにしました。問題が直ったことを示す操作ではありません。'}
+function acknowledgeIssue(key){writeAcknowledgedIssueKeys([...readAcknowledgedIssueKeys(),key]);updateNotificationBadge();renderOpsGroups();renderModBlocks();$('opsStatus').textContent='通知を確認済みにしました。問題が直ったことを示す操作ではありません。'}
 function taskUserLabel(t){return profilesCache.find(p=>p.id===t.user_id)?.email||t.user_id||'不明'}
 function creditCostLabel(t){return t.credit_cost===null||t.credit_cost===undefined||t.credit_cost===''?'不明':String(Number(t.credit_cost))}
 function automaticHandlingLabel(t){const state=handlingState(t),ledger=taskLedgerFacts(t);if(state.kind==='resolved')return ledger.code==='refunded'?`自動対応済み：${ledger.charged}クレジットを全額返金済み`:'自動対応済み：クレジット消費記録なし';if(state.kind==='monitoring')return'自動復旧中：15分ごとの照合対象（2時間超の放置タスクは既存処理で自動返金）';if(state.kind==='action'&&taskFacts(t).statusFailed)return`要確認：${ledger.label}（消費 ${ledger.charged} / 返金 ${ledger.refunded}）。二重返金防止のため自動追加返金はしません。`;return''}
@@ -114,23 +123,25 @@ async function fetchTaskCreditRows(taskIds){if(!taskIds.length)return{data:[],er
 function tallyModBlockCategories(rows){const counts={};rows.forEach(r=>(r.categories||[]).forEach(c=>{counts[c]=(counts[c]||0)+1}));return counts}
 function renderModBlockCategoryGrid(rows){const counts=tallyModBlockCategories(rows),entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]),el=$('modBlockCategoryGrid');el.innerHTML=entries.length?entries.map(([cat,n])=>`<div class="reasonBox"><b>${n}</b><span>${esc(cat)}</span></div>`).join(''):'<div class="reasonBox"><b>0</b><span>ブロックなし</span></div>'}
 // 同一カテゴリのブロックが30分以内に2件以上発生した場合を「過剰ブロックの
-// 疑い」として検出する。カテゴリごとに時系列で隣接する2件の間隔が30分
-// (1800000ms)以内であれば、そのカテゴリ全体をflaggedとする(誤判定の
-// 連鎖・悪用の兆候を早期に把握するための表示のみで、自動遮断はしない)。
+// 疑い」として検出する。カテゴリ単位ではなく、実際に30分以内の隣接ペアと
+// なった行(id)だけをflaggedとする。以前はカテゴリ全体をflaggedにしていた
+// ため、同じカテゴリの古い(対象時間帯から外れた)カードにまで警告が
+// 表示される不具合があった(誤判定の連鎖・悪用の兆候を早期に把握するための
+// 表示のみで、自動遮断はしない)。
 const EXCESSIVE_BLOCK_WINDOW_MS=30*60*1000;
-function detectExcessiveCategories(rows){
+function detectExcessiveRowIds(rows){
   const byCategory={};
   rows.forEach(r=>(r.categories||[]).forEach(c=>{(byCategory[c]=byCategory[c]||[]).push(r)}));
-  const flagged=new Set();
-  Object.entries(byCategory).forEach(([cat,list])=>{
+  const flaggedIds=new Set();
+  Object.values(byCategory).forEach(list=>{
     if(list.length<2)return;
     const sorted=list.slice().sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
     for(let i=1;i<sorted.length;i++){
       const diff=new Date(sorted[i].created_at)-new Date(sorted[i-1].created_at);
-      if(diff>=0&&diff<=EXCESSIVE_BLOCK_WINDOW_MS){flagged.add(cat);break}
+      if(diff>=0&&diff<=EXCESSIVE_BLOCK_WINDOW_MS){flaggedIds.add(sorted[i].id);flaggedIds.add(sorted[i-1].id)}
     }
   });
-  return flagged;
+  return flaggedIds;
 }
 function classificationDetail(c){if(!c||typeof c!=='object')return '記録なし（二次判定を経由していないブロックです）';return CLASSIFICATION_FIELDS.map(f=>`${esc(f)}: ${c[f]===true?'true':c[f]===false?'false':'-'}`).join('<br>')}
 function distinctModValues(key){return[...new Set(modBlocksCache.map(r=>String(r[key]||'').trim()).filter(Boolean))].sort()}
@@ -148,16 +159,20 @@ function matchesModFilter(r){
   if(userQuery&&!taskUserLabel(r).toLowerCase().includes(userQuery))return false;
   return true;
 }
-function modBlockCard(r){const categories=r.categories||[],excessive=categories.some(c=>modExcessiveCategories.has(c)),warning=excessive?'<div class="operatorAction" style="background:rgba(251,113,133,.14);color:#fecdd3">⚠ 過剰ブロックの疑い：同一カテゴリが30分以内に複数件発生しています。誤判定の連鎖や悪用の可能性を確認してください。</div>':'';return `<div class="taskItem${excessive?' actionRequired':''}"><div class="taskTop"><b>${esc(categories.join('、')||'-')}</b><span class="badge">${esc(r.reason||'-')}</span></div>${warning}<div class="taskMeta">${esc(r.mode||'-')}<br>発生: ${fmt(r.created_at)}<br>対象ユーザー: ${esc(taskUserLabel(r))}</div><details><summary>プロンプトを表示</summary>${esc(r.prompt||'記録なし')}</details><details><summary>classification詳細を表示（11項目）</summary>${classificationDetail(r.classification)}</details></div>`}
-function renderModBlocks(){const filtered=modBlocksCache.filter(matchesModFilter),rows=filtered.slice(0,modBlocksVisible),el=$('modBlockList');renderModFilterBars();$('modBlockCountNote').textContent=modBlocksCache.length>=100?`最新100件を表示中です（これより古いブロック記録は表示されません）。絞り込み後：${filtered.length}件中${rows.length}件を表示`:`${modBlocksCache.length}件を取得（絞り込み後：${filtered.length}件中${rows.length}件を表示）`;el.innerHTML=rows.length?rows.map(modBlockCard).join(''):'<div class="empty">該当するブロックはありません</div>';$('moreModBlocksBtn').style.display=modBlocksVisible<filtered.length?'block':'none'}
-async function loadModerationBlocks(){const r=await client.from('moderation_blocks').select('id,user_id,mode,categories,reason,classification,prompt,created_at').order('created_at',{ascending:false}).limit(100);if(r.error){$('modBlockList').innerHTML='<div class="empty">読み取りエラー：'+esc(r.error.message)+'</div>';return false}modBlocksCache=r.data||[];modExcessiveCategories=detectExcessiveCategories(modBlocksCache);$('modBlockCount').textContent=modBlocksCache.length;renderModBlockCategoryGrid(modBlocksCache);modBlocksVisible=20;renderModBlocks();return true}
-async function loadOps(){const tr=await client.from('generation_tasks').select('id,user_id,api_task_id,api_provider,status,mode,model,credit_cost,output_url,error_message,created_at,updated_at').order('updated_at',{ascending:false}).limit(100);if(tr.error){$('opsStatus').textContent='読み取りエラー：'+tr.error.message;return false}opsRowsCache=tr.data||[];const cr=await fetchTaskCreditRows(opsRowsCache.map(t=>t.id).filter(Boolean));if(cr.error){$('opsStatus').textContent='クレジット照合エラー：'+cr.error.message;return false}creditsCache=cr.data||[];const states=opsRowsCache.map(handlingState),facts=opsRowsCache.map(taskFacts);opsActionCache=opsRowsCache.filter(t=>handlingState(t).kind==='action');opsMonitoringCache=opsRowsCache.filter(t=>handlingState(t).kind==='monitoring');opsResolvedCache=opsRowsCache.filter(t=>handlingState(t).kind==='resolved');const action=opsActionCache.length,monitoring=opsMonitoringCache.length,resolved=opsResolvedCache.length,healthy=states.filter(x=>x.kind==='healthy').length,past=facts.filter(x=>x.statusFailed).length;$('opsErrorCount').textContent=action;$('opsWarningCount').textContent=monitoring;$('opsHealthyCount').textContent=resolved;$('opsTotalCount').textContent=healthy;$('opsIssueCount').textContent=action;$('dashOpsErrorCount').textContent=action;$('dashOpsWarningCount').textContent=monitoring;$('dashOpsHealthyCount').textContent=resolved;$('dashOpsIssueCount').textContent=healthy;$('reasonFailedCount').textContent=past;$('reasonErrorMessageCount').textContent=facts.filter(x=>x.hasError).length;$('reasonMissingUrlCount').textContent=facts.filter(x=>x.missingUrl).length;$('reasonQueuedStaleCount').textContent=facts.filter(x=>x.queuedStale).length;$('reasonProcessingStaleCount').textContent=facts.filter(x=>x.processingStale).length;$('opsActionCountNote').textContent=opsRowsCache.length>=100?'最新100件を表示中です（これより古いタスクは表示されません）。':`${opsRowsCache.length}件を取得（対応が必要：${action}件）`;const now='最終更新：'+new Date().toLocaleString('ja-JP');$('opsStatus').textContent=now;$('dashOpsUpdated').textContent=now;opsVisible=20;creditsVisible=20;renderOpsGroups();renderCredits();
+function modBlockCard(r){const categories=r.categories||[],excessive=modExcessiveRowIds.has(r.id),warning=excessive?'<div class="operatorAction" style="background:rgba(251,113,133,.14);color:#fecdd3">⚠ 過剰ブロックの疑い：同一カテゴリが30分以内に複数件発生しています。誤判定の連鎖や悪用の可能性を確認してください。</div>':'',key=issueKey(r),acknowledged=new Set(readAcknowledgedIssueKeys()).has(key),ackButton=`<div class="issueButtons"><button class="issueBtn" data-issue-action="ack" data-issue-key="${esc(key)}">${acknowledged?'確認済み':'通知を確認済みにする'}</button></div>`;return `<div class="taskItem${excessive?' actionRequired':''}"><div class="taskTop"><b>${esc(categories.join('、')||'-')}</b><span class="badge">${esc(r.reason||'-')}</span></div>${warning}<div class="taskMeta">${esc(r.mode||'-')}<br>発生: ${fmt(r.created_at)}<br>対象ユーザー: ${esc(taskUserLabel(r))}</div><details><summary>プロンプトを表示</summary>${esc(r.prompt||'記録なし')}</details><details><summary>classification詳細を表示（11項目）</summary>${classificationDetail(r.classification)}</details>${ackButton}</div>`}
+function renderModBlocks(){const filtered=modBlocksCache.filter(matchesModFilter),rows=filtered.slice(0,modBlocksVisible),el=$('modBlockList');renderModFilterBars();$('modBlockCountNote').textContent=`最新100件までを取得します。現在${modBlocksCache.length}件を取得（絞り込み後：${filtered.length}件中${rows.length}件を表示）`;el.innerHTML=rows.length?rows.map(modBlockCard).join(''):'<div class="empty">該当するブロックはありません</div>';$('moreModBlocksBtn').style.display=modBlocksVisible<filtered.length?'block':'none'}
+async function loadModerationBlocks(){const r=await client.from('moderation_blocks').select('id,user_id,mode,categories,reason,classification,prompt,created_at').order('created_at',{ascending:false}).limit(100);if(r.error){$('modBlockList').innerHTML='<div class="empty">読み取りエラー：'+esc(r.error.message)+'</div>';return false}modBlocksCache=r.data||[];modExcessiveRowIds=detectExcessiveRowIds(modBlocksCache);$('modBlockCount').textContent=modBlocksCache.length;renderModBlockCategoryGrid(modBlocksCache);modBlocksVisible=20;renderModBlocks();return true}
+async function loadOps(){const tr=await client.from('generation_tasks').select('id,user_id,api_task_id,api_provider,status,mode,model,credit_cost,output_url,error_message,created_at,updated_at').order('updated_at',{ascending:false}).limit(100);if(tr.error){$('opsStatus').textContent='読み取りエラー：'+tr.error.message;return false}opsRowsCache=tr.data||[];const cr=await fetchTaskCreditRows(opsRowsCache.map(t=>t.id).filter(Boolean));if(cr.error){$('opsStatus').textContent='クレジット照合エラー：'+cr.error.message;return false}creditsCache=cr.data||[];const states=opsRowsCache.map(handlingState),facts=opsRowsCache.map(taskFacts);opsActionCache=opsRowsCache.filter(t=>handlingState(t).kind==='action');opsMonitoringCache=opsRowsCache.filter(t=>handlingState(t).kind==='monitoring');opsResolvedCache=opsRowsCache.filter(t=>handlingState(t).kind==='resolved');const action=opsActionCache.length,monitoring=opsMonitoringCache.length,resolved=opsResolvedCache.length,healthy=states.filter(x=>x.kind==='healthy').length,past=facts.filter(x=>x.statusFailed).length;$('opsErrorCount').textContent=action;$('opsWarningCount').textContent=monitoring;$('opsHealthyCount').textContent=resolved;$('opsTotalCount').textContent=healthy;$('opsIssueCount').textContent=action;$('dashOpsErrorCount').textContent=action;$('dashOpsWarningCount').textContent=monitoring;$('dashOpsHealthyCount').textContent=resolved;$('dashOpsIssueCount').textContent=healthy;$('reasonFailedCount').textContent=past;$('reasonErrorMessageCount').textContent=facts.filter(x=>x.hasError).length;$('reasonMissingUrlCount').textContent=facts.filter(x=>x.missingUrl).length;$('reasonQueuedStaleCount').textContent=facts.filter(x=>x.queuedStale).length;$('reasonProcessingStaleCount').textContent=facts.filter(x=>x.processingStale).length;$('opsActionCountNote').textContent=`最新100件までを取得します。現在${opsRowsCache.length}件を取得（対応が必要：${action}件）`;const now='最終更新：'+new Date().toLocaleString('ja-JP');$('opsStatus').textContent=now;$('dashOpsUpdated').textContent=now;opsVisible=20;creditsVisible=20;renderOpsGroups();renderCredits();
+  // 生成エラー側の初回基準化は、moderation_blocksの読み込み成否に関わらず
+  // ここで確定させる(このタスク取得自体は成功しているため)。
+  initializeAlertBaseline();
   // 🔔通知対象は「対応が必要な生成エラー + moderation_blocks」の合算。
-  // moderation_blocksの読み込み(loadModerationBlocks)が終わってから
-  // alertRowsCacheを確定させ、初回基準化・バッジ更新を行う。
-  await loadModerationBlocks();
+  // moderation_blocksの読み込みが成功した場合のみ、そちらの初回基準化を
+  // 行う(失敗時は基準化フラグを立てず、次回成功時に再試行させる)。
+  const modLoaded=await loadModerationBlocks();
+  if(modLoaded)initializeModAlertBaseline();
   alertRowsCache=[...opsActionCache,...modBlocksCache];
-  initializeAlertBaseline();updateNotificationBadge();
+  updateNotificationBadge();
   return true}
 async function autoRefreshOps(){if(!currentUser||document.visibilityState==='hidden'||opsRefreshInFlight)return;opsRefreshInFlight=true;try{await loadOps()}finally{opsRefreshInFlight=false}}
 async function fetchAllRows(table,columns){const pageSize=1000,allRows=[];const orderColumn=table==='profiles'?'id':'user_id';for(let from=0;;from+=pageSize){const result=await client.from(table).select(columns).order(orderColumn,{ascending:true}).range(from,from+pageSize-1);if(result.error)return{data:null,error:result.error};const rows=result.data||[];allRows.push(...rows);if(rows.length<pageSize)return{data:allRows,error:null}}}
