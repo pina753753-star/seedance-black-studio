@@ -423,3 +423,12 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
   - 実際に画面へ表示される件数(displayedCount)が0件の場合は案内を非表示
 - API・DB・課金・認証・生成処理には変更なし(フロント3ファイルのみ: flowvid-history.js、flowvid-open-inline.js、profile.html)
 - PR #173でmainへマージ、本番(pinastudio.jp)反映済み(マージコミット: 0cbd5a5)
+
+## 完了: リファレンス/画像から動画タブの説明文追加(2026-08-19)
+- 背景: 複数のベータテスターから「リファレンス」と「画像から動画」の違いがUI上でわかりにくいという指摘があった。調査の結果、内部処理(reference_urls vs first_frame_url)は明確に別だが、画面上に説明が一切なかったことが判明。
+- 対応: generate-prod.htmlの各タブに説明文・ラベルを追加。
+  - 「画像から動画」: 「1枚の画像を最初のフレームとして、その続きの動きを作ります」/ラベル「開始画像を選ぶ」
+  - 「リファレンス」: 「最大9枚の画像から、キャラ・服・商品・背景の特徴を参考に新しい動画を作ります」+補足「参考画像と同じ構図から始まるとは限りません」/ラベル「参考画像を追加(最大9枚)」
+  - 補足文言は、コード・OpenRouter仕様(input_references vs frame_images)の調査により事実確認済み
+- API・DB・料金計算ロジックには変更なし(generate-prod.htmlのみ)
+- PR #175でmainへマージ、本番(pinastudio.jp)反映済み(マージコミット: 2a6a7b6)
