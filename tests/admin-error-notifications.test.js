@@ -83,7 +83,9 @@ test('通知UIと閲覧専用の確認済み保存を備える', () => {
   assert.match(source, /id="notificationBtn"/);
   assert.match(source, /id="notificationCount"/);
   assert.match(source, /pinaAdminAcknowledgedIssuesV1/);
-  assert.match(source, /pinaAdminAlertsInitializedV1/);
+  // moderation_blocksを通知対象へ合算したことに伴い、初回基準化のキーを
+  // V2へ更新した(導入前の既存ブロックが一斉に未確認扱いになるのを防ぐため)。
+  assert.match(source, /pinaAdminAlertsInitializedV2/);
   assert.match(script, /initializeAlertBaseline\(\)/);
   assert.match(source, /localStorage\.setItem/);
   assert.doesNotMatch(source, /localStorage[\s\S]{0,200}client\.from\([^)]*\)\.(insert|update|delete)/);
@@ -91,7 +93,8 @@ test('通知UIと閲覧専用の確認済み保存を備える', () => {
 
 test('初回以前の失敗を通知対象外にし、新しい失敗だけを通知できる', () => {
   assert.match(script, /writeAcknowledgedIssueKeys\(alertRowsCache\.map\(issueKey\)\)/);
-  assert.match(script, /alertRowsCache=opsActionCache/);
+  // 通知対象は「対応が必要な生成エラー + moderation_blocks」の合算。
+  assert.match(script, /alertRowsCache=\[\.\.\.opsActionCache,\.\.\.modBlocksCache\]/);
 });
 
 test('返金記録と自動再生成なしを過去失敗へ表示する', () => {
@@ -192,8 +195,8 @@ test('一覧に分類・要約・対処・ユーザー・生のエラーを表�
   assert.match(script, /生のエラー/);
 });
 
-test('通知は対応が必要な項目だけを数え、開くだけでは確認済みにしない', () => {
-  assert.match(script, /alertRowsCache=opsActionCache/);
+test('通知は対応が必要な項目とブロック記録だけを数え、開くだけでは確認済みにしない', () => {
+  assert.match(script, /alertRowsCache=\[\.\.\.opsActionCache,\.\.\.modBlocksCache\]/);
   assert.doesNotMatch(script, /if\(name==='ops'\)acknowledgeCurrentErrors/);
   assert.match(script, /function acknowledgeIssue/);
 });
@@ -219,4 +222,65 @@ test('スマホ幅では通知追加後もヘッダーを縮める指定があ�
   assert.match(mobileCss, /\.logo\{width:36px;height:36px;min-width:36px/);
   assert.match(mobileCss, /\.notificationBtn\{min-width:39px;height:39px\}/);
   assert.match(mobileCss, /\.logoutBtn\{padding:9px;font-size:11px\}/);
+});
+
+// ---- ここから: moderation_blocksの通知統合・classification詳細・
+// 過剰ブロック検出・フィルター・件数案内の追加分 ----
+
+test('classification(11項目)がfictional-action-classifier.jsのREQUIRED_BOOLEAN_FIELDSと一致する', () => {
+  const classifierSource = fs.readFileSync(
+    path.join(__dirname, '..', 'api', '_lib', 'fictional-action-classifier.js'),
+    'utf8'
+  );
+  const fieldsMatch = classifierSource.match(/const REQUIRED_BOOLEAN_FIELDS = \[([\s\S]*?)\];/);
+  assert.ok(fieldsMatch, 'REQUIRED_BOOLEAN_FIELDSが見つかりません');
+  const expectedFields = fieldsMatch[1]
+    .split(',')
+    .map((s) => s.trim().replace(/^'|'$/g, ''))
+    .filter(Boolean);
+  assert.equal(expectedFields.length, 11);
+  const adminFieldsMatch = script.match(/CLASSIFICATION_FIELDS=\[([\s\S]*?)\];/);
+  assert.ok(adminFieldsMatch, 'admin.htmlにCLASSIFICATION_FIELDSが見つかりません');
+  const adminFields = adminFieldsMatch[1]
+    .split(',')
+    .map((s) => s.trim().replace(/^'|'$/g, ''))
+    .filter(Boolean);
+  assert.deepEqual(adminFields, expectedFields);
+});
+
+test('classification詳細をブロックカードのdetailsに表示する', () => {
+  assert.match(script, /function classificationDetail\(c\)/);
+  assert.match(script, /classification詳細を表示（11項目）/);
+  assert.match(script, /classification,prompt,created_at/);
+});
+
+test('同一カテゴリが30分以内に2件以上発生した場合を過剰ブロックの疑いとして検出する', () => {
+  assert.match(script, /EXCESSIVE_BLOCK_WINDOW_MS=30\*60\*1000/);
+  assert.match(script, /function detectExcessiveCategories\(rows\)/);
+  assert.match(script, /過剰ブロックの疑い/);
+  assert.match(script, /modExcessiveCategories=detectExcessiveCategories\(modBlocksCache\)/);
+});
+
+test('ブロック理由・モード・ユーザーで絞り込める', () => {
+  assert.match(script, /function matchesModFilter\(r\)/);
+  assert.match(script, /modReasonFilter/);
+  assert.match(script, /modModeFilter/);
+  assert.match(source, /id="modUserFilterInput"/);
+  assert.match(script, /data-mod-reason-filter/);
+  assert.match(script, /data-mod-mode-filter/);
+});
+
+test('生成エラー一覧・ブロック一覧の両方に最新100件表示中の案内を出す', () => {
+  assert.match(source, /id="opsActionCountNote"/);
+  assert.match(source, /id="modBlockCountNote"/);
+  assert.match(script, /opsRowsCache\.length>=100\?'最新100件を表示中です/);
+  assert.match(script, /modBlocksCache\.length>=100\?`最新100件を表示中です/);
+});
+
+test('新規追加分もDBへのinsert/update/deleteを一切行わない(読み取り専用を維持)', () => {
+  const newLogicStart = script.indexOf('function tallyModBlockCategories');
+  const newLogicEnd = script.indexOf('async function loadOps');
+  const newLogic = script.slice(newLogicStart, newLogicEnd);
+  assert.ok(newLogic.length > 0);
+  assert.doesNotMatch(newLogic, /\.(insert|update|delete)\(/);
 });
