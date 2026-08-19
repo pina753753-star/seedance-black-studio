@@ -228,7 +228,7 @@ test('二次判定API timeoutは503 secondary_classifier_unavailableで停止', 
   assert.equal(result.reason, 'secondary_classifier_unavailable');
 });
 
-test('危険項目が1つでもtrueなら422 classification_blocked', async () => {
+test('重大危害をエフェクトで隠す場面は422 classification_blocked', async () => {
   const result = await resolveModerationDecision(
     'アニメ。剣で胸を刺す瞬間を白い閃光で隠す。',
     {
@@ -253,6 +253,34 @@ test('危険項目が1つでもtrueなら422 classification_blocked', async () =
   assert.equal(result.allow, false);
   assert.equal(result.status, 422);
   assert.equal(result.reason, 'classification_blocked');
+});
+
+test('架空の非グラフィックな決着はlethal診断だけでブロックしない', async () => {
+  const result = await resolveModerationDecision(
+    '日本アニメ調。成人の主人公と黒豹が連携し、赤い装甲獣の胸部コアへ精密射撃する。火花が飛び、装甲獣は停止する。流血、傷、欠損、苦痛、処刑はない。',
+    {
+      ok: true,
+      flagged: true,
+      categories: ['violence'],
+      categoryAppliedInputTypes: { violence: ['text', 'image'] },
+      flaggedImageUrls: ['https://example.com/armored-beast.png'],
+      reviewImageUrls: ['https://example.com/armored-beast.png']
+    },
+    {
+      apiKey: 'test',
+      fetchImpl: async () => mockResponse(200, {
+        output_text: JSON.stringify(safeAllow({
+          lethal_or_maiming_action: true,
+          non_graphic_action: true
+        }))
+      })
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.allow, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.reason, 'safe_fictional_non_graphic_action');
 });
 
 test('年齢外見項目だけがfalseでも安全な架空アニメなら許可', async () => {
