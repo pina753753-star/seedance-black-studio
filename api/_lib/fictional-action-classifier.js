@@ -124,7 +124,6 @@ function allSafetyConditionsSatisfied(value) {
     && value.real_person_target === false
     && value.minor_harm === false
     && value.graphic_injury === false
-    && value.lethal_or_maiming_action === false
     && value.torture_or_execution === false
     && value.sexual_violence === false
     && value.weapon_instruction === false
@@ -226,12 +225,15 @@ function buildClassifierPrompt(prompt, contradictions = [], hasImages = false) {
     '- real_person_target is true when a real identifiable person is targeted, impersonated, attacked, or depicted without a clearly fictional-original context.',
     '- minor_harm is true for actual injury, abuse, exploitation, sexual content, targeted realistic assault, cruelty, torture, prolonged suffering, or other actual harm involving a minor. Do not mark ordinary non-injurious general-audience fantasy action as minor_harm solely because a fictional minor participates.',
     '- graphic_injury is true for heavy or extensive blood, open wounds, visible organs, gore, dismemberment, severed limbs, exposed bone, or emphasized corpses.',
-    '- lethal_or_maiming_action is true for killing, execution, dismemberment, amputation, deliberate crippling, or a clearly lethal shooting or stabbing.',
+    '- lethal_or_maiming_action is true for killing, dismemberment, amputation, deliberate crippling, or a clearly lethal shooting or stabbing. This field is diagnostic and does not by itself make an otherwise safe fictional non-graphic action disallowed.',
     '- torture_or_execution is true for torture, execution, prolonged suffering, or sadistic harm.',
     '- sexual_violence is true for any sexual assault, coercion, or sexualized violence.',
-    '- weapon_instruction is true for practical real-world instructions to build, modify, aim, operate, or use a weapon to injure someone. Mere fictional weapon presence or ordinary non-instructional action is not enough.',
+    '- weapon_instruction is true for practical real-world instructions to build, modify, aim, operate, or use a weapon to injure someone. Mere fictional weapon presence, shot counts, fictional weak points, action choreography, camera directions, or ordinary non-instructional action are not enough.',
     '- effects_hide_serious_harm is true when flashes, smoke, silhouettes, or camera cuts merely conceal an otherwise serious stabbing, shooting, killing, or dismemberment.',
-    '- non_graphic_action is true only for general-audience action such as pursuit, evasion, vehicle action, fantasy combat, sparks, smoke, energy effects, or non-graphic impacts without serious visible injury.',
+    '- non_graphic_action is true for general-audience action such as pursuit, evasion, vehicle action, fantasy combat, sparks, smoke, energy effects, or non-graphic impacts without serious visible injury.',
+    '- lethal_or_maiming_action and non_graphic_action are independent diagnostics. In a clearly fictional scene, an implied defeat or lethal outcome may set lethal_or_maiming_action true and non_graphic_action true at the same time when there is no serious visible injury, blood, open wound, gore, dismemberment, emphasized corpse, prolonged suffering, torture, execution, real-person targeting, or minor harm.',
+    '- For original anime action against a fantasy monster, armored beast, robot, drone, or machine, shots or strikes against a fictional core, armor, joints, controls, or weak points; sparks; loss of power; collapse; shutdown; destruction; or defeat are non_graphic_action when no serious visible injury, blood, open wound, gore, dismemberment, or suffering is shown.',
+    '- Do not set non_graphic_action false solely because a fictional enemy is defeated, stops moving, loses power, or the attack is described as a finishing move. Evaluate the visible injury and protected-target facts instead.',
     '- An ordinary original fictional anime character with no concrete minor indicator may comically swat at, chase, or battle a mosquito or ordinary pest; this is ordinarily non-graphic action and does not by itself constitute lethal_or_maiming_action.',
     '- Block pest scenes that add graphic crushing, dismemberment, prolonged suffering, torture, sexual content, harm to a minor, harm to a real person, or practical instructions for injuring living beings.',
     '',
@@ -245,8 +247,9 @@ function buildClassifierPrompt(prompt, contradictions = [], hasImages = false) {
     '- A 16-year-old enemy soldier or a child soldier is attacked in a militarized battle. Set adult_or_nonhuman_only false, minor_harm true, and non_graphic_action false because this is child exploitation or targeted realistic assault, not ordinary fantasy adventure.',
     '- For scenes with multiple relevant characters, evaluate every character. If any relevant character has a concrete minor indicator, adult_or_nonhuman_only must be false for the whole scene.',
     '- An adult woman and a 12-year-old fairy fight together. adult_or_nonhuman_only must be false because one relevant character has an explicit minor indicator.',
+    '- In an original Japanese-anime-style gun action, an adult heroine and a black panther coordinate precise shots against the glowing core of a red armored beast. The beast emits sparks, loses power, and stops without blood, wounds, dismemberment, suffering, or an execution. Set fictional_setting true, graphic_injury false, torture_or_execution false, weapon_instruction false, effects_hide_serious_harm false, and non_graphic_action true. lethal_or_maiming_action may be true or false depending on whether the defeat is clearly lethal, but that field alone does not change non_graphic_action.',
     '',
-    'Weapons may appear in a fictional action scene, but heavy blood, gore, open wounds, killing, maiming, torture, execution, sexual violence, actual injury or abuse of minors, child exploitation, real-person targeting, and practical weapon instruction must remain blocked.',
+    'Weapons and decisive finishing attacks may appear in a fictional action scene. Heavy blood, gore, open wounds, emphasized serious visible injury, dismemberment, torture, execution, sexual violence, actual injury or abuse of minors, child exploitation, real-person targeting, and practical real-world weapon instruction must remain blocked.',
     'When required safety facts are genuinely unclear, use the safer value. Do not relax any safety rule.'
   ];
 
