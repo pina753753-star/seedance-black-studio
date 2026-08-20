@@ -5,6 +5,7 @@ const { requireConfirmedAuth } = require('./confirmed-auth.js');
 const { checkGenerationControl, REFUND_UNCONFIRMED_MESSAGE } = require('./generation-control.js');
 const { calculateVideoCreditCost } = require('./video-pricing.js');
 const { DEFAULT_MODEL, validateVideoGenerationOptions } = require('./video-model-validation.js');
+const { buildProviderPrompt } = require('./video-provider-prompt.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 
@@ -525,10 +526,15 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // Keep the user's original prompt in the task/history. Seedance 2.5 receives
+    // an internal audio-only constraint at the provider boundary so its native
+    // audio does not invent music that may trigger output copyright checks.
+    const providerPrompt = buildProviderPrompt({ model, prompt, generateAudio: true });
+
     // Build OpenRouter payload
     const payload = {
       model,
-      prompt,
+      prompt: providerPrompt,
       duration,
       resolution,
       aspect_ratio: aspectRatio,
