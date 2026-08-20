@@ -68,18 +68,30 @@ assert.equal(calculateVideoCreditCost({
   mode: 'image_to_video',
   resolution: '720p',
   duration: 5
-}), 150);
+}), 95);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'text_to_video',
+  resolution: '720p',
+  duration: 15
+}), 275);
 assert.equal(calculateVideoCreditCost({
   model: 'bytedance/seedance-2.5',
   mode: 'reference_to_video',
   resolution: '720p',
   duration: 30
-}), 830);
+}), 550);
 assert.equal(calculateVideoCreditCost({
   model: 'bytedance/seedance-2.5',
   mode: 'storyboard',
   resolution: '720p',
   duration: 30
-}), 555);
+}), 550);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'image_to_video',
+  resolution: '480p',
+  duration: 30
+}), 245);
 
 console.log(`video pricing regression passed: ${cases} Seedance combinations`);

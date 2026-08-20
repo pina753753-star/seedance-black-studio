@@ -259,8 +259,10 @@ function clearAcceptedGenerationInputs(submission){
   if(imagesCleared||submission.mode==='text_to_video')renderAssets();
 }
 const SEEDANCE_25_MODEL='bytedance/seedance-2.5';
-function pricingMultiplier(model){return model===SEEDANCE_25_MODEL?10.7/7:(model==='bytedance/seedance-2.0-fast'||model==='bytedance/seedance-2.0-lite'?0.8:1)}
-function pricingMaxCredits(model){return model===SEEDANCE_25_MODEL?850:400}
+const SEEDANCE_25_MAX_CREDITS=550;
+const SEEDANCE_25_CREDITS_PER_SECOND={'480p':245/30,'720p':550/30};
+function pricingMultiplier(model){return model==='bytedance/seedance-2.0-fast'||model==='bytedance/seedance-2.0-lite'?0.8:1}
+function pricingMaxCredits(model){return model===SEEDANCE_25_MODEL?SEEDANCE_25_MAX_CREDITS:400}
 function roundUpToFive(v,maxCredits=400){return Math.ceil(Math.max(50,Math.min(maxCredits,v))/5)*5;}
 const PRICING_SAFETY_MULTIPLIER=1.15;
 function creditEstimate(){const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const model=$('model')?.value||'bytedance/seedance-2.0-fast';
@@ -268,7 +270,7 @@ function creditEstimate(){const duration=Number($('duration')?.value||5);const r
   // 通常のリファレンスタブは画像の内容にかかわらず実際のアップロード完了枚数(urls.length)、
   // image_to_videoは1枚、text_to_videoは0枚とする。
   const refs=mode==='text_to_video'?0:(sbLocked?1:(mode==='image_to_video'?1:urls.length));
-  const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12)*(model===SEEDANCE_25_MODEL?multiplier:1),maxCredits);let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);}
+  if(model===SEEDANCE_25_MODEL){const creditsPerSecond=SEEDANCE_25_CREDITS_PER_SECOND[resolution]||SEEDANCE_25_CREDITS_PER_SECOND['720p'];return roundUpToFive(duration*creditsPerSecond,SEEDANCE_25_MAX_CREDITS);}const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12),maxCredits);let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);}
 function updateCreditUi(){
   const c=creditEstimate();
   const btn=$('create');

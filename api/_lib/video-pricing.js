@@ -5,13 +5,18 @@ const { getVideoModel, isGenerationEnabledModel } = require('./video-models');
 const MIN_CREDITS = 50;
 const MAX_CREDITS = 400;
 const PRICING_SAFETY_MULTIPLIER = 1.15;
+const SEEDANCE_25_MAX_CREDITS = 550;
+const SEEDANCE_25_CREDITS_PER_SECOND = Object.freeze({
+  '480p': 245 / 30,
+  '720p': 550 / 30
+});
 
 const PRICING_PROFILES = Object.freeze({
   seedance_standard_v1: Object.freeze({ modelMultiplier: 1.0, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
   seedance_fast_v1: Object.freeze({ modelMultiplier: 0.8, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
   seedance_lite_v1: Object.freeze({ modelMultiplier: 0.8, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
-  // OpenRouter video-token SKU: Seedance 2.5 $0.0000107 vs 2.0 $0.000007.
-  seedance_2_5_v1: Object.freeze({ modelMultiplier: 10.7 / 7, storyboardMultiplier: 10.7 / 7, maxCredits: 850 })
+  // Dedicated duration/resolution pricing is applied below for Seedance 2.5.
+  seedance_2_5_v1: Object.freeze({ modelMultiplier: 1.0, storyboardMultiplier: 1.0, maxCredits: SEEDANCE_25_MAX_CREDITS })
 });
 
 function roundUpToFive(value, maxCredits = MAX_CREDITS) {
@@ -37,6 +42,12 @@ function calculateVideoCreditCost(input) {
     const error = new Error('Pricing profile is not configured.');
     error.code = 'pricing_not_configured';
     throw error;
+  }
+
+  if (modelId === 'bytedance/seedance-2.5') {
+    const creditsPerSecond = SEEDANCE_25_CREDITS_PER_SECOND[resolution]
+      || SEEDANCE_25_CREDITS_PER_SECOND['720p'];
+    return roundUpToFive(duration * creditsPerSecond, profile.maxCredits);
   }
 
   if (mode === 'storyboard') {
