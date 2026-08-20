@@ -452,3 +452,13 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
   - 貼り付け禁止処理は追加していない(パスワードマネージャー利用者の利便性を優先)
 - Supabase Auth呼び出し(signUp/signInWithPassword)、CAPTCHA処理、authMessage()には変更なし(login.htmlのみ変更)
 - PR #180でmainへマージ、本番(pinastudio.jp)反映済み(マージコミット: b8671ab)
+
+## 完了: 動画編集タブの「過去動画」欄整理(2026-08-19)
+- 背景: 動画編集タブには他タブと共通の「過去動画」欄が表示されていたが、動画編集は生成方式ではないため常に空表示になっていた。既存の非表示処理(setLegacyVisibility())はDOM構造の想定が実態とズレていて機能していなかった。
+- 対応: flowvid-open-inline.js・flowvid-video-edit-vllo.jsを修正。
+  - 共通履歴(見出し・件数表示・履歴本体)を専用ラッパー#generationHistorySectionで囲む
+  - 共有関数syncGenerationHistoryVisibility()を新設(window.flowvidSyncGenerationHistoryVisibilityとして公開)し、タブクリック時・初期復元時・履歴DOM作成直後の3タイミングすべてで呼び出す
+  - 動画編集タブでは#generationHistorySectionを非表示にし、同じ位置に#veVlloHistorySection(編集済み動画)を配置
+  - 他タブでは通常通り#generationHistorySectionを表示
+- flowvid-history.jsの取得・絞り込み処理、api/generated-videos.js、api/video-edit-history.js、veList(編集素材選択)には変更なし
+- PR #182でmainへマージ、本番(pinastudio.jp)反映済み(マージコミット: 4ad5e62)
