@@ -118,7 +118,15 @@
 
     const shell=document.createElement('div');
     shell.className='ve-vllo-shell';
-    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div><div class="ve-vllo-history" id="veVlloHistorySection"><div class="ve-vllo-history-title">編集済み動画</div><div class="ve-vllo-history-empty" id="veVlloHistoryEmpty" style="display:none">まだ編集済みの動画はありません。</div><div class="ve-vllo-history-list" id="veVlloHistoryList"></div><button type="button" class="ve-vllo-history-more" id="veVlloHistoryMore" style="display:none">もっと見る</button></div>`;
+    shell.innerHTML=`<div class="ve-vllo-topbar"><div class="ve-vllo-title">動画編集</div><div class="ve-vllo-count" id="veVlloCount">0 / 6クリップ</div></div><div class="ve-vllo-preview" id="veVlloPreview"><div class="ve-vllo-preview-empty">下の＋から素材を追加してください</div></div><div class="ve-vllo-stage"><div class="ve-vllo-ruler"><span id="veVlloCurrent">00:00</span><span>タイムライン</span><span id="veVlloTotal">00:00</span></div><div class="ve-vllo-timeline-wrap" id="veVlloTimelineWrap"><div class="ve-vllo-timeline" id="veVlloTimeline"></div></div><div class="ve-vllo-sequence"><button type="button" id="veVlloSequence">▶ 全クリップを通し再生</button></div><div id="veVlloTrim"></div></div><div class="ve-vllo-actions"><button type="button" class="ve-vllo-tool" id="veVlloAdd"><strong>＋</strong><span>素材</span></button><button type="button" class="ve-vllo-tool" id="veVlloUp"><strong>←</strong><span>前へ</span></button><button type="button" class="ve-vllo-tool" id="veVlloDown"><strong>→</strong><span>後ろへ</span></button><button type="button" class="ve-vllo-tool danger" id="veVlloRemove"><strong>⌫</strong><span>削除</span></button></div>`;
+
+    // 「編集済み動画」欄は、意味のない「過去動画」欄(#generationHistorySection、
+    // flowvid-open-inline.js側で生成)と表示を排他的に切り替えるため、shellの
+    // 内部ではなく#videoEditSectionの直接の末尾の子として独立させて配置する。
+    const historySection=document.createElement('div');
+    historySection.className='ve-vllo-history';
+    historySection.id='veVlloHistorySection';
+    historySection.innerHTML='<div class="ve-vllo-history-title">編集済み動画</div><div class="ve-vllo-history-empty" id="veVlloHistoryEmpty" style="display:none">まだ編集済みの動画はありません。</div><div class="ve-vllo-history-list" id="veVlloHistoryList"></div><button type="button" class="ve-vllo-history-more" id="veVlloHistoryMore" style="display:none">もっと見る</button>';
 
     const shade=document.createElement('div');
     shade.className='ve-vllo-material-shade';
@@ -126,6 +134,8 @@
     shade.querySelector('.ve-vllo-material-sheet').appendChild(list);
     document.body.appendChild(shade);
     section.insertBefore(shell,loading||section.firstChild);
+    section.appendChild(historySection);
+    if(typeof window.flowvidSyncGenerationHistoryVisibility==='function')window.flowvidSyncGenerationHistoryVisibility();
 
     const originalRenderList=veRenderList;
     const originalAddClip=veAddClip;
@@ -284,7 +294,12 @@
     function selected(){if(!veSelected.length)return null;let c=getClip(activeClipId);if(!c){c=veSelected[0];activeClipId=c.clipId}return c}
     function clock(v){v=Math.max(0,Number(v)||0);return String(Math.floor(v/60)).padStart(2,'0')+':'+String(Math.floor(v%60)).padStart(2,'0')}
     function selectedOffset(c){let total=0;for(const item of veSelected){if(item.clipId===c.clipId)break;total+=Math.max(0,item.end-item.start)}return total}
-    function setLegacyVisibility(){const editing=document.querySelector('.tabs button[data-mode="video_edit"]')?.classList.contains('on');const history=document.getElementById('history');const heading=history?.previousElementSibling;if(history)history.style.display=editing?'none':'';if(heading?.classList.contains('section'))heading.style.display=editing?'none':''}
+    // previousElementSibling頼りの旧実装はDOM構造の想定と実態がズレて機能して
+    // いなかった。表示切り替えはflowvid-open-inline.js側の共有関数(明示的な
+    // ID指定、#generationHistorySection/#veVlloHistorySectionの両方を同期)に
+    // 委譲する。関数名はタブクリック時のイベントリスナー等、既存の呼び出し
+    // 箇所をそのまま維持するために残している。
+    function setLegacyVisibility(){if(typeof window.flowvidSyncGenerationHistoryVisibility==='function')window.flowvidSyncGenerationHistoryVisibility()}
     function seekVideo(video,target){return new Promise(resolve=>{if(!video||!Number.isFinite(target)){resolve();return}const max=Math.max(0,(Number(video.duration)||target+.1)-.05);const safe=Math.min(Math.max(0,target),max);if(Math.abs((Number(video.currentTime)||0)-safe)<.04){resolve();return}let done=false;const finish=()=>{if(done)return;done=true;clearTimeout(timer);video.removeEventListener('seeked',finish);resolve()};const timer=setTimeout(finish,1200);video.addEventListener('seeked',finish,{once:true});try{video.currentTime=safe}catch(_){finish()}})}
     function waitMetadata(video){return new Promise(resolve=>{if(video.readyState>=1){resolve();return}let done=false;const finish=()=>{if(done)return;done=true;clearTimeout(timer);video.removeEventListener('loadedmetadata',finish);resolve()};const timer=setTimeout(finish,1500);video.addEventListener('loadedmetadata',finish,{once:true})})}
     function updatePlayhead(c,time){if(!c)return;const duration=Math.max(.1,c.end-c.start);const progress=Math.max(0,Math.min(1,((Number(time)||c.start)-c.start)/duration));document.querySelectorAll('.ve-vllo-clip-playhead').forEach(el=>el.style.display='none');const clipEl=document.querySelector('[data-select="'+CSS.escape(c.clipId)+'"]');let head=clipEl?.querySelector('.ve-vllo-clip-playhead');if(!head&&clipEl){head=document.createElement('span');head.className='ve-vllo-clip-playhead';clipEl.appendChild(head)}if(head){head.style.display='block';head.style.left=(progress*100)+'%'}const current=document.getElementById('veVlloCurrent');if(current)current.textContent=clock(selectedOffset(c)+progress*duration)}
