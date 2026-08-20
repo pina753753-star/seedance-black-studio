@@ -43,6 +43,10 @@
         <form class="form" id="authForm">
           <div class="field"><label>メールアドレス</label><input id="email" type="email" placeholder="you@example.com" autocomplete="email" required></div>
           <div class="field"><label>パスワード</label><input id="password" type="password" placeholder="8文字以上" autocomplete="current-password" required></div>
+          <div class="field" id="passwordConfirmField" hidden>
+            <label for="passwordConfirm">パスワード（確認用）</label>
+            <input id="passwordConfirm" type="password" placeholder="もう一度入力してください" autocomplete="new-password">
+          </div>
           <div class="field" id="birthDateField" hidden>
             <label for="birthDate">生年月日</label>
             <input id="birthDate" type="date" autocomplete="bday">
@@ -68,6 +72,8 @@
     const form=document.getElementById('authForm');
     const email=document.getElementById('email');
     const password=document.getElementById('password');
+    const passwordConfirmField=document.getElementById('passwordConfirmField');
+    const passwordConfirm=document.getElementById('passwordConfirm');
     const birthDateField=document.getElementById('birthDateField');
     const birthDate=document.getElementById('birthDate');
     const message=document.getElementById('message');
@@ -171,6 +177,8 @@
       signupTab.classList.toggle('active',isSignup);
       submitBtn.textContent=isSignup?'アカウント作成':'ログインする';
       password.autocomplete=isSignup?'new-password':'current-password';
+      passwordConfirmField.hidden=!isSignup;
+      passwordConfirm.required=isSignup;
       birthDateField.hidden=!isSignup;
       birthDate.required=isSignup;
       try{
@@ -178,7 +186,10 @@
       }catch(error){
         birthDate.removeAttribute('max');
       }
-      if(!isSignup)birthDate.value='';
+      if(!isSignup){
+        birthDate.value='';
+        passwordConfirm.value='';
+      }
       clearMessage();
     }
     function showRedirectMessage(){
@@ -215,6 +226,7 @@
       const pass=password.value;
       let result;
       if(mode==='signup'){
+        if(pass!==passwordConfirm.value){setMessage('パスワードが一致しません。','error');passwordConfirm.focus();return;}
         const value=birthDate.value;
         const parsed=parseBirthDate(value);
         if(!value){setMessage('生年月日を入力してください。','error');birthDate.focus();return;}
