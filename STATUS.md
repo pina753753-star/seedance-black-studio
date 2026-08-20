@@ -441,3 +441,14 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
   - APIから返されるdetected_cuts(検出カット数)を「◯カットの絵コンテとして認識しました」として表示
 - api/storyboard-prompt.js等の生成ロジック、クレジット計算、課金・認証・モデレーション処理には変更なし(generate-prod.htmlのみ)
 - PR #178でmainへマージ、本番(pinastudio.jp)反映済み(マージコミット: 24d3e72)
+
+## 完了: 新規登録フォームへのパスワード確認欄追加(2026-08-19)
+- 背景: ベータテスターから「確認用にパスワード再入力があると親切」というフィードバックがあった。
+- 対応: login.htmlの新規登録フォームに、パスワード確認欄(#passwordConfirmField)を追加。
+  - autocomplete="new-password"を設定
+  - ログインモード時は非表示・非required(生年月日欄と同じパターン)
+  - モード切り替え時に値・エラー表示をクリア
+  - signup送信時、パスワードと確認用が不一致ならSupabase Auth呼び出し前に「パスワードが一致しません。」とエラー表示し、送信を止める
+  - 貼り付け禁止処理は追加していない(パスワードマネージャー利用者の利便性を優先)
+- Supabase Auth呼び出し(signUp/signInWithPassword)、CAPTCHA処理、authMessage()には変更なし(login.htmlのみ変更)
+- PR #180でmainへマージ、本番(pinastudio.jp)反映済み(マージコミット: b8671ab)
