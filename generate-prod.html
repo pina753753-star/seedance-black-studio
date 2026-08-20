@@ -59,6 +59,7 @@
 
 <!-- 通常生成カード -->
 <section class="card" id="mainCard">
+<div id="sbConfirmNotice" style="display:none;margin-bottom:12px;background:rgba(134,239,172,.07);border:1px solid rgba(134,239,172,.28);border-radius:14px;padding:12px 14px;color:#86efac;font-size:12px;font-weight:700;line-height:1.6"></div>
 <div id="sbLockNotice" style="display:none;margin-bottom:12px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.28);border-radius:14px;padding:12px 14px;color:#8ed8ff;font-size:12px;font-weight:700;line-height:1.6">画像・秒数・アスペクト比は、生成したプロンプトの内容と対応しているため変更できません。変更する場合は下の「絵コンテを作り直す」を押してください。</div>
 <button class="create" id="sbRedoBtn" type="button" style="display:none;margin-bottom:12px;background:#2b303a;color:#fff;font-size:14px;padding:12px 14px">絵コンテを作り直す ↺</button>
 <div id="modeHint" style="display:none;margin-bottom:10px;color:#9ca3af;font-size:12px;line-height:1.6"></div>
@@ -75,6 +76,15 @@
 <!-- 絵コンテセクション: 絵コンテ画像1枚→Claudeが単一の統合プロンプトを生成→
      既存のreference_to_video生成フロー(mainCard/start())へそのまま引き継ぐ -->
 <section id="sbSection" style="display:none">
+  <div id="sbHint" style="margin-bottom:12px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.28);border-radius:14px;padding:12px 14px;color:#c8cad6;font-size:12px;line-height:1.8">
+    複数のカットを1枚にまとめた絵コンテ画像から、AIが動画用プロンプトを作ります。<br>
+    ①画像を選ぶ → ②プロンプトを作る（無料） → ③内容を確認して動画を作る
+    <ul style="margin:8px 0 0;padding-left:18px;color:#9ca3af">
+      <li>画像は1枚のみアップロードできます</li>
+      <li>コマ番号を付け、左上から順番に並べるのがおすすめです</li>
+      <li>動画生成時にクレジットを消費します（プロンプト作成は無料です）</li>
+    </ul>
+  </div>
   <div class="sbUpload" id="sbUpload">
     <input type="file" id="sbFile" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
     <div id="sbPreview" style="display:none">
@@ -1275,6 +1285,10 @@ function sbApplyLock(locked){
   document.querySelectorAll('#assets .remove').forEach(btn=>{btn.style.display=locked?'none':''});
   const notice=$('sbLockNotice');if(notice)notice.style.display=locked?'block':'none';
   const redoBtn=$('sbRedoBtn');if(redoBtn)redoBtn.style.display=locked?'block':'none';
+  // ロック解除(タブ切り替え・作り直し)のたびに、プロンプト作成完了時の案内も
+  // 一緒に隠す。ロック開始時(true)はsbProceedToCreate側が内容込みで表示するため
+  // ここでは何もしない。
+  if(!locked){const confirmNotice=$('sbConfirmNotice');if(confirmNotice)confirmNotice.style.display='none';}
 }
 
 $('sbFile').onchange=e=>{
@@ -1346,7 +1360,8 @@ $('sbAnalyzeBtn').onclick=async()=>{
       model:$('sbModel').value,
       aspect:$('sbAspect').value,
       duration:String($('sbDuration').value),
-      resolution:$('sbResolution').value
+      resolution:$('sbResolution').value,
+      detectedCuts:data.detected_cuts
     });
   }catch(e){
     $('sbNotice').textContent='エラー: '+e.message;
@@ -1360,7 +1375,7 @@ $('sbAnalyzeBtn').onclick=async()=>{
 // 生成された統合プロンプトと参照画像URLを、既存のreference_to_video生成フロー
 // (mainCard / #create / start())へそのまま引き継ぐ。start()・creditEstimate()・
 // updateCreditUi()・renderAssets()・モデレーション・料金計算には一切手を加えない。
-function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution}){
+function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution,detectedCuts}){
   mode='reference_to_video';
   // flowvid-open-inline.jsのcalculateCredits()はwindow.flowvidGenerationModeを
   // 最優先で参照するため、ここでreference_to_videoへ設定する。タブの表示(.on)は
@@ -1378,6 +1393,16 @@ function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution}){
   $('mainCard').style.display='block';
   $('assets').style.display='grid';
   $('file').multiple=true;
+  // プロンプト作成が完了しただけで、まだ動画生成(クレジット消費)は始まっていない
+  // ことを明示する。「使い方がわからない」フィードバックへの対応で、ここは表示のみ
+  // (start()・クレジット計算・課金処理には一切手を加えない)。
+  const confirmNotice=$('sbConfirmNotice');
+  if(confirmNotice){
+    const cuts=Number.isFinite(Number(detectedCuts))?Number(detectedCuts):null;
+    confirmNotice.textContent=(cuts&&cuts>0?`${cuts}カットの絵コンテとして認識しました。`:'')
+      +'まだ動画生成は始まっていません。内容を確認し、必要なら編集してから「作成する」を押してください。';
+    confirmNotice.style.display='block';
+  }
   // persistDraft()より先にロックする(sbLocked===trueの間、persistDraft()は通常タブの
   // 下書き(referenceUrls/prompt_reference_to_video)へ書き込まないため、renderAssets()/
   // syncComboWarning()内のupdateCreditUi()→persistDraft()が絵コンテ内容を混入させない)。
@@ -1399,6 +1424,8 @@ function resetStoryboardInputs(){
   files=[];
   $('prompt').value='';
   $('sbNotice').style.display='none';
+  const confirmNotice=$('sbConfirmNotice');
+  if(confirmNotice){confirmNotice.style.display='none';confirmNotice.textContent=''}
   $('sbImg').src='';
   $('sbPreview').style.display='none';
   $('sbPlaceholder').style.display='block';
