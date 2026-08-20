@@ -261,11 +261,32 @@
       ?'最新50件を表示中です。これより古い動画がある場合、この一覧には表示されません。'
       :'現在'+count+'件を表示中（最大50件）';
   }
+  // 動画編集タブ(video_edit)は生成方式ではないため、共通の「過去動画」欄
+  // (#generationHistorySection、生成タブ共通のUIパーツ)は常に空表示になる。
+  // 動画編集タブの間はこれを隠し、代わりに動画編集専用の「編集済み動画」欄
+  // (#veVlloHistorySection、flowvid-video-edit-vllo.js側で生成)を表示する。
+  // previousElementSiblingのようなDOM位置依存はせず、双方とも明示的なIDで
+  // 取得する。タブクリック時・初期復元時・履歴DOM作成直後のいずれからも、
+  // この1つの関数だけを呼べば表示状態が揃うようにする。
+  function syncGenerationHistoryVisibility(){
+    const editing=document.querySelector('.tabs button[data-mode="video_edit"]')?.classList.contains('on')||false;
+    const generationSection=document.getElementById('generationHistorySection');
+    if(generationSection)generationSection.style.display=editing?'none':'';
+    const veHistorySection=document.getElementById('veVlloHistorySection');
+    if(veHistorySection)veHistorySection.style.display=editing?'':'none';
+  }
+  window.flowvidSyncGenerationHistoryVisibility=syncGenerationHistoryVisibility;
+
   function ensureGenerateHistory(){
     if(!/\/generate-prod\.html(?:$|[?#])/i.test(location.pathname+location.search))return;
     if(document.getElementById('history'))return;
     const main=document.querySelector('main.wrap');
     if(!main)return;
+    // 見出し・件数表示・履歴本体の3要素を専用ラッパーで囲み、動画編集タブの
+    // 間はラッパーごと隠せるようにする(以前はmain直下にバラバラに置かれており、
+    // previousElementSibling頼りの非表示処理がDOM構造とズレて機能していなかった)。
+    const wrapper=document.createElement('div');
+    wrapper.id='generationHistorySection';
     const section=document.createElement('section');
     section.className='section';
     section.innerHTML='<h2>過去動画</h2><button id="clear" type="button">再読込</button>';
@@ -280,14 +301,16 @@
     historyDiv.className='history';
     historyDiv.id='history';
     historyDiv.innerHTML='<div class="empty">履歴を読み込み中...</div>';
-    main.appendChild(section);
-    main.appendChild(countNote);
-    main.appendChild(historyDiv);
+    wrapper.appendChild(section);
+    wrapper.appendChild(countNote);
+    wrapper.appendChild(historyDiv);
+    main.appendChild(wrapper);
     const getMode=()=>document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'';
     if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode());
     if(Number.isFinite(window.flowvidHistoryFetchedCount))updateHistoryCountNote(window.flowvidHistoryFetchedCount,window.flowvidHistoryDisplayedCount);
     window.addEventListener('flowvid:history-count',e=>updateHistoryCountNote(e?.detail?.count,e?.detail?.displayedCount));
     section.querySelector('#clear').onclick=()=>{if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory(getMode())};
+    syncGenerationHistoryVisibility();
   }
 
   const HIDE_MS = 3200;
