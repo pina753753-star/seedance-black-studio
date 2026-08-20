@@ -3,77 +3,19 @@ const { moderateContent } = require('./openai-moderation.js');
 const { resolveModerationDecision } = require('./moderation-decision.js');
 const { requireConfirmedAuth } = require('./confirmed-auth.js');
 const { checkGenerationControl, REFUND_UNCONFIRMED_MESSAGE } = require('./generation-control.js');
+const { calculateVideoCreditCost } = require('./video-pricing.js');
+const { DEFAULT_MODEL, validateVideoGenerationOptions } = require('./video-model-validation.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
-const DEFAULT_MODEL = 'bytedance/seedance-2.0';
-const FAST_MODEL = 'bytedance/seedance-2.0-fast';
-const LEGACY_LITE_MODEL = 'bytedance/seedance-2.0-lite';
-const ALLOWED_MODELS = [DEFAULT_MODEL, FAST_MODEL, LEGACY_LITE_MODEL];
-const MODEL_MULTIPLIERS = { [DEFAULT_MODEL]: 1.0, [FAST_MODEL]: 0.8, [LEGACY_LITE_MODEL]: 0.8 };
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-const MIN_CREDITS = 50;
-const MAX_CREDITS = 400;
-const PRICING_SAFETY_MULTIPLIER = 1.15;
 
 function jsonBody(req) {
   if (typeof req.body === 'string') {
     try { return JSON.parse(req.body || '{}'); } catch (_) { return {}; }
   }
   return req.body || {};
-}
-
-function normalizeDuration(value) {
-  const n = Number(value || 5);
-  if (!Number.isFinite(n)) return 5;
-  return Math.max(1, Math.min(15, Math.round(n)));
-}
-
-function normalizeAspectRatio(value) {
-  const ratio = String(value || '9:16').trim();
-  return ['9:16', '16:9', '1:1', '4:3', '3:4'].includes(ratio) ? ratio : '9:16';
-}
-
-function normalizeResolution(value) {
-  const resolution = String(value || '720p').trim();
-  return ['480p', '720p', '1080p'].includes(resolution) ? resolution : '720p';
-}
-
-function normalizeMode(value) {
-  const m = String(value || '').trim();
-  return ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'].includes(m) ? m : 'reference_to_video';
-}
-
-function normalizeModel(value) {
-  const m = String(value || DEFAULT_MODEL).trim();
-  return ALLOWED_MODELS.includes(m) ? m : DEFAULT_MODEL;
-}
-
-function roundUpToFive(value) {
-  return Math.ceil(Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, value)) / 5) * 5;
-}
-
-function countReferenceInputs(body) {
-  if (Array.isArray(body.reference_urls)) return Math.max(1, body.reference_urls.length);
-  if (body.reference_url) return 1;
-  return 1;
-}
-
-function calculateCreditCost(body, mode, duration, resolution, model) {
-  if (mode === 'storyboard') {
-    return roundUpToFive(Math.max(MIN_CREDITS, duration * 12));
-  }
-  let credits = 80;
-  credits += Math.max(0, duration - 5) * 15;
-  if (resolution === '1080p') credits += 100;
-  if (resolution === '480p') credits -= 20;
-  if (mode === 'text_to_video') credits -= 10;
-  credits += 15;
-  const multiplier = MODEL_MULTIPLIERS[model] ?? 1.0;
-  const modeMultiplier = mode === 'reference_to_video' ? PRICING_SAFETY_MULTIPLIER : 1;
-  return roundUpToFive(credits * multiplier * modeMultiplier);
 }
 
 function imageObject(url, frameType) {
@@ -400,50 +342,18 @@ module.exports = async function handler(req, res) {
     const prompt = String(body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ ok: false, error: 'prompt is required' });
 
-    // Reject explicitly invalid inputs before any DB writes or credit deductions.
-    // Absent/empty fields fall through to normalize defaults (backward compat).
-    const VALID_MODES = ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'];
-    const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
-    const rawMode = body.mode;
-    const rawModel = body.model;
-    const rawResolution = body.resolution;
-    const rawDuration = body.duration !== undefined ? body.duration : body.duration_seconds;
-    if (rawMode !== undefined && rawMode !== null && rawMode !== '') {
-      if (!VALID_MODES.includes(String(rawMode).trim())) {
-        return res.status(400).json({ ok: false, error: 'invalid_mode', message: 'Unsupported generation mode.' });
-      }
-    }
-    if (rawModel !== undefined && rawModel !== null && rawModel !== '') {
-      if (!ALLOWED_MODELS.includes(String(rawModel).trim())) {
-        return res.status(400).json({ ok: false, error: 'invalid_model', message: 'Unsupported generation model.' });
-      }
-    }
-    if (rawResolution !== undefined && rawResolution !== null && rawResolution !== '') {
-      if (!VALID_RESOLUTIONS.includes(String(rawResolution).trim())) {
-        return res.status(400).json({ ok: false, error: 'invalid_resolution', message: 'Unsupported resolution.' });
-      }
-    }
-    if (rawDuration !== undefined && rawDuration !== '') {
-      const durNum = Number(rawDuration);
-      if (rawDuration === null || !Number.isFinite(durNum) || !Number.isInteger(durNum) || durNum < 1 || durNum > 15) {
-        return res.status(400).json({ ok: false, error: 'invalid_duration', message: 'Duration must be an integer between 1 and 15.' });
-      }
-    }
-
-    const resolution = normalizeResolution(body.resolution);
-    const aspectRatio = normalizeAspectRatio(body.aspect_ratio || body.aspectRatio);
-    const duration = normalizeDuration(body.duration || body.duration_seconds);
-    const mode = normalizeMode(body.mode);
-    const model = normalizeModel(body.model);
-
-    // Fast/Lite + reference_to_video + 1080p is rejected by OpenRouter (confirmed).
-    if ((model === FAST_MODEL || model === LEGACY_LITE_MODEL) && mode === 'reference_to_video' && resolution === '1080p') {
-      return res.status(400).json({
-        ok: false,
-        error: 'unsupported_combination',
-        message: 'Seedance 2.0 Fastのリファレンスモードは1080pに対応していません。720p以下をお選びください。'
-      });
-    }
+    // Model capabilities are validated before moderation, DB writes, credit
+    // deductions, and the OpenRouter request. Missing fields retain the existing
+    // Seedance 2.0 defaults for backward compatibility.
+    const options = validateVideoGenerationOptions({
+      model: body.model,
+      mode: body.mode,
+      resolution: body.resolution,
+      aspectRatio: body.aspect_ratio || body.aspectRatio,
+      duration: body.duration !== undefined ? body.duration : body.duration_seconds
+    });
+    if (!options.ok) return res.status(400).json({ ok: false, error: options.error, message: options.message });
+    const { resolution, aspectRatio, duration, mode, model } = options;
 
     // Authentication has already succeeded above. Fail closed before any task,
     // credit, or OpenRouter work if moderation blocks or cannot complete.
@@ -497,7 +407,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const creditCost = calculateCreditCost(body, mode, duration, resolution, model);
+    const creditCost = calculateVideoCreditCost({ ...body, mode, duration, resolution, model });
 
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db

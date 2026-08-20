@@ -3,7 +3,8 @@ const coreHandler = require('./_lib/seedance-start.js');
 const DEFAULT_MODEL = 'bytedance/seedance-2.0';
 const FAST_MODEL = 'bytedance/seedance-2.0-fast';
 const LEGACY_LITE_MODEL = 'bytedance/seedance-2.0-lite';
-const ALLOWED_MODELS = new Set([DEFAULT_MODEL, FAST_MODEL]);
+const SEEDANCE_25_MODEL = 'bytedance/seedance-2.5';
+const ALLOWED_MODELS = new Set([DEFAULT_MODEL, FAST_MODEL, SEEDANCE_25_MODEL]);
 
 function jsonBody(req) {
   if (typeof req.body === 'string') {

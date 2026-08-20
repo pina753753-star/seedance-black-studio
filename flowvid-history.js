@@ -130,7 +130,7 @@
   }
 
   function selectedModel(){const model=$('model')?.value||STANDARD_MODEL;return model===LEGACY_LITE_MODEL?FAST_MODEL:model}
-  function credits(){const mode=currentMode();const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const refs=mode==='text_to_video'?0:Math.max(1,getRefs().length||1);let c=80;c+=Math.max(0,duration-5)*15;if(resolution==='1080p')c+=100;if(resolution==='480p')c-=20;if(mode==='reference_to_video')c+=Math.max(0,refs-1)*10;if(mode==='text_to_video')c-=10;c+=15;const multiplier=selectedModel()===FAST_MODEL?.8:1;return Math.max(50,Math.round(c*multiplier))}
+  function credits(){const args={mode:currentMode(),duration:Number($('duration')?.value||5),resolution:$('resolution')?.value||'720p',model:selectedModel()};if(typeof window.flowvidComputeCredits==='function')return window.flowvidComputeCredits(args);let c=80;c+=Math.max(0,args.duration-5)*15;if(args.resolution==='1080p')c+=100;if(args.resolution==='480p')c-=20;if(args.mode==='text_to_video')c-=10;c+=15;const multiplier=args.model===FAST_MODEL?.8:1;return Math.max(50,Math.round(c*multiplier))}
   function updateCreate(){const b=$('create');if(b)b.textContent='作成する ✦ '+credits()}
   function startTimeout(ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);return {signal:c.signal,clear:()=>clearTimeout(t)}}
   async function parseJsonResponse(res){const text=await res.text();try{return text?JSON.parse(text):{}}catch(_){return{ok:false,error:text.slice(0,200)||'Invalid response'}}}

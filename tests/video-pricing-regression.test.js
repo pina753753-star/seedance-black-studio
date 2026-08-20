@@ -63,4 +63,23 @@ assert.throws(
   (error) => error && error.code === 'invalid_model'
 );
 
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'image_to_video',
+  resolution: '720p',
+  duration: 5
+}), 150);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'reference_to_video',
+  resolution: '720p',
+  duration: 30
+}), 830);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'storyboard',
+  resolution: '720p',
+  duration: 30
+}), 555);
+
 console.log(`video pricing regression passed: ${cases} Seedance combinations`);

@@ -1,25 +1,27 @@
 (function(){
   const STANDARD_MODEL='bytedance/seedance-2.0';
   const FAST_MODEL='bytedance/seedance-2.0-fast';
+  const SEEDANCE_25_MODEL='bytedance/seedance-2.5';
   const PRICING_SAFETY_MULTIPLIER=1.15;
   const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
   const DRAFT_KEY='flowvidGenerateDraft';
 
-  function roundUpToFive(value){
-    return Math.ceil(Math.max(50,Math.min(400,value))/5)*5;
+  function roundUpToFive(value,maxCredits=400){
+    return Math.ceil(Math.max(50,Math.min(maxCredits,value))/5)*5;
   }
 
   function computeCredits({duration,resolution,model,mode}){
-    if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));
+    const multiplier=model===SEEDANCE_25_MODEL?10.7/7:((model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1);
+    const maxCredits=model===SEEDANCE_25_MODEL?850:400;
+    if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12)*(model===SEEDANCE_25_MODEL?multiplier:1),maxCredits);
     let credits=80;
     credits+=Math.max(0,duration-5)*15;
     if(resolution==='1080p')credits+=100;
     if(resolution==='480p')credits-=20;
     if(mode==='text_to_video')credits-=10;
     credits+=15;
-    const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
     const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;
-    return roundUpToFive(credits*multiplier*modeMultiplier);
+    return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);
   }
   window.flowvidComputeCredits=computeCredits;
 

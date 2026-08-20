@@ -7,13 +7,15 @@ const MAX_CREDITS = 400;
 const PRICING_SAFETY_MULTIPLIER = 1.15;
 
 const PRICING_PROFILES = Object.freeze({
-  seedance_standard_v1: Object.freeze({ modelMultiplier: 1.0 }),
-  seedance_fast_v1: Object.freeze({ modelMultiplier: 0.8 }),
-  seedance_lite_v1: Object.freeze({ modelMultiplier: 0.8 })
+  seedance_standard_v1: Object.freeze({ modelMultiplier: 1.0, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
+  seedance_fast_v1: Object.freeze({ modelMultiplier: 0.8, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
+  seedance_lite_v1: Object.freeze({ modelMultiplier: 0.8, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
+  // OpenRouter video-token SKU: Seedance 2.5 $0.0000107 vs 2.0 $0.000007.
+  seedance_2_5_v1: Object.freeze({ modelMultiplier: 10.7 / 7, storyboardMultiplier: 10.7 / 7, maxCredits: 850 })
 });
 
-function roundUpToFive(value) {
-  return Math.ceil(Math.max(MIN_CREDITS, Math.min(MAX_CREDITS, value)) / 5) * 5;
+function roundUpToFive(value, maxCredits = MAX_CREDITS) {
+  return Math.ceil(Math.max(MIN_CREDITS, Math.min(maxCredits, value)) / 5) * 5;
 }
 
 function calculateVideoCreditCost(input) {
@@ -38,7 +40,10 @@ function calculateVideoCreditCost(input) {
   }
 
   if (mode === 'storyboard') {
-    return roundUpToFive(Math.max(MIN_CREDITS, duration * 12));
+    return roundUpToFive(
+      Math.max(MIN_CREDITS, duration * 12) * profile.storyboardMultiplier,
+      profile.maxCredits
+    );
   }
 
   let credits = 80;
@@ -52,7 +57,10 @@ function calculateVideoCreditCost(input) {
     ? PRICING_SAFETY_MULTIPLIER
     : 1;
 
-  return roundUpToFive(credits * profile.modelMultiplier * modeMultiplier);
+  return roundUpToFive(
+    credits * profile.modelMultiplier * modeMultiplier,
+    profile.maxCredits
+  );
 }
 
 module.exports = {

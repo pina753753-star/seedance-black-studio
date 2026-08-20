@@ -65,7 +65,7 @@
 <div class="assets" id="assets"><label class="add"><input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple><div><b>＋</b><span id="assetsLabel">画像追加</span></div></label></div>
 <div id="uploadProgress" style="display:none"></div>
 <div class="prompt"><textarea id="prompt" placeholder="キャラクター、商品、シーン、動きを入力してください。"></textarea></div>
-<details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
+<details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5">Seedance 2.5</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
 <button class="create" id="create">作成する ✦ 80</button>
 <div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
 <div class="mini"></div>
@@ -89,7 +89,7 @@
   </div>
 
   <details class="settings" open><summary>設定</summary><div class="settingsBody">
-    <div class="field"><label>モデル</label><select id="sbModel"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option></select></div>
+    <div class="field"><label>モデル</label><select id="sbModel"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5">Seedance 2.5</option></select></div>
     <div class="field"><label>アスペクト比</label><select id="sbAspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div>
     <div class="field"><label>長さ</label><select id="sbDuration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div>
     <div class="field"><label>解像度</label><select id="sbResolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div>
@@ -258,14 +258,17 @@ function clearAcceptedGenerationInputs(submission){
   if(imagesCleared&&$('file'))$('file').value='';
   if(imagesCleared||submission.mode==='text_to_video')renderAssets();
 }
-function roundUpToFive(v){return Math.ceil(Math.max(50,Math.min(400,v))/5)*5;}
+const SEEDANCE_25_MODEL='bytedance/seedance-2.5';
+function pricingMultiplier(model){return model===SEEDANCE_25_MODEL?10.7/7:(model==='bytedance/seedance-2.0-fast'||model==='bytedance/seedance-2.0-lite'?0.8:1)}
+function pricingMaxCredits(model){return model===SEEDANCE_25_MODEL?850:400}
+function roundUpToFive(v,maxCredits=400){return Math.ceil(Math.max(50,Math.min(maxCredits,v))/5)*5;}
 const PRICING_SAFETY_MULTIPLIER=1.15;
 function creditEstimate(){const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const model=$('model')?.value||'bytedance/seedance-2.0-fast';
   // refs: 参照画像の枚数目安。絵コンテタブの確定フロー(sbLocked)は専用画像1枚として扱い、
   // 通常のリファレンスタブは画像の内容にかかわらず実際のアップロード完了枚数(urls.length)、
   // image_to_videoは1枚、text_to_videoは0枚とする。
   const refs=mode==='text_to_video'?0:(sbLocked?1:(mode==='image_to_video'?1:urls.length));
-  if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const multiplier=model==='bytedance/seedance-2.0-fast'||model==='bytedance/seedance-2.0-lite'?0.8:1;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier);}
+  const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12)*(model===SEEDANCE_25_MODEL?multiplier:1),maxCredits);let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);}
 function updateCreditUi(){
   const c=creditEstimate();
   const btn=$('create');
@@ -296,8 +299,19 @@ function updateCreditUi(){
   persistDraft();
   return c;
 }
-function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?.value||'';return(m==='bytedance/seedance-2.0-fast'||m==='bytedance/seedance-2.0-lite')&&mode==='reference_to_video'&&r==='1080p'}
-function syncComboWarning(){const mo=$('model')?.value||'';const isFastLite=mo==='bytedance/seedance-2.0-fast'||mo==='bytedance/seedance-2.0-lite';const isRefMode=mode==='reference_to_video';const resEl=$('resolution');if(resEl){const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=isFastLite&&isRefMode;}const el=$('comboWarning');if(!el)return;const blocked=isComboBlocked();if(blocked){el.textContent='このモデルとリファレンスモードでは1080pを利用できません。';el.style.display='block';}else el.style.display='none';}
+function ensureGenerationModelOptions(){
+  const add=(id,value,label)=>{const select=$(id);if(select&&!Array.from(select.options).some(o=>o.value===value)){const option=document.createElement('option');option.value=value;option.textContent=label;select.appendChild(option)}};
+  ['duration','sbDuration'].forEach(id=>{for(let sec=4;sec<=30;sec++)add(id,String(sec),sec+'秒')});
+  [['aspect','4:3','4:3'],['aspect','3:4','3:4'],['aspect','21:9','21:9 ワイド'],['sbAspect','4:3','4:3'],['sbAspect','3:4','3:4'],['sbAspect','21:9','21:9 ワイド']].forEach(args=>add(...args));
+}
+function syncSelectModelCapabilities(modelId,durationId,resolutionId,aspectId){
+  const is25=modelId===SEEDANCE_25_MODEL;
+  const durationEl=$(durationId);if(durationEl){const current=Number(durationEl.value);const allowed=is25?Array.from({length:27},(_,i)=>i+4):[5,8,10,15];durationEl.replaceChildren(...allowed.map(sec=>{const option=document.createElement('option');option.value=String(sec);option.textContent=sec+'秒';return option}));durationEl.value=String(allowed.includes(current)?current:5)}
+  const resolutionEl=$(resolutionId);if(resolutionEl){const opt1080=Array.from(resolutionEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=is25;if(is25&&resolutionEl.value==='1080p')resolutionEl.value='720p'}
+  const aspectEl=$(aspectId);if(aspectEl){const optWide=Array.from(aspectEl.options).find(o=>o.value==='21:9');if(optWide){optWide.disabled=!is25;optWide.hidden=!is25}if(!is25&&aspectEl.value==='21:9')aspectEl.value='16:9'}
+}
+function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?.value||'';return r==='1080p'&&(m===SEEDANCE_25_MODEL||((m==='bytedance/seedance-2.0-fast'||m==='bytedance/seedance-2.0-lite')&&mode==='reference_to_video'))}
+function syncComboWarning(){const mo=$('model')?.value||'';syncSelectModelCapabilities(mo,'duration','resolution','aspect');const isFastLite=mo==='bytedance/seedance-2.0-fast'||mo==='bytedance/seedance-2.0-lite';const isRefMode=mode==='reference_to_video';const resEl=$('resolution');if(resEl){const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=mo===SEEDANCE_25_MODEL||(isFastLite&&isRefMode);}const el=$('comboWarning');if(!el)return;const blocked=isComboBlocked();if(blocked){el.textContent=mo===SEEDANCE_25_MODEL?'Seedance 2.5は1080pに対応していません。720p以下をお選びください。':'このモデルとリファレンスモードでは1080pを利用できません。';el.style.display='block';}else el.style.display='none';}
 
 function setMode(m){
   const wasSbLocked=sbLocked;
@@ -1129,7 +1143,7 @@ $('veResultSave').addEventListener('click',veSaveEditedVideo);
   if(typeof sbLocked!=='undefined'&&sbLocked&&typeof sbWriteDraft==='function'){
     sbWriteDraft({model:$('model')?.value,resolution:$('resolution')?.value});
   }
-  updateCreditUi();syncComboWarning();
+  syncComboWarning();updateCreditUi();
 }));
 $('prompt').addEventListener('input',persistDraft);
 $('assets').addEventListener('click',e=>{
@@ -1141,6 +1155,7 @@ $('assets').addEventListener('click',e=>{
 $('file').onchange=e=>addAssets(e.target.files);
 $('create').onclick=start;window.flowvidCreateHandler=start;
 
+ensureGenerationModelOptions();
 restoreDraft();
 // 絵コンテのプロンプト確定(prepared)済みの専用下書きがあれば、通常タブのdraft.modeや
 // flowvidGenerateModeより優先して絵コンテタブ選択+mainCard表示を復元する。
@@ -1250,11 +1265,13 @@ function sbUpdateCreditEstimate(){
 // 生成前に同じ組み合わせを防ぐ。1080p固定でプロンプトを作成した後に
 // 生成側で弾かれる事態を避ける。
 function sbSyncResolutionLock(){
-  const isFastLite=$('sbModel').value==='bytedance/seedance-2.0-fast'||$('sbModel').value==='bytedance/seedance-2.0-lite';
+  const selectedModel=$('sbModel').value;
+  const isFastLite=selectedModel==='bytedance/seedance-2.0-fast'||selectedModel==='bytedance/seedance-2.0-lite';
   const resEl=$('sbResolution');
   const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');
-  if(opt1080)opt1080.disabled=isFastLite;
-  if(isFastLite&&resEl.value==='1080p')resEl.value='720p';
+  syncSelectModelCapabilities(selectedModel,'sbDuration','sbResolution','sbAspect');
+  if(opt1080)opt1080.disabled=isFastLite||selectedModel===SEEDANCE_25_MODEL;
+  if((isFastLite||selectedModel===SEEDANCE_25_MODEL)&&resEl.value==='1080p')resEl.value='720p';
 }
 $('sbModel').addEventListener('change',()=>{sbSyncResolutionLock();sbUpdateCreditEstimate();});
 $('sbDuration').addEventListener('change',sbUpdateCreditEstimate);
