@@ -1,25 +1,33 @@
 (function(){
   const STANDARD_MODEL='bytedance/seedance-2.0';
   const FAST_MODEL='bytedance/seedance-2.0-fast';
+  const SEEDANCE_25_MODEL='bytedance/seedance-2.5';
   const PRICING_SAFETY_MULTIPLIER=1.15;
+  const SEEDANCE_25_MAX_CREDITS=600;
+  const SEEDANCE_25_CREDITS_PER_SECOND={'480p':245/30,'720p':550/30,'1080p':20};
   const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
   const DRAFT_KEY='flowvidGenerateDraft';
 
-  function roundUpToFive(value){
-    return Math.ceil(Math.max(50,Math.min(400,value))/5)*5;
+  function roundUpToFive(value,maxCredits=400){
+    return Math.ceil(Math.max(50,Math.min(maxCredits,value))/5)*5;
   }
 
-  function computeCredits({duration,resolution,model,mode}){
-    if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12));
+  function computeCredits({duration,resolution,model,mode,plan}){
+    if(model===SEEDANCE_25_MODEL){
+      const creditsPerSecond=SEEDANCE_25_CREDITS_PER_SECOND[resolution]||SEEDANCE_25_CREDITS_PER_SECOND['720p'];
+      return roundUpToFive(duration*creditsPerSecond,SEEDANCE_25_MAX_CREDITS);
+    }
+    const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
+    const maxCredits=400;
+    if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12),maxCredits);
     let credits=80;
     credits+=Math.max(0,duration-5)*15;
     if(resolution==='1080p')credits+=100;
     if(resolution==='480p')credits-=20;
     if(mode==='text_to_video')credits-=10;
     credits+=15;
-    const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
     const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;
-    return roundUpToFive(credits*multiplier*modeMultiplier);
+    return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);
   }
   window.flowvidComputeCredits=computeCredits;
 
@@ -28,12 +36,13 @@
     const resolution=document.getElementById('resolution')?.value||'720p';
     const model=document.getElementById('model')?.value||FAST_MODEL;
     const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
-    return computeCredits({duration,resolution,model,mode});
+    const plan=localStorage.getItem('flowvidPlan')||localStorage.getItem('plan')||'free';
+    return computeCredits({duration,resolution,model,mode,plan});
   }
 
   function syncCreditButton(){
     const button=document.getElementById('create');
-    if(!button)return;
+    if(!button||button.disabled)return;
     const expected='作成する ✦ '+calculateCredits();
     if(button.textContent!==expected)button.textContent=expected;
   }

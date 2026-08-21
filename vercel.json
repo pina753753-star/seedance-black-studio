@@ -28,8 +28,16 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/wavespeed-reconcile",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/video-edit-reconcile",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/reference-audio-cleanup",
+      "schedule": "37 * * * *"
     }
   ]
 }
