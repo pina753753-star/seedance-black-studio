@@ -462,3 +462,26 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
   - 他タブでは通常通り#generationHistorySectionを表示
 - flowvid-history.jsの取得・絞り込み処理、api/generated-videos.js、api/video-edit-history.js、veList(編集素材選択)には変更なし
 - PR #182でmainへマージ、本番(pinastudio.jp)反映済み(マージコミット: 4ad5e62)
+
+## 完了: Seedance 2.5の1080p・WaveSpeed・参照音源対応(2026-08-21)
+- Seedance 2.5の480p/720pは既存のOpenRouter経路を維持し、1080pのみWaveSpeedへ振り分ける構成を本番反映。
+  - テキスト/リファレンス/絵コンテ: `bytedance/seedance-2.5/text-to-video-turbo`
+  - 画像から動画: `bytedance/seedance-2.5/image-to-video-turbo`
+  - WaveSpeedの`created`/`processing`は生成継続、`completed`はSupabase保存後に完了、`failed`/`cancelled`/`timeout`のみ最終失敗として扱う。
+  - WaveSpeed送信前に`generation_tasks.api_provider`を`wavespeed`へ更新し、OpenRouterのreconcile対象から分離。ブラウザが閉じた場合に備え、WaveSpeed専用reconcileも追加。
+- 1080pの公開記念価格を20クレジット/秒・5単位切り上げに設定(15秒300クレジット、30秒600クレジット)。480p/720pのOpenRouter料金は維持。
+- Seedance 2.5・1080p・曲アップロードをPremium/Ultimate/Team/Scaleへ限定。クライアント表示だけでなく開始APIと音源アップロードAPIでも有効期限を含めて検証し、プラン照会失敗時は安全側で開始を停止。
+- MP3参照音源(1曲、最大15MB)に対応。
+  - 非公開Supabase Storageへ署名付きURLで直接アップロードし、生成時だけ1時間の期限付きURLをWaveSpeedの`reference_audios`へ渡す。
+  - 添付解除/差し替え時の即時削除APIと、期限切れ音源を削除するCronを追加。音源を添付しただけではクレジットを消費しない旨と、動画と同じ長さに切り出したMP3を推奨する説明をUIへ追加。
+- 失敗時のクレジット返金RPCをWaveSpeedでも利用可能にし、タスク行ロックと返金台帳の一意制約による冪等な1回返金を維持。完成動画のSupabase保存と既存の無料プラン透かし処理も維持。
+- `WAVESPEED_API_KEY`はVercelのProduction/Previewへ設定。未設定時はSeedance 2.5の1080pだけを開始せず、720p以下には影響しない。
+- 関連するUI回帰を修正。
+  - 画像/音源アップロード状態は既存の小さな進捗表示へ集約し、生成ボタンは無効化中も「作成する ✦ クレジット数」を維持。
+  - iPhone Safariで遅延した`seeked`イベントが履歴動画のタップ再生を停止していた処理を除去し、動画部分のタップによる再生/停止を復旧。
+- 確認結果:
+  - 最新`main`との統合後に`node --test tests/*.test.js`を実行し、202/202件成功。
+  - JavaScript構文検査、`git diff --check`、Vercel Preview、本番配信ファイルの非課金スモーク確認が成功。
+  - Previewで15秒・1080p・参照音源ありの実生成が完了し、WaveSpeed実課金は$2.835だった。
+  - 未認証の生成開始/音源アップロードAPIは401、認証なしのWaveSpeed reconcile/音源削除Cronは403を確認。
+- PR #184で`main`へマージし、Vercel/Railwayのデプロイ成功後に本番(pinastudio.jp)へ反映済み(マージコミット: `6a89867`)。
