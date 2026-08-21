@@ -82,8 +82,15 @@ test('開始APIは外部送信・タスク作成・クレジット消費より�
 
 test('料金ページはPremium以上の特典と年額合計・毎月付与を表示する', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'pricing.html'), 'utf8');
+  const generationPage = fs.readFileSync(path.join(__dirname, '..', 'generate-prod.html'), 'utf8');
   assert.match(source, /Seedance 2\.5・1080p・曲アップロード/);
   assert.doesNotMatch(source, /Seedance 2\.5の消費クレジット5%オフ/);
+  for (const page of [source, generationPage]) {
+    assert.match(page, /公開記念価格（期間限定）/);
+    assert.match(page, /15秒 300クレジット／30秒 600クレジット/);
+    assert.match(page, /終了前にサイト内でお知らせします/);
+    assert.doesNotMatch(page, /通常価格/);
+  }
   assert.match(source, /annualCredits:'9,600'/);
   assert.match(source, /annualCredits:'25,200'/);
   assert.match(source, /annualCredits:'61,200'/);
