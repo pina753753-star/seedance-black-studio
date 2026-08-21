@@ -49,6 +49,12 @@ test('UIと開始APIは音源をWaveSpeed専用項目で受け渡す', () => {
   assert.match(ui, /「何秒から」と指定すると、使用位置がずれる場合があります/);
   assert.match(ui, /name="audioSyncMode" value="singing" checked>歌唱に合わせる/);
   assert.match(ui, /name="audioSyncMode" value="rhythm">リズム・雰囲気に合わせる/);
+  assert.match(ui, /aria-label="歌唱に合わせるの説明"/);
+  assert.match(ui, /aria-label="リズム・雰囲気に合わせるの説明"/);
+  assert.match(ui, /\.audioSyncInfoButton\{width:30px;min-height:30px;padding:0;border:0;background:transparent/);
+  assert.match(ui, /歌ってるキャラクターが映る動画向けです。曲の歌詞・メロディ・歌声をできるだけそのまま保ち/);
+  assert.match(ui, /歌ってる人が映らない、ダンスやアクション動画向けです。歌詞の再現よりも、曲のビート・強拍・展開に合わせて/);
+  assert.match(ui, /function toggleAudioSyncInfo\(kind,button\)/);
   assert.match(ui, /body\.reference_audio_paths=\[audioAsset\.path\]/);
   assert.match(ui, /body\.reference_audio_sync_mode=getReferenceAudioSyncMode\(\)/);
   assert.match(ui, /const currentAudioId=typeof audioAsset==='undefined'\?'':\(audioAsset\?\.id\|\|'\'\)/);
