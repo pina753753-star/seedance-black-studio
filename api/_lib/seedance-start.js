@@ -6,6 +6,7 @@ const { checkGenerationControl, REFUND_UNCONFIRMED_MESSAGE } = require('./genera
 const { calculateVideoCreditCost } = require('./video-pricing.js');
 const { DEFAULT_MODEL, validateVideoGenerationOptions } = require('./video-model-validation.js');
 const { buildProviderPrompt } = require('./video-provider-prompt.js');
+const { normalizeReferenceAudioPaths, createReferenceAudioSignedUrls } = require('./reference-audio.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
@@ -60,7 +61,7 @@ function collectModerationImageUrls(body) {
   return [...new Set(values.map(extractImageUrl).filter(Boolean))];
 }
 
-function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRatio, mode, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }) {
+function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRatio, mode, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls, referenceAudioUrls = [] }) {
   const payload = {
     prompt: providerPrompt,
     duration,
@@ -77,6 +78,7 @@ function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRat
   ].filter(Boolean);
   if (mode === 'image_to_video') payload.image = waveReferenceUrls[0] || '';
   else if (waveReferenceUrls.length) payload.reference_images = [...new Set(waveReferenceUrls)];
+  if (referenceAudioUrls.length) payload.reference_audios = [...new Set(referenceAudioUrls)];
   return payload;
 }
 
@@ -388,6 +390,22 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    const normalizedAudio = normalizeReferenceAudioPaths(body.reference_audio_paths, user.id);
+    if (!normalizedAudio.ok) {
+      return res.status(400).json({ ok: false, error: normalizedAudio.error, message: normalizedAudio.message });
+    }
+    if (normalizedAudio.paths.length && (provider !== 'wavespeed' || mode === 'image_to_video')) {
+      return res.status(400).json({
+        ok: false,
+        error: 'reference_audio_not_supported',
+        message: '参照音源はSeedance 2.5・1080pのテキスト／リファレンス生成で利用できます。'
+      });
+    }
+    const signedAudio = await createReferenceAudioSignedUrls(db, normalizedAudio.paths);
+    if (!signedAudio.ok) {
+      return res.status(400).json({ ok: false, error: signedAudio.error, message: signedAudio.message });
+    }
+
     // Authentication has already succeeded above. Fail closed before any task,
     // credit, or OpenRouter work if moderation blocks or cannot complete.
     const moderation = await moderateContent(prompt, collectModerationImageUrls(body));
@@ -561,7 +579,7 @@ module.exports = async function handler(req, res) {
     // Keep the user's original prompt in the task/history. Seedance 2.5 receives
     // an internal audio-only constraint at the provider boundary so its native
     // audio does not invent music that may trigger output copyright checks.
-    const providerPrompt = buildProviderPrompt({ model, prompt, generateAudio: true });
+    const providerPrompt = buildProviderPrompt({ model, prompt, generateAudio: true, hasReferenceAudio: signedAudio.urls.length > 0 });
 
     const frameImages = Array.isArray(body.frame_images) ? body.frame_images : [];
     const inputReferences = Array.isArray(body.input_references) ? body.input_references : [];
@@ -582,7 +600,8 @@ module.exports = async function handler(req, res) {
           inputReferences,
           firstFrameUrl,
           referenceUrl,
-          referenceUrls
+          referenceUrls,
+          referenceAudioUrls: signedAudio.urls
         })
       : {
           model,

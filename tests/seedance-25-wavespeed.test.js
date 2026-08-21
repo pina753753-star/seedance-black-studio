@@ -49,3 +49,11 @@ test('client enables Seedance 2.5 1080p and prefers the saved polling URL', () =
   assert.match(source, /'1080p':20/);
   assert.match(source, /const pu=task\.polling_url\|\|\(task\.api_task_id\?/);
 });
+
+test('reference audio storage remains private and MP3-only', () => {
+  const migration = read('supabase/migrations/20260821010000_create_seedance_reference_audio_bucket.sql');
+  assert.match(migration, /'seedance-reference-audio'/);
+  assert.match(migration, /false,/);
+  assert.match(migration, /array\['audio\/mpeg'\]/);
+  assert.doesNotMatch(migration, /create policy/i);
+});

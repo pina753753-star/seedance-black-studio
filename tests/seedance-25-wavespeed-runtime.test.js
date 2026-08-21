@@ -63,11 +63,13 @@ test('WaveSpeed text/reference payload uses reference_images without OpenRouter 
   const payload = buildWaveSpeedPayload({
     providerPrompt: 'prompt', duration: 15, resolution: '1080p', aspectRatio: '16:9', mode: 'reference_to_video',
     frameImages: [], inputReferences: [], firstFrameUrl: '', referenceUrl: 'https://example.com/a.png',
-    referenceUrls: [{ image_url: { url: 'https://example.com/a.png' } }, { image_url: { url: 'https://example.com/b.png' } }]
+    referenceUrls: [{ image_url: { url: 'https://example.com/a.png' } }, { image_url: { url: 'https://example.com/b.png' } }],
+    referenceAudioUrls: ['https://storage.example.com/audio.mp3?token=secret']
   });
   assert.deepEqual(payload, {
     prompt: 'prompt', duration: 15, resolution: '1080p', aspect_ratio: '16:9', generate_audio: true,
-    reference_images: ['https://example.com/a.png', 'https://example.com/b.png']
+    reference_images: ['https://example.com/a.png', 'https://example.com/b.png'],
+    reference_audios: ['https://storage.example.com/audio.mp3?token=secret']
   });
   assert.equal('model' in payload, false);
   assert.equal('input_references' in payload, false);

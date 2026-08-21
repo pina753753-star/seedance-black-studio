@@ -34,6 +34,18 @@ test('既存Seedanceと音声なしではユーザーのプロンプトを変更
   }), original);
 });
 
+test('参照音源がある場合は@audio1の維持と同期を指示する', () => {
+  const providerPrompt = buildProviderPrompt({
+    model: 'bytedance/seedance-2.5',
+    prompt: '実写ライブで歌う。',
+    generateAudio: true,
+    hasReferenceAudio: true
+  });
+  assert.match(providerPrompt, /Use @audio1 as the supplied soundtrack/);
+  assert.match(providerPrompt, /Synchronize the performer's lip movements/);
+  assert.doesNotMatch(providerPrompt, /Do not add background music/);
+});
+
 test('内部指示を二重に追加しない', () => {
   const once = buildProviderPrompt({
     model: 'bytedance/seedance-2.5',
