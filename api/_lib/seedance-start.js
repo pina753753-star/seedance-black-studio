@@ -417,6 +417,7 @@ module.exports = async function handler(req, res) {
     }
 
     const normalizedAudio = normalizeReferenceAudioPaths(body.reference_audio_paths, user.id);
+    const referenceAudioSyncMode = body.reference_audio_sync_mode === 'rhythm' ? 'rhythm' : 'singing';
     if (!normalizedAudio.ok) {
       return res.status(400).json({ ok: false, error: normalizedAudio.error, message: normalizedAudio.message });
     }
@@ -620,7 +621,13 @@ module.exports = async function handler(req, res) {
     // Keep the user's original prompt in the task/history. Seedance 2.5 receives
     // an internal audio-only constraint at the provider boundary so its native
     // audio does not invent music that may trigger output copyright checks.
-    const providerPrompt = buildProviderPrompt({ model, prompt, generateAudio: true, hasReferenceAudio: signedAudio.urls.length > 0 });
+    const providerPrompt = buildProviderPrompt({
+      model,
+      prompt,
+      generateAudio: true,
+      hasReferenceAudio: signedAudio.urls.length > 0,
+      referenceAudioSyncMode
+    });
 
     const frameImages = Array.isArray(body.frame_images) ? body.frame_images : [];
     const inputReferences = Array.isArray(body.input_references) ? body.input_references : [];

@@ -47,10 +47,15 @@ test('UIと開始APIは音源をWaveSpeed専用項目で受け渡す', () => {
   assert.match(ui, /id="audioFile"[^>]+accept="audio\/mpeg,\.mp3"/);
   assert.match(ui, /動画と同じ長さに切り出したMP3がおすすめです/);
   assert.match(ui, /「何秒から」と指定すると、使用位置がずれる場合があります/);
+  assert.match(ui, /name="audioSyncMode" value="singing" checked>歌唱に合わせる/);
+  assert.match(ui, /name="audioSyncMode" value="rhythm">リズム・雰囲気に合わせる/);
   assert.match(ui, /body\.reference_audio_paths=\[audioAsset\.path\]/);
+  assert.match(ui, /body\.reference_audio_sync_mode=getReferenceAudioSyncMode\(\)/);
   assert.match(ui, /const currentAudioId=typeof audioAsset==='undefined'\?'':\(audioAsset\?\.id\|\|'\'\)/);
   assert.match(ui, /currentAudioId===\(submission\.audioId\|\|'\'\)/);
   assert.match(start, /mode === 'image_to_video'/);
   assert.match(start, /payload\.reference_audios/);
   assert.match(start, /createReferenceAudioSignedUrls/);
+  assert.match(start, /body\.reference_audio_sync_mode === 'rhythm' \? 'rhythm' : 'singing'/);
+  assert.match(start, /referenceAudioSyncMode/);
 });

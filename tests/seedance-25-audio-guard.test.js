@@ -34,7 +34,7 @@ test('既存Seedanceと音声なしではユーザーのプロンプトを変更
   }), original);
 });
 
-test('参照音源がある場合は@audio1の維持と同期を指示する', () => {
+test('参照音源の既定値は歌唱同期として@audio1の維持と同期を指示する', () => {
   const providerPrompt = buildProviderPrompt({
     model: 'bytedance/seedance-2.5',
     prompt: '実写ライブで歌う。',
@@ -44,6 +44,33 @@ test('参照音源がある場合は@audio1の維持と同期を指示する', (
   assert.match(providerPrompt, /Use @audio1 as the supplied soundtrack/);
   assert.match(providerPrompt, /Synchronize the performer's lip movements/);
   assert.doesNotMatch(providerPrompt, /Do not add background music/);
+});
+
+test('リズム同期では動き・照明・カメラ・場面転換を@audio1に合わせる', () => {
+  const providerPrompt = buildProviderPrompt({
+    model: 'bytedance/seedance-2.5',
+    prompt: '音楽に合わせてダンスする。',
+    generateAudio: true,
+    hasReferenceAudio: true,
+    referenceAudioSyncMode: 'rhythm'
+  });
+  assert.match(providerPrompt, /Use @audio1 as the master timing, rhythm, and mood reference/);
+  assert.match(providerPrompt, /lighting changes, camera movements, and scene transitions/);
+  assert.match(providerPrompt, /The visual pacing must follow @audio1 continuously/);
+  assert.match(providerPrompt, /If a singer is visible, synchronize lip movements/);
+  assert.match(providerPrompt, /Do not compose or add a different song/);
+  assert.doesNotMatch(providerPrompt, /Use @audio1 as the supplied soundtrack and vocal performance/);
+});
+
+test('不明な同期用途は従来互換の歌唱同期へフォールバックする', () => {
+  const providerPrompt = buildProviderPrompt({
+    model: 'bytedance/seedance-2.5',
+    prompt: '実写ライブで歌う。',
+    generateAudio: true,
+    hasReferenceAudio: true,
+    referenceAudioSyncMode: 'unknown'
+  });
+  assert.match(providerPrompt, /Use @audio1 as the supplied soundtrack and vocal performance/);
 });
 
 test('内部指示を二重に追加しない', () => {
