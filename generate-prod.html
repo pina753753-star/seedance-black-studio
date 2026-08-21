@@ -295,31 +295,13 @@ function updateCreditUi(){
     // 通常assetsのpending/uploading/failedで生成を止めない。
     const imageMode=!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video');
     const list=currentModeAssetList();
+    const blockedByAudio=!!audioAsset&&(!canUseReferenceAudio()||audioAsset.status!=='completed');
+    const blockedByImage=imageMode&&(list.some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed')||list.filter(a=>a.status==='completed').length===0);
     if($('model')?.value===SEEDANCE_25_MODEL&&!seedance25Access){
       btn.disabled=true;
       btn.textContent='Premium以上で利用できます';
-    }else if(audioAsset&&!canUseReferenceAudio()){
-      btn.disabled=true;
-      btn.textContent='音源を使うにはSeedance 2.5・1080pを選択してください';
-    }else if(audioAsset?.status==='uploading'){
-      btn.disabled=true;
-      btn.textContent='音源アップロード中…';
-    }else if(audioAsset?.status==='failed'){
-      btn.disabled=true;
-      btn.textContent='音源を選び直してください';
-    }else if(imageMode&&list.some(a=>a.status==='pending'||a.status==='uploading')){
-      const total=list.length;
-      const doneCount=list.filter(a=>a.status==='completed'||a.status==='failed').length;
-      btn.disabled=true;
-      btn.textContent='画像アップロード中… '+doneCount+'/'+total;
-    }else if(imageMode&&list.some(a=>a.status==='failed')){
-      btn.disabled=true;
-      btn.textContent='失敗した画像を再試行してください';
-    }else if(imageMode&&list.filter(a=>a.status==='completed').length===0){
-      btn.disabled=true;
-      btn.textContent='画像を追加してください';
     }else{
-      btn.disabled=false;
+      btn.disabled=blockedByAudio||blockedByImage;
       btn.textContent='作成する ✦ '+c;
     }
   }
