@@ -5,10 +5,11 @@ const { getVideoModel, isGenerationEnabledModel } = require('./video-models');
 const MIN_CREDITS = 50;
 const MAX_CREDITS = 400;
 const PRICING_SAFETY_MULTIPLIER = 1.15;
-const SEEDANCE_25_MAX_CREDITS = 550;
+const SEEDANCE_25_MAX_CREDITS = 600;
 const SEEDANCE_25_CREDITS_PER_SECOND = Object.freeze({
   '480p': 245 / 30,
-  '720p': 550 / 30
+  '720p': 550 / 30,
+  '1080p': 20
 });
 
 const PRICING_PROFILES = Object.freeze({

@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
+const WAVESPEED_RESULT_BASE = 'https://api.wavespeed.ai/api/v3/predictions';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const VIDEO_BUCKET = process.env.FLOWVID_VIDEO_BUCKET || 'reference-images';
@@ -306,7 +307,8 @@ function dbClient() {
 
 function isStatusEndpointUrl(url) {
   const value = String(url || '');
-  return /^https:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(value);
+  return /^https:\/\/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(value)
+    || /^https:\/\/api\.wavespeed\.ai\/api\/v3\/predictions\/[^/?#]+\/result\/?(?:[?#].*)?$/i.test(value);
 }
 
 function isOpenRouterContentUrl(url) {
@@ -359,83 +361,46 @@ function normalizeStatus(data) {
   return String(data?.status || data?.data?.status || data?.response?.status || data?.result?.status || '').toLowerCase();
 }
 
-function isCompletedStatus(status) {
+function isCompletedStatus(status, provider = 'openrouter') {
+  if (provider === 'wavespeed') return String(status || '').toLowerCase() === 'completed';
   return ['completed', 'complete', 'succeeded', 'success', 'done'].includes(String(status || '').toLowerCase());
 }
 
-function isFailedStatus(status) {
+function isFailedStatus(status, provider = 'openrouter') {
+  if (provider === 'wavespeed') return ['failed', 'cancelled', 'timeout'].includes(String(status || '').toLowerCase());
   return ['failed', 'error', 'cancelled', 'canceled'].includes(String(status || '').toLowerCase());
 }
 
-// Looks up the generation_tasks record for this OpenRouter job, atomically marks
-// it as failed (preventing concurrent calls from double-refunding), then refunds
-// each credit pool back to where the credits were originally deducted from.
+// Looks up the active task and delegates the entire failure/refund transition to
+// the database RPC. Its row lock and unique refund ledger make repeated polls
+// and concurrent failure handlers idempotent.
 async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
-  if (!db || !jobId || !isFailedStatus(jobStatus)) return;
+  if (!db || !jobId || jobStatus !== 'failed') return { confirmed: false, refunded: false };
 
   // Find the task — only eligible if still in a non-terminal state
   const { data: task } = await db
     .from('generation_tasks')
-    .select('id,user_id,credit_cost,status')
+    .select('id')
     .eq('api_task_id', jobId)
     .in('status', ['queued', 'processing'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (!task) return; // Not found, already terminal, or no matching task
-
-  // Atomic claim: update status to 'failed' only if still in non-terminal state.
-  // If a concurrent polling call already claimed it, 0 rows are returned → skip.
-  const { data: claimed } = await db
-    .from('generation_tasks')
-    .update({ status: 'failed', error_message: errorMessage || null, updated_at: new Date().toISOString() })
-    .eq('id', task.id)
-    .in('status', ['queued', 'processing'])
-    .select('id');
-
-  if (!claimed || claimed.length === 0) return; // Already handled by another request
-
-  // Reconstruct deduction breakdown from credit_transactions
-  const { data: deductions } = await db
-    .from('credit_transactions')
-    .select('credit_type,amount')
-    .eq('related_task_id', task.id)
-    .in('reason', ['video_generation', 'cost_based_adjustment']);
-
-  if (!deductions || deductions.length === 0) return; // Nothing to refund
-
-  let fromSub = 0, fromFree = 0, fromPurchased = 0;
-  for (const tx of deductions) {
-    const amount = Math.abs(Number(tx.amount || 0));
-    if (tx.credit_type === 'subscription') fromSub += amount;
-    else if (tx.credit_type === 'free') fromFree += amount;
-    else if (tx.credit_type === 'purchased') fromPurchased += amount;
+  if (!task) return { confirmed: false, refunded: false };
+  const { data, error } = await db.rpc('refund_generation_task_atomic', {
+    p_task_id: task.id,
+    p_error_message: String(errorMessage || 'generation failed').slice(0, 500)
+  });
+  if (error || data?.ok !== true) {
+    console.error('[seedance-status] atomic refund failed:', error?.message || data?.code || 'unknown', 'taskId:', task.id);
+    return { confirmed: false, refunded: false };
   }
-
-  if (fromSub + fromFree + fromPurchased === 0) return;
-
-  // Read current balance and add back to each pool
-  const { data: bal } = await db
-    .from('credit_balances')
-    .select('free_credits,subscription_credits,purchased_credits')
-    .eq('user_id', task.user_id)
-    .maybeSingle();
-
-  if (!bal) return;
-
-  const updateFields = { updated_at: new Date().toISOString() };
-  if (fromSub > 0) updateFields.subscription_credits = Number(bal.subscription_credits || 0) + fromSub;
-  if (fromFree > 0) updateFields.free_credits = Number(bal.free_credits || 0) + fromFree;
-  if (fromPurchased > 0) updateFields.purchased_credits = Number(bal.purchased_credits || 0) + fromPurchased;
-  await db.from('credit_balances').update(updateFields).eq('user_id', task.user_id);
-
-  // Record per-pool refund transactions
-  const txRows = [];
-  if (fromSub > 0) txRows.push({ user_id: task.user_id, amount: fromSub, credit_type: 'subscription', reason: 'generation_refund', related_task_id: task.id });
-  if (fromFree > 0) txRows.push({ user_id: task.user_id, amount: fromFree, credit_type: 'free', reason: 'generation_refund', related_task_id: task.id });
-  if (fromPurchased > 0) txRows.push({ user_id: task.user_id, amount: fromPurchased, credit_type: 'purchased', reason: 'generation_refund', related_task_id: task.id });
-  if (txRows.length) await db.from('credit_transactions').insert(txRows);
+  return {
+    confirmed: ['refunded', 'already_refunded', 'no_charge_found'].includes(data.code),
+    refunded: ['refunded', 'already_refunded'].includes(data.code),
+    code: data.code
+  };
 }
 
 // ---- result-wait grace period helpers ----
@@ -592,7 +557,11 @@ function effectiveJobId({ jobId, pollingUrl, rawVideoUrl }) {
 
       const pathParts = parsed.pathname.split('/').filter(Boolean);
       const pathId = pathParts[pathParts.length - 1];
-      if (pathId && !/^(download|output|video|file|public|content)$/i.test(pathId)) return pathId;
+      if (parsed.hostname === 'api.wavespeed.ai') {
+        const predictionIndex = pathParts.indexOf('predictions');
+        if (predictionIndex >= 0 && pathParts[predictionIndex + 1]) return pathParts[predictionIndex + 1];
+      }
+      if (pathId && !/^(download|output|video|file|public|content|result)$/i.test(pathId)) return pathId;
     } catch (_) {
       // Ignore malformed URLs and fall back below.
     }
@@ -779,9 +748,6 @@ module.exports = async function handler(req, res) {
     return res.status(auth.status).json(auth.body);
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY || '';
-  if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
-
   const jobId = String(req.query.id || req.query.jobId || '').trim();
   const pollingUrl = String(req.query.pollingUrl || req.query.polling_url || '').trim();
 
@@ -824,7 +790,7 @@ module.exports = async function handler(req, res) {
   if (requestedJobId) {
     const result = await ownershipDb
       .from('generation_tasks')
-      .select('id,user_id,api_task_id,polling_url')
+      .select('id,user_id,api_task_id,polling_url,api_provider')
       .eq('user_id', auth.user.id)
       .eq('api_task_id', requestedJobId)
       .order('created_at', { ascending: false })
@@ -837,7 +803,7 @@ module.exports = async function handler(req, res) {
   if (!ownedTask && !ownershipError && pollingUrl) {
     const result = await ownershipDb
       .from('generation_tasks')
-      .select('id,user_id,api_task_id,polling_url')
+      .select('id,user_id,api_task_id,polling_url,api_provider')
       .eq('user_id', auth.user.id)
       .eq('polling_url', pollingUrl)
       .order('created_at', { ascending: false })
@@ -860,7 +826,20 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const statusUrl = pollingUrl || `${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(requestedJobId)}`;
+  const provider = ownedTask.api_provider === 'wavespeed' ? 'wavespeed' : 'openrouter';
+  const apiKey = provider === 'wavespeed'
+    ? (process.env.WAVESPEED_API_KEY || '')
+    : (process.env.OPENROUTER_API_KEY || '');
+  if (!apiKey) {
+    return res.status(500).json({
+      ok: false,
+      error: provider === 'wavespeed' ? 'Missing WAVESPEED_API_KEY' : 'Missing OPENROUTER_API_KEY'
+    });
+  }
+
+  const statusUrl = ownedTask.polling_url || pollingUrl || (provider === 'wavespeed'
+    ? `${WAVESPEED_RESULT_BASE}/${encodeURIComponent(requestedJobId)}/result`
+    : `${OPENROUTER_VIDEO_ENDPOINT}/${encodeURIComponent(requestedJobId)}`);
   if (!isStatusEndpointUrl(statusUrl)) {
     return res.status(400).json({
       ok: false,
@@ -875,8 +854,10 @@ module.exports = async function handler(req, res) {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://flowvid-studio.vercel.app',
-        'X-Title': 'FlowVid Studio'
+        ...(provider === 'openrouter' ? {
+          'HTTP-Referer': 'https://flowvid-studio.vercel.app',
+          'X-Title': 'FlowVid Studio'
+        } : {})
       }
     });
 
@@ -887,13 +868,15 @@ module.exports = async function handler(req, res) {
     const jobStatus = normalizeStatus(data);
     const foundVideoUrl = findVideoUrl(data);
     const resolvedJobId = effectiveJobId({ jobId, pollingUrl, rawVideoUrl: foundVideoUrl });
-    const fallbackContentUrl = !foundVideoUrl && isCompletedStatus(jobStatus) ? openRouterContentUrl(resolvedJobId) : null;
+    const fallbackContentUrl = provider === 'openrouter' && !foundVideoUrl && isCompletedStatus(jobStatus, provider)
+      ? openRouterContentUrl(resolvedJobId)
+      : null;
     const rawVideoUrl = foundVideoUrl || fallbackContentUrl;
     let videoUrl = null;
     let storage = null;
 
     // Before hitting OpenRouter content URL, check if a Supabase-hosted video already exists in DB
-    if (isCompletedStatus(jobStatus)) {
+    if (isCompletedStatus(jobStatus, provider)) {
       const dbCheck = dbClient();
       if (dbCheck) {
         const { data: task } = await dbCheck.from('generation_tasks').select('output_url').eq('api_task_id', resolvedJobId).maybeSingle();
@@ -916,7 +899,7 @@ module.exports = async function handler(req, res) {
     // Applies when: status endpoint returned 404, OR OpenRouter says completed but no video URL
     // yet available. We track wait state in generation_tasks.settings.result_wait and only
     // trigger a refund after both 5 min elapsed AND 5 failed attempts.
-    if (!videoUrl && (isCompletedStatus(jobStatus) || response.status === 404)) {
+    if (provider === 'openrouter' && !videoUrl && (isCompletedStatus(jobStatus, provider) || response.status === 404)) {
       const waitReason = response.status === 404 ? 'status-404' : 'completed-no-url';
       const dbWait = dbClient();
       let waitResult = { state: 'db_error' };
@@ -1058,7 +1041,7 @@ module.exports = async function handler(req, res) {
     // For free-plan users, completion is now gated behind a successful watermark
     // (see below) — this variable is only assigned directly here for paid users
     // and for the free-user watermark-success sub-path.
-    const costUsd = extractCostUsd(data);
+    const costUsd = provider === 'openrouter' ? extractCostUsd(data) : null;
     let finalCreditsResult = null;
     let responseVideoUrl = videoUrl;
     let watermarkFailure = null;
@@ -1220,9 +1203,11 @@ module.exports = async function handler(req, res) {
     // Refund credits on explicit terminal failure (failed/error/cancelled from OpenRouter).
     // HTTP 404 is now handled by the recoverable-failure grace period block above,
     // which delays refunds until both 5 min elapsed AND 5 failed attempts.
-    if (response.ok && isFailedStatus(jobStatus) && !done) {
+    let terminalFailureRefund = null;
+    if (response.ok && isFailedStatus(jobStatus, provider) && !done) {
       const orErrorMsg = (data && typeof data === 'object') ? (data.error || data.message || JSON.stringify(data).slice(0, 200)) : String(data || '').slice(0, 200);
-      await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', orErrorMsg).catch(() => {});
+      terminalFailureRefund = await processRefundIfNeeded(dbClient(), resolvedJobId, 'failed', orErrorMsg)
+        .catch(() => ({ confirmed: false, refunded: false }));
     }
 
     // For free-plan users on completion, strip the raw (unwatermarked) video URL
@@ -1242,13 +1227,14 @@ module.exports = async function handler(req, res) {
     return res.status(response.ok ? 200 : response.status).json({
       ok: response.ok,
       status: response.status,
-      provider: 'openrouter',
+      provider,
       jobId: resolvedJobId,
       originalJobId: jobId,
       pollingUrl,
       statusUrl,
       jobStatus,
       done,
+      ...(terminalFailureRefund ? { refunded: terminalFailureRefund.refunded, refundConfirmed: terminalFailureRefund.confirmed } : {}),
       videoUrl: responseVideoUrl,
       costUsd: costUsd ?? null,
       finalCredits: finalCreditsResult?.finalCredits ?? null,
@@ -1260,4 +1246,20 @@ module.exports = async function handler(req, res) {
   } catch (error) {
     return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', statusUrl, checkedAt: new Date().toISOString() });
   }
+};
+
+// Internal server-only reuse for the authenticated status route and the
+// CRON_SECRET-protected WaveSpeed reconciliation route. These helpers never
+// expose credentials to the browser.
+module.exports._reconcileHelpers = {
+  findVideoUrl,
+  normalizeStatus,
+  isCompletedStatus,
+  isFailedStatus,
+  persistVideo,
+  processFinalCredits,
+  processRefundIfNeeded,
+  recordWatermarkWait,
+  isResultWaitExpired,
+  validWatermarkUrl
 };

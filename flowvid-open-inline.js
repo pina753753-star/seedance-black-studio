@@ -3,8 +3,8 @@
   const FAST_MODEL='bytedance/seedance-2.0-fast';
   const SEEDANCE_25_MODEL='bytedance/seedance-2.5';
   const PRICING_SAFETY_MULTIPLIER=1.15;
-  const SEEDANCE_25_MAX_CREDITS=550;
-  const SEEDANCE_25_CREDITS_PER_SECOND={'480p':245/30,'720p':550/30};
+  const SEEDANCE_25_MAX_CREDITS=600;
+  const SEEDANCE_25_CREDITS_PER_SECOND={'480p':245/30,'720p':550/30,'1080p':20};
   const DEFAULTS_APPLIED_KEY='flowvidPricingDefaultsV2';
   const DRAFT_KEY='flowvidGenerateDraft';
 

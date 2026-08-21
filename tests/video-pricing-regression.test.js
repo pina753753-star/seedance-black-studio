@@ -93,5 +93,17 @@ assert.equal(calculateVideoCreditCost({
   resolution: '480p',
   duration: 30
 }), 245);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'text_to_video',
+  resolution: '1080p',
+  duration: 15
+}), 300);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'reference_to_video',
+  resolution: '1080p',
+  duration: 30
+}), 600);
 
 console.log(`video pricing regression passed: ${cases} Seedance combinations`);

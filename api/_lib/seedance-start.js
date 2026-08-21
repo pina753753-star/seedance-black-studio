@@ -8,6 +8,9 @@ const { DEFAULT_MODEL, validateVideoGenerationOptions } = require('./video-model
 const { buildProviderPrompt } = require('./video-provider-prompt.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
+const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
+const WAVESPEED_TEXT_MODEL = 'bytedance/seedance-2.5/text-to-video-turbo';
+const WAVESPEED_IMAGE_MODEL = 'bytedance/seedance-2.5/image-to-video-turbo';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -55,6 +58,26 @@ function collectModerationImageUrls(body) {
   append(body.first_frame_url);
 
   return [...new Set(values.map(extractImageUrl).filter(Boolean))];
+}
+
+function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRatio, mode, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }) {
+  const payload = {
+    prompt: providerPrompt,
+    duration,
+    resolution,
+    aspect_ratio: aspectRatio,
+    generate_audio: true
+  };
+  const waveReferenceUrls = [
+    ...(Array.isArray(frameImages) ? frameImages : []).map(extractImageUrl),
+    firstFrameUrl,
+    ...(Array.isArray(inputReferences) ? inputReferences : []).map(extractImageUrl),
+    ...(Array.isArray(referenceUrls) ? referenceUrls : []).map(extractImageUrl),
+    referenceUrl
+  ].filter(Boolean);
+  if (mode === 'image_to_video') payload.image = waveReferenceUrls[0] || '';
+  else if (waveReferenceUrls.length) payload.reference_images = [...new Set(waveReferenceUrls)];
+  return payload;
 }
 
 function extractJobId(data) {
@@ -304,15 +327,12 @@ module.exports = async function handler(req, res) {
       ok: true,
       endpoint: '/api/seedance-start',
       method: 'POST',
-      provider: 'openrouter',
+      provider: 'openrouter (480p/720p) or wavespeed (Seedance 2.5 1080p)',
       model: DEFAULT_MODEL,
       note: 'POST only. Authorization: Bearer <supabase-jwt> required.',
-      requiredEnv: 'OPENROUTER_API_KEY'
+      requiredEnv: 'OPENROUTER_API_KEY and WAVESPEED_API_KEY for Seedance 2.5 1080p'
     });
   }
-
-  const apiKey = process.env.OPENROUTER_API_KEY || '';
-  if (!apiKey) return res.status(500).json({ ok: false, error: 'Missing OPENROUTER_API_KEY' });
 
   // Authenticate against Supabase Auth and reject unconfirmed addresses before
   // moderation, balance reads, task creation, credit use, or OpenRouter calls.
@@ -355,6 +375,18 @@ module.exports = async function handler(req, res) {
     });
     if (!options.ok) return res.status(400).json({ ok: false, error: options.error, message: options.message });
     const { resolution, aspectRatio, duration, mode, model } = options;
+    const provider = model === 'bytedance/seedance-2.5' && resolution === '1080p'
+      ? 'wavespeed'
+      : 'openrouter';
+    const apiKey = provider === 'wavespeed'
+      ? (process.env.WAVESPEED_API_KEY || '')
+      : (process.env.OPENROUTER_API_KEY || '');
+    if (!apiKey) {
+      return res.status(500).json({
+        ok: false,
+        error: provider === 'wavespeed' ? 'Missing WAVESPEED_API_KEY' : 'Missing OPENROUTER_API_KEY'
+      });
+    }
 
     // Authentication has already succeeded above. Fail closed before any task,
     // credit, or OpenRouter work if moderation blocks or cannot complete.
@@ -531,29 +563,45 @@ module.exports = async function handler(req, res) {
     // audio does not invent music that may trigger output copyright checks.
     const providerPrompt = buildProviderPrompt({ model, prompt, generateAudio: true });
 
-    // Build OpenRouter payload
-    const payload = {
-      model,
-      prompt: providerPrompt,
-      duration,
-      resolution,
-      aspect_ratio: aspectRatio,
-      generate_audio: true
-    };
-
     const frameImages = Array.isArray(body.frame_images) ? body.frame_images : [];
     const inputReferences = Array.isArray(body.input_references) ? body.input_references : [];
     const firstFrameUrl = String(body.first_frame_url || '').trim();
     const referenceUrl = String(body.reference_url || '').trim();
     const referenceUrls = imageObjects(body.reference_urls || body.referenceUrls || []);
 
-    if (frameImages.length) payload.frame_images = frameImages;
-    else if (firstFrameUrl) payload.frame_images = [imageObject(firstFrameUrl, 'first_frame')].filter(Boolean);
+    // Keep the existing OpenRouter request shape for 480p/720p. Seedance 2.5
+    // at 1080p uses WaveSpeed's dedicated Turbo request shape.
+    const payload = provider === 'wavespeed'
+      ? buildWaveSpeedPayload({
+          providerPrompt,
+          duration,
+          resolution,
+          aspectRatio,
+          mode,
+          frameImages,
+          inputReferences,
+          firstFrameUrl,
+          referenceUrl,
+          referenceUrls
+        })
+      : {
+          model,
+          prompt: providerPrompt,
+          duration,
+          resolution,
+          aspect_ratio: aspectRatio,
+          generate_audio: true
+        };
 
-    if (!payload.frame_images?.length) {
-      if (inputReferences.length) payload.input_references = inputReferences;
-      else if (referenceUrls.length) payload.input_references = referenceUrls;
-      else if (referenceUrl) payload.input_references = [imageObject(referenceUrl)].filter(Boolean);
+    if (provider !== 'wavespeed') {
+      if (frameImages.length) payload.frame_images = frameImages;
+      else if (firstFrameUrl) payload.frame_images = [imageObject(firstFrameUrl, 'first_frame')].filter(Boolean);
+
+      if (!payload.frame_images?.length) {
+        if (inputReferences.length) payload.input_references = inputReferences;
+        else if (referenceUrls.length) payload.input_references = referenceUrls;
+        else if (referenceUrl) payload.input_references = [imageObject(referenceUrl)].filter(Boolean);
+      }
     }
 
     // Final check at the external-send boundary. If the stop was activated
@@ -598,41 +646,88 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Call OpenRouter
-    console.log('[seedance-start] calling OpenRouter, taskId:', taskId, 'model:', payload.model, 'mode:', mode, 'has_refs:', Boolean(payload.input_references?.length), 'has_frames:', Boolean(payload.frame_images?.length));
+    // reserve_generation_task/deduct_generation_credits_atomic initially store
+    // openrouter. Switch only the 1080p task before any WaveSpeed request so the
+    // OpenRouter reconciler can never claim it.
+    if (provider === 'wavespeed') {
+      const { data: providerRows, error: providerError } = await db.from('generation_tasks')
+        .update({ api_provider: 'wavespeed', updated_at: new Date().toISOString() })
+        .eq('id', taskId)
+        .eq('user_id', user.id)
+        .in('status', ['queued', 'processing'])
+        .eq('api_provider', 'openrouter')
+        .select('id');
+      if (providerError || !providerRows || providerRows.length !== 1) {
+        const refundResult = await db.rpc('refund_generation_task_atomic', {
+          p_task_id: taskId,
+          p_error_message: 'WaveSpeed provider routing could not be persisted'
+        });
+        const refunded = !refundResult.error && refundResult.data?.ok === true
+          && ['refunded', 'already_refunded'].includes(refundResult.data.code);
+        return res.status(refunded ? 503 : 500).json({
+          ok: false,
+          error: 'wavespeed_provider_persist_failed',
+          message: refunded ? '生成を開始できなかったため、クレジットを返還しました。' : REFUND_UNCONFIRMED_MESSAGE,
+          refunded,
+          creditRefunded: refunded ? creditCost : 0
+        });
+      }
+    }
+
+    const providerModel = mode === 'image_to_video' ? WAVESPEED_IMAGE_MODEL : WAVESPEED_TEXT_MODEL;
+    const providerEndpoint = provider === 'wavespeed'
+      ? `${WAVESPEED_API_BASE}/${providerModel}`
+      : OPENROUTER_VIDEO_ENDPOINT;
+    console.log('[seedance-start] calling provider, provider:', provider, 'taskId:', taskId, 'mode:', mode);
     orStarted = true;
     let response, text, data;
     try {
-      response = await fetch(OPENROUTER_VIDEO_ENDPOINT, {
+      response = await fetch(providerEndpoint, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://flowvid-studio.vercel.app',
-          'X-Title': 'FlowVid Studio'
+          ...(provider === 'openrouter' ? {
+            'HTTP-Referer': 'https://flowvid-studio.vercel.app',
+            'X-Title': 'FlowVid Studio'
+          } : {})
         },
         body: JSON.stringify(payload)
       });
       text = await response.text();
       try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
     } catch (fetchError) {
-      console.error('[seedance-start] OpenRouter network error:', fetchError?.message, 'taskId:', taskId);
-      const refundResult = await refundCredits(db, user.id, deduction, taskId);
-      await releaseTask(db, user.id, taskId, 'failed', fetchError?.message || 'Network error');
+      console.error('[seedance-start] provider network error:', fetchError?.message, 'provider:', provider, 'taskId:', taskId);
+      let refunded = false;
+      if (provider === 'wavespeed') {
+        const refundResult = await db.rpc('refund_generation_task_atomic', { p_task_id: taskId, p_error_message: fetchError?.message || 'WaveSpeed network error' });
+        refunded = !refundResult.error && refundResult.data?.ok === true && ['refunded', 'already_refunded'].includes(refundResult.data.code);
+      } else {
+        const refundResult = await refundCredits(db, user.id, deduction, taskId);
+        await releaseTask(db, user.id, taskId, 'failed', fetchError?.message || 'Network error');
+        refunded = refundResult.ok;
+      }
       return res.status(502).json({
         ok: false,
-        error: fetchError?.message || 'OpenRouter request failed',
-        creditRefunded: refundResult.ok ? creditCost : 0,
-        refunded: refundResult.ok,
+        error: fetchError?.message || `${provider} request failed`,
+        creditRefunded: refunded ? creditCost : 0,
+        refunded,
         checkedAt: new Date().toISOString()
       });
     }
 
     if (!response.ok) {
       const rawBody = String(text || '');
-      console.error('[seedance-start] OpenRouter error body:', response.status, rawBody.slice(0, 500));
-      const refundResult = await refundCredits(db, user.id, deduction, taskId);
-      await releaseTask(db, user.id, taskId, 'failed', `OpenRouter ${response.status}: ${rawBody.slice(0, 200)}`);
+      console.error('[seedance-start] provider error body:', provider, response.status, rawBody.slice(0, 500));
+      let refunded = false;
+      if (provider === 'wavespeed') {
+        const refundResult = await db.rpc('refund_generation_task_atomic', { p_task_id: taskId, p_error_message: `WaveSpeed ${response.status}: ${rawBody.slice(0, 200)}` });
+        refunded = !refundResult.error && refundResult.data?.ok === true && ['refunded', 'already_refunded'].includes(refundResult.data.code);
+      } else {
+        const refundResult = await refundCredits(db, user.id, deduction, taskId);
+        await releaseTask(db, user.id, taskId, 'failed', `OpenRouter ${response.status}: ${rawBody.slice(0, 200)}`);
+        refunded = refundResult.ok;
+      }
       const classified = classifyProviderError(rawBody, response.status);
       const orMsg = PROVIDER_ERROR_MESSAGES[classified.category]
         || (response.status === 403
@@ -648,27 +743,36 @@ module.exports = async function handler(req, res) {
         providerErrorCode: classified.code,
         error_detail: rawBody.slice(0, 1000),
         openrouterStatus: response.status,
-        creditRefunded: refundResult.ok ? creditCost : 0,
-        refunded: refundResult.ok,
+        creditRefunded: refunded ? creditCost : 0,
+        refunded,
         checkedAt: new Date().toISOString()
       });
     }
 
     const jobId = extractJobId(data);
-    const orPollingUrl = data?.polling_url || data?.pollingUrl || null;
+    const orPollingUrl = provider === 'wavespeed' && jobId
+      ? `${WAVESPEED_API_BASE}/predictions/${encodeURIComponent(jobId)}/result`
+      : (data?.polling_url || data?.pollingUrl || null);
     console.log('[seedance-start] OR response keys:', Object.keys(data && typeof data === 'object' ? data : {}));
     console.log('[seedance-start] OR response preview:', JSON.stringify(data).slice(0, 600));
     console.log('[seedance-start] OpenRouter accepted, jobId:', jobId, 'pollingUrl:', orPollingUrl, 'taskId:', taskId);
 
     if (!jobId && !orPollingUrl) {
       console.error('[seedance-start] OpenRouter 200 but no jobId or pollingUrl — cannot track job, refunding', 'taskId:', taskId);
-      const refundResult = await refundCredits(db, user.id, deduction, taskId);
-      await releaseTask(db, user.id, taskId, 'failed');
+      let refunded = false;
+      if (provider === 'wavespeed') {
+        const refundResult = await db.rpc('refund_generation_task_atomic', { p_task_id: taskId, p_error_message: 'WaveSpeed response missing prediction id' });
+        refunded = !refundResult.error && refundResult.data?.ok === true && ['refunded', 'already_refunded'].includes(refundResult.data.code);
+      } else {
+        const refundResult = await refundCredits(db, user.id, deduction, taskId);
+        await releaseTask(db, user.id, taskId, 'failed');
+        refunded = refundResult.ok;
+      }
       return res.status(502).json({
         ok: false,
         error: 'OpenRouterから有効なジョブIDが返されませんでした。もう一度お試しください。',
-        creditRefunded: refundResult.ok ? creditCost : 0,
-        refunded: refundResult.ok,
+        creditRefunded: refunded ? creditCost : 0,
+        refunded,
         checkedAt: new Date().toISOString()
       });
     }
@@ -683,6 +787,7 @@ module.exports = async function handler(req, res) {
             status: 'processing',
             api_task_id: jobId || null,
             polling_url: orPollingUrl || null,
+            api_provider: provider,
             updated_at: new Date().toISOString()
           })
           .eq('id', taskId)
@@ -712,6 +817,7 @@ module.exports = async function handler(req, res) {
             status: 'processing',
             api_task_id: jobId || null,
             polling_url: orPollingUrl || null,
+            api_provider: provider,
             updated_at: new Date().toISOString()
           })
           .eq('id', taskId)
@@ -745,10 +851,10 @@ module.exports = async function handler(req, res) {
     return res.status(202).json({
       ok: true,
       status: response.status,
-      provider: 'openrouter',
-      model: payload.model,
+      provider,
+      model,
       jobId,
-      pollingUrl: data?.polling_url || data?.pollingUrl || null,
+      pollingUrl: orPollingUrl,
       jobStatus: data?.status || data?.data?.status || null,
       taskId,
       creditCost,
@@ -779,3 +885,5 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', refunded, checkedAt: new Date().toISOString() });
   }
 };
+
+module.exports._test = { buildWaveSpeedPayload };

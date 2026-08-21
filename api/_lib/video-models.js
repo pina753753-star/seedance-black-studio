@@ -74,11 +74,16 @@ const VIDEO_MODELS = Object.freeze({
     canonicalSlug: 'bytedance/seedance-2.5-20260807',
     displayName: 'Seedance 2.5',
     provider: 'openrouter',
+    providersByResolution: Object.freeze({
+      '480p': 'openrouter',
+      '720p': 'openrouter',
+      '1080p': 'wavespeed'
+    }),
     status: MODEL_STATUS.ACTIVE,
     enabledForGeneration: true,
     metadataConfidence: 'live_openrouter_video_models_api_2026-08-20',
     durations: Object.freeze({ type: 'integer_range', min: 4, max: 30, integerOnly: true }),
-    resolutions: Object.freeze(['480p', '720p']),
+    resolutions: Object.freeze(['480p', '720p', '1080p']),
     aspectRatios: Object.freeze(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9']),
     sizes: Object.freeze([
       '854x480', '752x560', '640x640', '560x752', '480x854', '992x432',
@@ -99,7 +104,7 @@ const VIDEO_MODELS = Object.freeze({
     pricingProfile: 'seedance_2_5_v1',
     notes: Object.freeze([
       'Metadata was retrieved from the OpenRouter video models API on 2026-08-20.',
-      'Only 480p and 720p are enabled because those are the formal supported_resolutions values.',
+      '480p and 720p use OpenRouter; 1080p uses WaveSpeed Seedance 2.5 Turbo.',
       'Video and audio references are recorded as capabilities but are not exposed by the normal generation UI.',
       'AI video editing remains a separate application flow and is not enabled by this model entry.'
     ])

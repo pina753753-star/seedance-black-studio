@@ -5,12 +5,13 @@ const assert = require('node:assert/strict');
 const { ACTIVE_MODEL_IDS, getVideoModel } = require('../api/_lib/video-models');
 const { validateVideoGenerationOptions } = require('../api/_lib/video-model-validation');
 
-test('Seedance 2.5 is active with the OpenRouter capabilities verified on 2026-08-20', () => {
+test('Seedance 2.5 routes only 1080p to WaveSpeed', () => {
   const model = getVideoModel('bytedance/seedance-2.5');
   assert.ok(model);
   assert.equal(model.enabledForGeneration, true);
   assert.ok(ACTIVE_MODEL_IDS.includes(model.id));
-  assert.deepEqual(model.resolutions, ['480p', '720p']);
+  assert.deepEqual(model.resolutions, ['480p', '720p', '1080p']);
+  assert.deepEqual(model.providersByResolution, { '480p': 'openrouter', '720p': 'openrouter', '1080p': 'wavespeed' });
   assert.deepEqual(model.durations, { type: 'integer_range', min: 4, max: 30, integerOnly: true });
   assert.ok(model.aspectRatios.includes('21:9'));
   assert.equal(model.pricingSkus.videoTokens, '0.0000107');
@@ -29,12 +30,11 @@ test('Seedance 2.5 accepts its minimum and maximum duration', () => {
   }
 });
 
-test('Seedance 2.5 rejects 1080p and durations outside 4-30 seconds', () => {
+test('Seedance 2.5 accepts 1080p and rejects durations outside 4-30 seconds', () => {
   const resolution = validateVideoGenerationOptions({
     model: 'bytedance/seedance-2.5', resolution: '1080p', duration: 5
   });
-  assert.equal(resolution.ok, false);
-  assert.equal(resolution.error, 'invalid_resolution');
+  assert.equal(resolution.ok, true);
 
   for (const duration of [3, 31, 4.5, null]) {
     const result = validateVideoGenerationOptions({
