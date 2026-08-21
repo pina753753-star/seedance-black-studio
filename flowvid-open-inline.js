@@ -12,7 +12,7 @@
     return Math.ceil(Math.max(50,Math.min(maxCredits,value))/5)*5;
   }
 
-  function computeCredits({duration,resolution,model,mode}){
+  function computeCredits({duration,resolution,model,mode,plan}){
     if(model===SEEDANCE_25_MODEL){
       const creditsPerSecond=SEEDANCE_25_CREDITS_PER_SECOND[resolution]||SEEDANCE_25_CREDITS_PER_SECOND['720p'];
       return roundUpToFive(duration*creditsPerSecond,SEEDANCE_25_MAX_CREDITS);
@@ -36,12 +36,13 @@
     const resolution=document.getElementById('resolution')?.value||'720p';
     const model=document.getElementById('model')?.value||FAST_MODEL;
     const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
-    return computeCredits({duration,resolution,model,mode});
+    const plan=localStorage.getItem('flowvidPlan')||localStorage.getItem('plan')||'free';
+    return computeCredits({duration,resolution,model,mode,plan});
   }
 
   function syncCreditButton(){
     const button=document.getElementById('create');
-    if(!button)return;
+    if(!button||button.disabled)return;
     const expected='作成する ✦ '+calculateCredits();
     if(button.textContent!==expected)button.textContent=expected;
   }

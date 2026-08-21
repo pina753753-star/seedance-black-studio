@@ -6,7 +6,13 @@ const { checkGenerationControl, REFUND_UNCONFIRMED_MESSAGE } = require('./genera
 const { calculateVideoCreditCost } = require('./video-pricing.js');
 const { DEFAULT_MODEL, validateVideoGenerationOptions } = require('./video-model-validation.js');
 const { buildProviderPrompt } = require('./video-provider-prompt.js');
-const { normalizeReferenceAudioPaths, createReferenceAudioSignedUrls } = require('./reference-audio.js');
+const {
+  normalizeReferenceAudioPaths,
+  createReferenceAudioSignedUrls,
+  REFERENCE_AUDIO_RETENTION_MS,
+  REFERENCE_AUDIO_REGISTRY_TABLE
+} = require('./reference-audio.js');
+const { getSeedance25Entitlement } = require('./video-plan-entitlements.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
@@ -377,6 +383,26 @@ module.exports = async function handler(req, res) {
     });
     if (!options.ok) return res.status(400).json({ ok: false, error: options.error, message: options.message });
     const { resolution, aspectRatio, duration, mode, model } = options;
+    let generationPlan = 'free';
+    if (model === 'bytedance/seedance-2.5') {
+      const entitlement = await getSeedance25Entitlement(db, user.id);
+      if (!entitlement.ok) {
+        return res.status(503).json({
+          ok: false,
+          error: 'plan_check_unavailable',
+          message: '現在プランを確認できないため、Seedance 2.5を開始できません。しばらくしてからもう一度お試しください。'
+        });
+      }
+      if (!entitlement.allowed) {
+        return res.status(403).json({
+          ok: false,
+          error: 'seedance_25_plan_required',
+          message: 'Seedance 2.5・1080p・曲アップロードはPremium以上で利用できます。',
+          redirect: '/pricing.html#monthly'
+        });
+      }
+      generationPlan = entitlement.plan;
+    }
     const provider = model === 'bytedance/seedance-2.5' && resolution === '1080p'
       ? 'wavespeed'
       : 'openrouter';
@@ -400,6 +426,21 @@ module.exports = async function handler(req, res) {
         error: 'reference_audio_not_supported',
         message: '参照音源はSeedance 2.5・1080pのテキスト／リファレンス生成で利用できます。'
       });
+    }
+    if (normalizedAudio.paths.length) {
+      const expiresAt = new Date(Date.now() + REFERENCE_AUDIO_RETENTION_MS).toISOString();
+      const { error: retentionError } = await db
+        .from(REFERENCE_AUDIO_REGISTRY_TABLE)
+        .update({ expires_at: expiresAt })
+        .eq('user_id', user.id)
+        .in('path', normalizedAudio.paths);
+      if (retentionError) {
+        return res.status(503).json({
+          ok: false,
+          error: 'reference_audio_retention_failed',
+          message: '音源の安全な保持期間を確認できないため、生成を開始できません。もう一度添付してください。'
+        });
+      }
     }
     const signedAudio = await createReferenceAudioSignedUrls(db, normalizedAudio.paths);
     if (!signedAudio.ok) {
@@ -458,7 +499,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const creditCost = calculateVideoCreditCost({ ...body, mode, duration, resolution, model });
+    const creditCost = calculateVideoCreditCost({ ...body, mode, duration, resolution, model, plan: generationPlan });
 
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db

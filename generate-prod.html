@@ -66,9 +66,9 @@
 <div id="uploadProgress" style="display:none"></div>
 <div class="audioRef" id="audioReference"><div class="audioRefTop"><label class="audioPick"><input id="audioFile" type="file" accept="audio/mpeg,.mp3"><span>♪ 曲を添付</span></label><div class="audioInfo"><div class="audioName" id="audioName">MP3・最大15MB</div><div class="audioNote" id="audioNote">Seedance 2.5・1080pで@audio1として使用します</div></div><button class="audioRemove" id="audioRemove" type="button" aria-label="音源を削除">×</button></div><div class="audioHelp">動画と同じ長さに切り出したMP3がおすすめです。長い曲を添付して「何秒から」と指定すると、使用位置がずれる場合があります。</div></div>
 <div class="prompt"><textarea id="prompt" placeholder="キャラクター、商品、シーン、動きを入力してください。"></textarea></div>
-<details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5">Seedance 2.5</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
+<details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5">Seedance 2.5（Premium以上）</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
 <button class="create" id="create">作成する ✦ 80</button>
-<div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
+<div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="planWarning" style="display:none;margin-top:10px;background:rgba(232,203,116,.07);border:1px solid rgba(232,203,116,.28);border-radius:14px;padding:12px 16px;color:#f4d98d;font-size:13px;font-weight:700;line-height:1.6">Seedance 2.5・1080p・曲アップロードはPremium以上で利用できます。<br><a href="./pricing.html#monthly" style="color:#fff;text-decoration:underline">プランを見る →</a></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
 <div class="mini"></div>
 <pre class="log" id="log"></pre>
 </section>
@@ -90,7 +90,7 @@
   </div>
 
   <details class="settings" open><summary>設定</summary><div class="settingsBody">
-    <div class="field"><label>モデル</label><select id="sbModel"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5">Seedance 2.5</option></select></div>
+    <div class="field"><label>モデル</label><select id="sbModel"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5">Seedance 2.5（Premium以上）</option></select></div>
     <div class="field"><label>アスペクト比</label><select id="sbAspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div>
     <div class="field"><label>長さ</label><select id="sbDuration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div>
     <div class="field"><label>解像度</label><select id="sbResolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div>
@@ -194,11 +194,15 @@ let uploadQueueRunning=false;
 let imgAsset=null;
 let imgUploadRunning=false;
 let audioAsset=null;
+let generationRequestInFlight=false;
+let activePlan='free';
+let seedance25Access=false;
+const SEEDANCE_25_ALLOWED_PLANS=['premium','ultimate','team','scale'];
 // mode(image_to_video/reference_to_video)に応じた「現在表示・判定対象の画像リスト」を返す。
 // updateCreditUi()/updateUploadProgressUi()/start()の状態チェックで共通利用する。
 function currentModeAssetList(){return mode==='image_to_video'?(imgAsset?[imgAsset]:[]):assets}
-function canUseReferenceAudio(){return $('model')?.value===SEEDANCE_25_MODEL&&$('resolution')?.value==='1080p'&&mode!=='image_to_video'&&mode!=='video_edit'}
-function syncReferenceAudioUi(){const panel=$('audioReference');if(!panel)return;const relevant=$('model')?.value===SEEDANCE_25_MODEL&&mode!=='image_to_video'&&mode!=='video_edit';panel.style.display=(relevant||audioAsset)?'block':'none';const usable=canUseReferenceAudio();$('audioFile').disabled=!usable||audioAsset?.status==='uploading';$('audioRemove').style.display=audioAsset&&audioAsset.status!=='uploading'?'block':'none';$('audioName').textContent=audioAsset?.name||'MP3・最大15MB';if(audioAsset?.status==='uploading')$('audioNote').textContent='音源を安全にアップロード中…';else if(audioAsset?.status==='completed')$('audioNote').textContent='添付完了・プロンプトでは @audio1 として指定できます';else if(audioAsset?.status==='failed')$('audioNote').textContent=audioAsset.error||'アップロードに失敗しました';else $('audioNote').textContent=usable?'Seedance 2.5・1080pで@audio1として使用します':'音源を使うには解像度を1080pにしてください'}
+function canUseReferenceAudio(){return seedance25Access&&$('model')?.value===SEEDANCE_25_MODEL&&$('resolution')?.value==='1080p'&&mode!=='image_to_video'&&mode!=='video_edit'}
+function syncReferenceAudioUi(){const panel=$('audioReference');if(!panel)return;const relevant=$('model')?.value===SEEDANCE_25_MODEL&&mode!=='image_to_video'&&mode!=='video_edit';panel.style.display=(relevant||audioAsset)?'block':'none';const usable=canUseReferenceAudio();$('audioFile').disabled=!usable||audioAsset?.status==='uploading'||generationRequestInFlight;$('audioRemove').style.display=audioAsset&&audioAsset.status!=='uploading'&&!generationRequestInFlight?'block':'none';$('audioName').textContent=audioAsset?.name||'MP3・最大15MB';if(audioAsset?.status==='uploading')$('audioNote').textContent='音源を安全にアップロード中…';else if(audioAsset?.status==='completed')$('audioNote').textContent=generationRequestInFlight?'生成受付中・音源を安全に保持しています':'添付完了・プロンプトでは @audio1 として指定できます';else if(audioAsset?.status==='failed')$('audioNote').textContent=audioAsset.error||'アップロードに失敗しました';else if(!seedance25Access)$('audioNote').textContent='曲アップロードはPremium以上で利用できます';else $('audioNote').textContent=usable?'Seedance 2.5・1080pで@audio1として使用します':'音源を使うには解像度を1080pにしてください'}
 let sbFile=null;
 let sbResizedBase64='';
 let sbLocked=false;
@@ -212,6 +216,9 @@ function notice(t,b=false){}
 function log(x,b=false){}
 function getPlan(){return localStorage.getItem('flowvidPlan')||localStorage.getItem('plan')||'free'}
 function isPaid(){return /^(paid|pro|premium|business|creator)$/i.test(getPlan())}
+function hasActiveSeedance25Plan(plan,expiresAt){const normalized=String(plan||'free').toLowerCase();const expiresMs=Date.parse(String(expiresAt||''));return SEEDANCE_25_ALLOWED_PLANS.includes(normalized)&&Number.isFinite(expiresMs)&&expiresMs>Date.now()}
+function syncSeedance25PlanUi(){const locked=$('model')?.value===SEEDANCE_25_MODEL&&!seedance25Access;const warning=$('planWarning');if(warning)warning.style.display=locked?'block':'none';syncReferenceAudioUi();updateCreditUi();if(typeof sbSyncPlanAccess==='function')sbSyncPlanAccess()}
+async function loadGenerationPlan(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return;if(!window.__flowvidUserClient)window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return;const[profileResult,balanceResult]=await Promise.all([window.__flowvidUserClient.from('profiles').select('plan').eq('id',user.id).maybeSingle(),window.__flowvidUserClient.from('credit_balances').select('subscription_expires_at').eq('user_id',user.id).maybeSingle()]);if(profileResult.error||balanceResult.error)return;activePlan=String(profileResult.data?.plan||'free').toLowerCase();seedance25Access=hasActiveSeedance25Plan(activePlan,balanceResult.data?.subscription_expires_at);localStorage.setItem('flowvidPlan',activePlan)}finally{syncSeedance25PlanUi()}}
 // 絵コンテ確定プレビュー中(sbLocked)は、内部modeが一時的にreference_to_videoになっていても
 // 通常タブの下書き(referenceUrls/prompt_<mode>)へは一切書き込まない。絵コンテタブ選択中
 // (mode==='storyboard')も同様に、タブ選択状態(d.mode)だけは記録しつつ画像・プロンプトは
@@ -267,6 +274,7 @@ function clearAcceptedGenerationInputs(submission){
 const SEEDANCE_25_MODEL='bytedance/seedance-2.5';
 const SEEDANCE_25_MAX_CREDITS=600;
 const SEEDANCE_25_CREDITS_PER_SECOND={'480p':245/30,'720p':550/30,'1080p':20};
+const TEAM_SEEDANCE_25_DISCOUNT=.95;
 function pricingMultiplier(model){return model==='bytedance/seedance-2.0-fast'||model==='bytedance/seedance-2.0-lite'?0.8:1}
 function pricingMaxCredits(model){return model===SEEDANCE_25_MODEL?SEEDANCE_25_MAX_CREDITS:400}
 function roundUpToFive(v,maxCredits=400){return Math.ceil(Math.max(50,Math.min(maxCredits,v))/5)*5;}
@@ -276,7 +284,7 @@ function creditEstimate(){const duration=Number($('duration')?.value||5);const r
   // 通常のリファレンスタブは画像の内容にかかわらず実際のアップロード完了枚数(urls.length)、
   // image_to_videoは1枚、text_to_videoは0枚とする。
   const refs=mode==='text_to_video'?0:(sbLocked?1:(mode==='image_to_video'?1:urls.length));
-  if(model===SEEDANCE_25_MODEL){const creditsPerSecond=SEEDANCE_25_CREDITS_PER_SECOND[resolution]||SEEDANCE_25_CREDITS_PER_SECOND['720p'];return roundUpToFive(duration*creditsPerSecond,SEEDANCE_25_MAX_CREDITS);}const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12),maxCredits);let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);}
+  if(model===SEEDANCE_25_MODEL){const creditsPerSecond=SEEDANCE_25_CREDITS_PER_SECOND[resolution]||SEEDANCE_25_CREDITS_PER_SECOND['720p'];const base=roundUpToFive(duration*creditsPerSecond,SEEDANCE_25_MAX_CREDITS);return activePlan==='team'?roundUpToFive(base*TEAM_SEEDANCE_25_DISCOUNT,SEEDANCE_25_MAX_CREDITS):base;}const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12),maxCredits);let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);}
 function updateCreditUi(){
   const c=creditEstimate();
   const btn=$('create');
@@ -288,7 +296,10 @@ function updateCreditUi(){
     // 通常assetsのpending/uploading/failedで生成を止めない。
     const imageMode=!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video');
     const list=currentModeAssetList();
-    if(audioAsset&&!canUseReferenceAudio()){
+    if($('model')?.value===SEEDANCE_25_MODEL&&!seedance25Access){
+      btn.disabled=true;
+      btn.textContent='Premium以上で利用できます';
+    }else if(audioAsset&&!canUseReferenceAudio()){
       btn.disabled=true;
       btn.textContent='音源を使うにはSeedance 2.5・1080pを選択してください';
     }else if(audioAsset?.status==='uploading'){
@@ -726,6 +737,7 @@ async function uploadReferenceAudio(file){
   const type=String(file.type||'').toLowerCase();
   if(!['audio/mpeg','audio/mp3'].includes(type)&&!String(file.name||'').toLowerCase().endsWith('.mp3')){audioAsset={status:'failed',name:file.name||'音源',error:'MP3形式の音源を選択してください'};syncReferenceAudioUi();updateCreditUi();return}
   if(file.size<=0||file.size>15*1024*1024){audioAsset={status:'failed',name:file.name||'音源',error:'音源は15MB以下にしてください'};syncReferenceAudioUi();updateCreditUi();return}
+  const previousAudio=audioAsset?.status==='completed'?{...audioAsset}:null;
   audioAsset={id:'audio-'+Date.now(),status:'uploading',name:file.name||'参照音源',path:'',error:''};syncReferenceAudioUi();updateCreditUi();
   try{
     const token=await getToken();if(!token){location.href='./login.html';return}
@@ -736,18 +748,20 @@ async function uploadReferenceAudio(file){
     const{error}=await client.storage.from(urlData.bucket).uploadToSignedUrl(urlData.path,urlData.token,file,{contentType:urlData.contentType||'audio/mpeg'});
     if(error)throw error;
     audioAsset.status='completed';audioAsset.path=urlData.path;
-  }catch(error){audioAsset.status='failed';audioAsset.error=error?.message||'音源のアップロードに失敗しました'}
+    if(previousAudio?.path&&previousAudio.path!==urlData.path)deleteReferenceAudioPath(previousAudio.path);
+  }catch(error){if(previousAudio)audioAsset=previousAudio;else{audioAsset.status='failed';audioAsset.error=error?.message||'音源のアップロードに失敗しました'}}
   syncReferenceAudioUi();updateCreditUi();
 }
 
-function removeReferenceAudio(){if(audioAsset?.status==='uploading')return;audioAsset=null;if($('audioFile'))$('audioFile').value='';syncReferenceAudioUi();updateCreditUi()}
+async function deleteReferenceAudioPath(path){if(!path)return false;try{const token=await getToken();if(!token)return false;const response=await fetch('/api/reference-audio-delete',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({path})});return response.ok}catch(_){return false}}
+function removeReferenceAudio(){if(audioAsset?.status==='uploading'||generationRequestInFlight)return;const path=audioAsset?.path||'';audioAsset=null;if($('audioFile'))$('audioFile').value='';syncReferenceAudioUi();updateCreditUi();if(path)deleteReferenceAudioPath(path)}
 
 async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return null;if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return null;const{data}=await window.__flowvidUserClient.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',user.id).maybeSingle();return Number(data?.free_credits||0)+Number(data?.subscription_credits||0)+Number(data?.purchased_credits||0)}catch(_){return null}}
 
 function showCreditShortage(needed,balance){const el=$('creditStatus');if(!el)return;const shortage=needed-balance;el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="color:#fca5a5;font-weight:800;font-size:15px">クレジットが足りません</div><button type="button" onclick="hideCreditStatus()" aria-label="閉じる" style="background:none;border:none;color:#9ca3af;font-size:20px;line-height:1;cursor:pointer;padding:0 4px;flex-shrink:0">×</button></div><div style="color:#d1d5db;font-size:13px;line-height:1.9;margin-bottom:12px">必要: '+needed+' cr<br>現在: '+balance+' cr<br>不足: '+shortage+' cr</div><a href="./pricing.html#credit" style="display:inline-block;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:12px;padding:10px 18px;font-weight:800;text-decoration:none;font-size:14px">クレジットを購入 →</a>';el.style.display='block';setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50)}
 function hideCreditStatus(){const el=$('creditStatus');if(el)el.style.display='none'}
 
-async function start(){if(audioAsset&&(!canUseReferenceAudio()||audioAsset.status!=='completed'))return;if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&currentModeAssetList().some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const rawPrompt=$('prompt').value;const prompt=rawPrompt.trim();if(!prompt)return;const hasRequiredImage=mode==='text_to_video'?true:(sbLocked?!!sbGenerationImageUrl:(mode==='image_to_video'?!!(imgAsset&&imgAsset.status==='completed'&&imgAsset.url):!!urls.length));if(!hasRequiredImage)return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(audioAsset?.status==='completed')body.reference_audio_paths=[audioAsset.path];if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const submission={mode,rawPrompt,storyboardLocked:sbLocked,storyboardImageUrl:sbLocked?sbGenerationImageUrl:'',assetIds:sbLocked?[]:currentModeAssetList().map(a=>a.id),audioId:audioAsset?.id||''};try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});clearAcceptedGenerationInputs(submission);loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}}
+async function start(){if($('model')?.value===SEEDANCE_25_MODEL&&!seedance25Access){syncSeedance25PlanUi();$('planWarning')?.scrollIntoView({behavior:'smooth',block:'nearest'});return}if(audioAsset&&(!canUseReferenceAudio()||audioAsset.status!=='completed'))return;if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&currentModeAssetList().some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const rawPrompt=$('prompt').value;const prompt=rawPrompt.trim();if(!prompt)return;const hasRequiredImage=mode==='text_to_video'?true:(sbLocked?!!sbGenerationImageUrl:(mode==='image_to_video'?!!(imgAsset&&imgAsset.status==='completed'&&imgAsset.url):!!urls.length));if(!hasRequiredImage)return;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){showCreditShortage(c,balance);return}$('create').disabled=true;const tmpId='tmp_'+Date.now();_activePtId=tmpId;_ptInsertCard({id:tmpId,prompt,mode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(audioAsset?.status==='completed')body.reference_audio_paths=[audioAsset.path];if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const submission={mode,rawPrompt,storyboardLocked:sbLocked,storyboardImageUrl:sbLocked?sbGenerationImageUrl:'',assetIds:sbLocked?[]:currentModeAssetList().map(a=>a.id),audioId:audioAsset?.id||''};generationRequestInFlight=true;syncReferenceAudioUi();try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl});clearAcceptedGenerationInputs(submission);loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}finally{generationRequestInFlight=false;syncReferenceAudioUi()}}
 
 
 function restoreDraft(){draft=readDraft();const p=draft['prompt_'+mode]||'';if(p)$('prompt').value=p;[['model',draft.model],['aspect',draft.aspect],['duration',draft.duration],['resolution',draft.resolution]].forEach(([id,val])=>{if($(id)&&val)$(id).value=val});setAssetsFromUrls(Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):urls)}
@@ -1181,7 +1195,7 @@ $('veResultSave').addEventListener('click',veSaveEditedVideo);
   if(typeof sbLocked!=='undefined'&&sbLocked&&typeof sbWriteDraft==='function'){
     sbWriteDraft({model:$('model')?.value,resolution:$('resolution')?.value});
   }
-  syncComboWarning();syncReferenceAudioUi();updateCreditUi();
+  syncComboWarning();syncSeedance25PlanUi();
 }));
 $('prompt').addEventListener('input',persistDraft);
 $('assets').addEventListener('click',e=>{
@@ -1208,7 +1222,7 @@ if(!sbRestored){
   // 最初からvideo_editへ復元する。
   if(q==='video_edit'){onVideoEditTab()}else{setMode(['image_to_video','text_to_video','storyboard','reference_to_video'].includes(q)?q:'text_to_video')}
 }
-renderAssets();syncReferenceAudioUi();updateCreditUi();syncComboWarning();
+renderAssets();syncReferenceAudioUi();updateCreditUi();syncComboWarning();loadGenerationPlan();
 
 // ---- pending tasks ----
 const _pendingPollers={};
@@ -1295,7 +1309,8 @@ function sbUpdateCreditEstimate(){
     duration:Number($('sbDuration').value||5),
     resolution:$('sbResolution').value||'720p',
     model:$('sbModel').value||'bytedance/seedance-2.0-fast',
-    mode:'reference_to_video'
+    mode:'reference_to_video',
+    plan:activePlan
   });
   el.textContent=String(credits);
 }
@@ -1304,6 +1319,13 @@ function sbUpdateCreditEstimate(){
 // isComboBlocked()/syncComboWarning()と同じ制約)ため、絵コンテ側でも
 // 生成前に同じ組み合わせを防ぐ。1080p固定でプロンプトを作成した後に
 // 生成側で弾かれる事態を避ける。
+function sbSyncPlanAccess(){
+  const locked=$('sbModel')?.value===SEEDANCE_25_MODEL&&!seedance25Access;
+  const btn=$('sbAnalyzeBtn');
+  if(!btn)return;
+  if(locked){btn.disabled=true;btn.textContent='Seedance 2.5はPremium以上で利用できます'}
+  else if(!btn.textContent.includes('作成中')){btn.disabled=!sbFile;btn.textContent='プロンプトを作る ✦'}
+}
 function sbSyncResolutionLock(){
   const selectedModel=$('sbModel').value;
   const isFastLite=selectedModel==='bytedance/seedance-2.0-fast'||selectedModel==='bytedance/seedance-2.0-lite';
@@ -1312,6 +1334,7 @@ function sbSyncResolutionLock(){
   syncSelectModelCapabilities(selectedModel,'sbDuration','sbResolution','sbAspect');
   if(opt1080)opt1080.disabled=isFastLite;
   if(isFastLite&&resEl.value==='1080p')resEl.value='720p';
+  sbSyncPlanAccess();
 }
 $('sbModel').addEventListener('change',()=>{sbSyncResolutionLock();sbUpdateCreditEstimate();});
 $('sbDuration').addEventListener('change',sbUpdateCreditEstimate);
@@ -1342,7 +1365,7 @@ $('sbFile').onchange=e=>{
     $('sbImg').src=r.result;
     $('sbPreview').style.display='block';
     $('sbPlaceholder').style.display='none';
-    $('sbAnalyzeBtn').disabled=false;
+    sbSyncPlanAccess();
   };
   r.readAsDataURL(sbFile);
 };
@@ -1367,6 +1390,7 @@ function sbResizeToBase64(dataUrl){
 
 $('sbAnalyzeBtn').onclick=async()=>{
   if(!sbFile)return;
+  if($('sbModel')?.value===SEEDANCE_25_MODEL&&!seedance25Access){sbSyncPlanAccess();return}
   const token=await getToken();
   if(!token){location.href='./login.html';return}
   $('sbNotice').style.display='none';
@@ -1409,8 +1433,8 @@ $('sbAnalyzeBtn').onclick=async()=>{
     $('sbNotice').textContent='エラー: '+e.message;
     $('sbNotice').style.display='block';
   }finally{
-    $('sbAnalyzeBtn').disabled=false;
     $('sbAnalyzeBtn').textContent='プロンプトを作る ✦';
+    sbSyncPlanAccess();
   }
 };
 

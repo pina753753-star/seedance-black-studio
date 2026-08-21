@@ -36,8 +36,10 @@ test('browser and server credit estimates stay identical for all enabled models'
     for (const mode of modes) {
       for (const resolution of resolutions) {
         for (const duration of durations) {
-          const input = { model, mode, resolution, duration };
-          assert.equal(clientCalculate(input), calculateVideoCreditCost(input), JSON.stringify(input));
+          for (const plan of ['free', 'team']) {
+            const input = { model, mode, resolution, duration, plan };
+            assert.equal(clientCalculate(input), calculateVideoCreditCost(input), JSON.stringify(input));
+          }
         }
       }
     }

@@ -5,6 +5,8 @@ const REFERENCE_AUDIO_PREFIX = 'users';
 const MAX_REFERENCE_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_REFERENCE_AUDIO_FILES = 1;
 const REFERENCE_AUDIO_SIGNED_URL_TTL_SECONDS = 60 * 60;
+const REFERENCE_AUDIO_RETENTION_MS = 24 * 60 * 60 * 1000;
+const REFERENCE_AUDIO_REGISTRY_TABLE = 'seedance_reference_audio_uploads';
 
 function normalizeReferenceAudioPaths(value, userId) {
   const values = Array.isArray(value) ? value : (value ? [value] : []);
@@ -59,6 +61,8 @@ async function createReferenceAudioSignedUrls(db, paths) {
 module.exports = {
   REFERENCE_AUDIO_BUCKET,
   MAX_REFERENCE_AUDIO_BYTES,
+  REFERENCE_AUDIO_RETENTION_MS,
+  REFERENCE_AUDIO_REGISTRY_TABLE,
   normalizeReferenceAudioPaths,
   isMp3Header,
   createReferenceAudioSignedUrls
