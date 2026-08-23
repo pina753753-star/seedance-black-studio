@@ -503,3 +503,8 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - 4ケース(招待コードなし/あり/無効コード/invite_required=false時)を本番Supabaseで実機検証済み、全て想定通り。
 - Supabase Auth設定、CAPTCHA、年齢確認、既存クレジット付与済みユーザーのデータには変更なし。
 - PR #190(マージコミット764c7fa)、PR #192(マージコミットfa9937b)で本番反映済み。
+
+## 確認: 一般公開前の確認メール送信設定(2026-08-23)
+- 背景: SNS告知に向けて、確認メールの送信上限を確認した。標準のSupabaseメール送信機能だと1時間あたり2通という制限があり、SNS告知時のアクセス集中でボトルネックになる懸念があった。
+- 確認結果: 本番Supabase(Authentication → Emails → SMTP Settings)で、既にカスタムSMTP(Resend、smtp.resend.com:465)が設定・有効化済みであることを確認した。送信元アドレスはnoreply@pinastudio.jp、Minimum interval per userは60秒。
+- 結論: 標準SMTPの制限(1時間2通)は該当せず、SNS告知時の確認メール遅延リスクは低いと判断。設定変更は行っていない(既存設定の確認のみ)。
