@@ -176,5 +176,8 @@ test('画面は無料付与だけを提供し、リセットや直接DB更新を
   assert.match(page, /無料クレジット付与/);
   assert.doesNotMatch(page, /resetFree|無料分を0に戻す/);
   assert.doesNotMatch(page, /\.from\(['"]credit_balances['"]\)[\s\S]{0,200}\.update\(/);
-  assert.match(admin, /安全な付与画面を開く/);
+  // ダッシュボードのカード導線はハンバーガーメニューへ整理済み。
+  // admin.htmlのハンバーガーメニューから、専用付与画面へのリンクが
+  // 維持されていることを確認する。
+  assert.match(admin, /href="\.\/admin-credit-grant\.html"/);
 });
