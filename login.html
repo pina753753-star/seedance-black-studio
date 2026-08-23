@@ -68,7 +68,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-config.js?v=4a1f0c1"></script>
   <script src="./auth-guard.js?v=1"></script>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=flowvidTurnstileReady&amp;render=explicit" defer></script>
   <script>
     let mode='login';
     const loginTab=document.getElementById('loginTab');
@@ -96,20 +96,27 @@
     const captchaField=document.getElementById('captchaField');
     const captchaWidget=document.getElementById('captchaWidget');
     let captchaToken='';
+    let captchaWidgetId;
     window.flowvidCaptchaSuccess=function(token){captchaToken=token||'';};
     window.flowvidCaptchaExpired=function(){captchaToken='';};
     if(turnstileSiteKey&&captchaField&&captchaWidget){
       captchaField.hidden=false;
-      captchaWidget.className='cf-turnstile';
-      captchaWidget.setAttribute('data-sitekey',turnstileSiteKey);
-      captchaWidget.setAttribute('data-callback','flowvidCaptchaSuccess');
-      captchaWidget.setAttribute('data-expired-callback','flowvidCaptchaExpired');
-      captchaWidget.setAttribute('data-error-callback','flowvidCaptchaExpired');
     }
+    window.flowvidTurnstileReady=function(){
+      if(!turnstileSiteKey||!captchaWidget||!window.turnstile||captchaWidgetId!==undefined)return;
+      captchaWidgetId=window.turnstile.render(captchaWidget,{
+        sitekey:turnstileSiteKey,
+        theme:'dark',
+        size:'flexible',
+        callback:window.flowvidCaptchaSuccess,
+        'expired-callback':window.flowvidCaptchaExpired,
+        'error-callback':window.flowvidCaptchaExpired
+      });
+    };
     function resetCaptcha(){
       captchaToken='';
-      if(turnstileSiteKey&&window.turnstile&&typeof window.turnstile.reset==='function'){
-        try{window.turnstile.reset(captchaWidget);}catch(_){}
+      if(turnstileSiteKey&&captchaWidgetId!==undefined&&window.turnstile&&typeof window.turnstile.reset==='function'){
+        try{window.turnstile.reset(captchaWidgetId);}catch(_){}
       }
     }
     function formatDateParts(parts){
