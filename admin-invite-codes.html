@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>招待コード管理 | Pina Studio</title>
+<meta name="theme-color" content="#050506">
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{--bg:#050506;--card:#121216;--line:rgba(255,255,255,.14);--muted:rgba(255,255,255,.64);--gold:#d7b86a;--red:#fb7185;--ok:#86efac}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:640px;margin:0 auto;padding:16px 12px 44px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:26px}.brand{color:#fff;text-decoration:none;font-weight:950;font-size:20px}.back{color:#fff;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:9px 12px;font-size:13px}.hero p{margin:0 0 8px;color:var(--red);font-size:12px;letter-spacing:.16em}.hero h1{margin:0 0 9px;font-size:34px;letter-spacing:-.05em}.lead,.mini{color:var(--muted);font-size:13px;line-height:1.7}.notice,.card{border:1px solid var(--line);border-radius:22px;background:var(--card);padding:16px;margin-top:13px}.notice{border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}.card h2{margin:0 0 10px;font-size:17px}label{display:block;margin:14px 0 6px;color:var(--muted);font-size:13px}input{width:100%;border:1px solid var(--line);background:#18181d;color:#fff;border-radius:14px;padding:13px;font:inherit;outline:none}input:focus{border-color:rgba(215,184,106,.7)}button{width:100%;margin-top:12px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(90deg,#fff,#f5dca4);color:#050506;padding:14px;font-weight:950;font-size:15px}button.secondary{background:rgba(255,255,255,.06);color:#fff}button.danger{background:rgba(251,113,133,.16);border-color:rgba(251,113,133,.55);color:#fff}button:disabled{opacity:.48}.sectionHeader{display:flex;align-items:center;justify-content:space-between;gap:10px}.sectionHeader button{width:auto;margin-top:0;padding:9px 13px;font-size:12px}.issued{border:1px solid rgba(134,239,172,.32);background:rgba(134,239,172,.08);border-radius:16px;padding:13px;margin-top:12px}.issued code{display:block;overflow-wrap:anywhere;font-family:ui-monospace,monospace;font-size:15px;margin:8px 0;color:#fff}.inviteRow{border:1px solid var(--line);border-radius:16px;padding:13px;margin-top:10px;background:#18181d}.inviteRow h3{margin:0 0 6px;font-size:15px}.message{display:none;margin-top:13px;border-radius:16px;padding:12px;font-size:13px;line-height:1.65}.message.show{display:block}.message.error{background:rgba(251,113,133,.12);border:1px solid rgba(251,113,133,.4)}.message.ok{background:rgba(134,239,172,.10);border:1px solid rgba(134,239,172,.32)}@media(max-width:430px){.hero h1{font-size:29px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header class="top"><a class="brand" href="./index.html">Pina Studio</a><a class="back" href="./admin.html">管理画面へ戻る</a></header>
+<section class="hero"><p>ADMIN INVITE CODES</p><h1>招待コード管理</h1><div class="lead">新規登録用コードの発行・停止と、招待コード必須化のON/OFFを管理します。</div></section>
+
+<section class="card" id="app" hidden>
+  <h2>招待コード必須化</h2>
+  <p id="requiredStatus" class="mini">状態を確認中です。</p>
+  <button id="requiredButton" type="button" disabled>読み込み中</button>
+  <div class="notice mini">ONにすると、コードを持たない新規登録はDB側で拒否されます。最低1個の有効なコードを発行し、登録試験後にONにしてください。</div>
+</section>
+
+<section class="card" id="createCard" hidden>
+  <h2>新しいコードを発行</h2>
+  <label for="label">用途名</label>
+  <input id="label" type="text" maxlength="80" placeholder="例：SNS公開用">
+  <button id="createButton" type="button">招待コードを発行</button>
+  <div id="issuedCodeBox" class="issued" hidden>
+    <div class="mini">このコードが表示されるのは今回だけです。</div>
+    <code id="issuedCode"></code>
+    <button id="copyButton" type="button" class="secondary">コピー</button>
+  </div>
+</section>
+
+<section class="card" id="listCard" hidden>
+  <div class="sectionHeader"><h2>発行済みコード</h2><button id="reloadButton" type="button" class="secondary">再読み込み</button></div>
+  <div id="codeList"></div>
+</section>
+
+<div class="message" id="message"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./auth-config.js?v=4a1f0c1"></script>
+<script>
+const ADMIN_EMAIL='hinaran53@gmail.com';
+const cfg=window.FLOWVID_AUTH||{};
+const client=cfg.supabaseUrl&&cfg.supabaseAnonKey?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
+const $=id=>document.getElementById(id);
+let session=null,inviteRequired=false,submitting=false;
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function message(text,type='error'){$('message').textContent=text;$('message').className='message show '+type}
+function clearMessage(){$('message').className='message'}
+
+function randomInviteCode(){
+  const bytes=new Uint8Array(10);
+  crypto.getRandomValues(bytes);
+  const body=Array.from(bytes).map(byte=>byte.toString(16).padStart(2,'0')).join('').toUpperCase();
+  return `PINA-${body}`;
+}
+async function sha256Hex(value){
+  const bytes=new TextEncoder().encode(value);
+  const digest=await crypto.subtle.digest('SHA-256',bytes);
+  return Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+function codeHint(code){return `${code.slice(0,10)}…${code.slice(-4)}`}
+
+async function adminApi(action,payload={}){
+  if(!session?.access_token)throw new Error('管理者ログインが必要です。');
+  const response=await fetch('/api/admin-invite-codes',{
+    method:'POST',
+    headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
+    body:JSON.stringify({action,...payload})
+  });
+  const data=await response.json().catch(()=>null);
+  if(!response.ok||!data?.ok)throw new Error(data?.message||'招待コードの処理に失敗しました。');
+  return data;
+}
+
+function renderRequiredState(){
+  $('requiredStatus').textContent=inviteRequired?'現在：必須':'現在：任意（導入準備中）';
+  $('requiredButton').textContent=inviteRequired?'緊急解除して任意に戻す':'招待コードを必須にする';
+  $('requiredButton').disabled=false;
+}
+
+function renderCodes(codes){
+  const box=$('codeList');
+  if(!codes.length){box.innerHTML='<div class="mini">招待コードはまだありません。</div>';return}
+  box.innerHTML=codes.map((code,i)=>`<div class="inviteRow"><h3>${esc(code.label)}</h3><div class="mini">${esc(code.codeHint)} / 登録 ${code.usedCount}人 / ${code.isActive?'有効':'停止中'}</div><button class="secondary" data-code-index="${i}">${code.isActive?'このコードを停止':'このコードを再開'}</button></div>`).join('');
+  box.querySelectorAll('[data-code-index]').forEach(btn=>{
+    btn.onclick=async()=>{
+      const code=codes[Number(btn.dataset.codeIndex)];
+      const nextActive=!code.isActive;
+      const confirmed=confirm(nextActive?`「${code.label}」を再開しますか？`:`「${code.label}」を停止しますか？`);
+      if(!confirmed)return;
+      btn.disabled=true;
+      try{
+        await adminApi('setActive',{inviteCodeId:code.id,isActive:nextActive});
+        await loadCodes();
+      }catch(error){
+        message(error.message);
+        btn.disabled=false;
+      }
+    };
+  });
+}
+
+async function loadCodes(){
+  clearMessage();
+  const data=await adminApi('list');
+  inviteRequired=data.inviteRequired===true;
+  renderRequiredState();
+  renderCodes(Array.isArray(data.codes)?data.codes:[]);
+}
+
+$('createButton').onclick=async()=>{
+  if(submitting)return;
+  const label=$('label').value.trim();
+  if(label.length<2||label.length>80){message('用途名を2〜80文字で入力してください。');$('label').focus();return}
+  submitting=true;
+  $('createButton').disabled=true;
+  $('issuedCodeBox').hidden=true;
+  clearMessage();
+  const plainCode=randomInviteCode();
+  try{
+    const hash=await sha256Hex(plainCode);
+    const requestId=crypto.randomUUID();
+    await adminApi('create',{requestId,label,codeHash:hash,codeHint:codeHint(plainCode)});
+    $('issuedCode').textContent=plainCode;
+    $('issuedCodeBox').hidden=false;
+    $('label').value='';
+    message('招待コードを発行しました。今すぐコピーしてください。','ok');
+    await loadCodes();
+  }catch(error){
+    message(error.message);
+  }finally{
+    submitting=false;
+    $('createButton').disabled=false;
+  }
+};
+
+$('copyButton').onclick=async()=>{
+  const value=$('issuedCode').textContent.trim();
+  if(!value)return;
+  try{
+    await navigator.clipboard.writeText(value);
+    message('招待コードをコピーしました。','ok');
+  }catch(_){
+    message('コピーできませんでした。コードを長押ししてコピーしてください。');
+  }
+};
+
+$('requiredButton').onclick=async()=>{
+  if(submitting)return;
+  const nextRequired=!inviteRequired;
+  const prompt=nextRequired
+    ?'最低1個の有効なコードを発行し、登録試験まで完了しましたか？\n\n招待コードを必須にします。'
+    :'招待コード必須化を解除し、コードなし登録を許可します。';
+  if(!confirm(prompt))return;
+  submitting=true;
+  $('requiredButton').disabled=true;
+  try{
+    const data=await adminApi('setRequired',{inviteRequired:nextRequired});
+    inviteRequired=data.inviteRequired===true;
+    renderRequiredState();
+    message(inviteRequired?'招待コードを必須にしました。':'招待コード必須化を解除しました。','ok');
+  }catch(error){
+    message(error.message);
+    renderRequiredState();
+  }finally{
+    submitting=false;
+  }
+};
+
+$('reloadButton').onclick=()=>{loadCodes().catch(error=>message(error.message))};
+
+(async()=>{
+  if(!client){message('Supabase設定を確認できません。');return}
+  const result=await client.auth.getSession();
+  session=result.data?.session||null;
+  if(!session?.user||String(session.user.email||'').toLowerCase()!==ADMIN_EMAIL){location.href='./admin-login.html';return}
+  const profile=await client.from('profiles').select('role').eq('id',session.user.id).maybeSingle();
+  if(profile.error||profile.data?.role!=='admin'){location.href='./admin-login.html';return}
+  $('app').hidden=false;
+  $('createCard').hidden=false;
+  $('listCard').hidden=false;
+  try{
+    await loadCodes();
+  }catch(error){
+    message(error.message);
+  }
+})().catch(()=>{location.href='./admin-login.html'});
+</script>
+</body>
+</html>
