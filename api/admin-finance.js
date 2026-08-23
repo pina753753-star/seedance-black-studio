@@ -99,19 +99,45 @@ function validatePeriodPayload(body) {
   return { period };
 }
 
-// 1件のbalance transactionから、売上内訳の分類キーを判定する。
-// expand済みのsource(charge)にinvoiceが紐づいていればサブスクリプション、
-// 無ければ追加クレジット(都度課金)とみなす。
-// charge展開に失敗している/取得できない場合は「unknown」に分類する。
-function classifyBalanceTransaction(txn) {
+// balance transactionの種類ごとに、分類判定に使う元Chargeオブジェクトを取り出す。
+// - type=charge: sourceそのものがChargeなので、展開済みならそのまま使う
+// - type=refund: sourceはRefundオブジェクトであり、Refund.chargeが元のCharge。
+//   'data.source.charge' まで展開していない/取得できない場合はnullを返す。
+function resolveChargeForClassification(txn) {
+  const type = txn?.type;
   const source = txn?.source;
 
-  if (!source || typeof source !== 'object') {
-    return 'unknown';
+  if (!source || typeof source !== 'object') return null;
+
+  if (type === 'charge') {
+    return source;
   }
 
-  return source.invoice ? 'subscription' : 'credit';
+  if (type === 'refund') {
+    const charge = source.charge;
+    return (charge && typeof charge === 'object') ? charge : null;
+  }
+
+  return null;
 }
+
+// 1件のbalance transactionから、売上内訳の分類キーを判定する。
+// 元Charge.invoiceが紐づいていればサブスクリプション、
+// 無ければ追加クレジット(都度課金)とみなす。返金(refund)も元Chargeの
+// invoice有無で分類するため、サブスク返金はsubscriptionから、
+// 追加クレジット返金はcreditから、それぞれマイナスされる。
+// 元Chargeを確認できない場合は「unknown」に分類する。
+function classifyBalanceTransaction(txn) {
+  const charge = resolveChargeForClassification(txn);
+
+  if (!charge) return 'unknown';
+
+  return charge.invoice ? 'subscription' : 'credit';
+}
+
+// 安全弁の上限件数。到達してまだ次ページがある場合は、不完全な集計を
+// 成功として返さないよう、呼び出し元へ明示的なエラーを投げる。
+const BALANCE_TRANSACTIONS_MAX_RESULTS = 20000;
 
 async function listAllBalanceTransactions(stripe, params) {
   const results = [];
@@ -131,8 +157,12 @@ async function listAllBalanceTransactions(stripe, params) {
     if (!page?.has_more || data.length === 0) break;
     startingAfter = data[data.length - 1].id;
 
-    // 想定外の無限ループを避けるための安全弁。
-    if (results.length > 20000) break;
+    if (results.length >= BALANCE_TRANSACTIONS_MAX_RESULTS) {
+      // まだ後続ページがある状態で上限に達した。ここで打ち切って不完全な
+      // 金額を集計・返却すると誤った経営状況を表示してしまうため、
+      // 集計を継続させず明示的なエラーとして停止する。
+      throw new Error('FINANCE_PAGE_LIMIT_EXCEEDED');
+    }
   }
 
   return results;
@@ -148,7 +178,9 @@ async function aggregateFinance(stripe, range) {
   const refunds = await listAllBalanceTransactions(stripe, {
     created: { gte: range.gte, lt: range.lt },
     type: 'refund',
-    expand: ['data.source']
+    // refundのsourceはRefundオブジェクトのため、元Chargeのinvoice有無で
+    // 分類できるよう、Refund.chargeまで展開する。
+    expand: ['data.source.charge']
   });
 
   const all = [...txns, ...refunds];
@@ -263,7 +295,15 @@ function createHandler(dependencies = {}) {
         range,
         ...result
       });
-    } catch (_) {
+    } catch (err) {
+      if (err?.message === 'FINANCE_PAGE_LIMIT_EXCEEDED') {
+        return res.status(500).json({
+          ok: false,
+          error: 'FINANCE_RANGE_TOO_LARGE',
+          message: '対象期間の取引件数が多すぎるため、集計を停止しました。期間を絞って再度お試しください。'
+        });
+      }
+
       return res.status(500).json({
         ok: false,
         error: 'ADMIN_FINANCE_OPERATION_FAILED',
@@ -279,9 +319,11 @@ module.exports = handler;
 module.exports._test = {
   aggregateFinance,
   authorizeAdmin,
+  BALANCE_TRANSACTIONS_MAX_RESULTS,
   classifyBalanceTransaction,
   createHandler,
   listAllBalanceTransactions,
   periodRangeSeconds,
+  resolveChargeForClassification,
   validatePeriodPayload
 };
