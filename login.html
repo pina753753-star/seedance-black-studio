@@ -52,6 +52,11 @@
             <input id="birthDate" type="date" autocomplete="bday">
             <p class="fieldHint">18歳未満の方は登録できません。</p>
           </div>
+          <div class="field" id="inviteCodeField" hidden>
+            <label for="inviteCode">招待コード</label>
+            <input id="inviteCode" type="text" placeholder="招待コードを入力" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64">
+            <p class="fieldHint">新規登録に使用する招待コードを入力してください。</p>
+          </div>
           <div class="field" id="captchaField" hidden><div id="captchaWidget"></div></div>
           <button class="primary" id="submitBtn">ログインする</button>
           <div class="message" id="message"></div>
@@ -76,6 +81,8 @@
     const passwordConfirm=document.getElementById('passwordConfirm');
     const birthDateField=document.getElementById('birthDateField');
     const birthDate=document.getElementById('birthDate');
+    const inviteCodeField=document.getElementById('inviteCodeField');
+    const inviteCode=document.getElementById('inviteCode');
     const message=document.getElementById('message');
     const cfg=window.FLOWVID_AUTH||{};
     const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
@@ -157,8 +164,33 @@
       if(beforeBirthday)age-=1;
       return age;
     }
+    function normalizeInviteCode(value){
+      return String(value||'').trim().toUpperCase().replace(/\s+/g,'');
+    }
+    async function sha256Hex(value){
+      const bytes=new TextEncoder().encode(value);
+      const digest=await crypto.subtle.digest('SHA-256',bytes);
+      return Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+    }
+    async function prevalidateInviteCode(codeHash){
+      try{
+        const response=await fetch('/api/invite-code/validate',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({codeHash:codeHash||''})
+        });
+        const data=await response.json().catch(()=>null);
+        if(!response.ok||!data?.ok)return null;
+        return data;
+      }catch(_){
+        // Pre-validation is UX only. The DB trigger remains the authoritative protection.
+        return null;
+      }
+    }
     function authMessage(text){
       const raw=String(text||'');
+      if(/invite code is required/i.test(raw)) return '招待コードを入力してください。';
+      if(/invite code is invalid/i.test(raw)||/invite code usage conflict/i.test(raw)) return '招待コードが正しくないか、現在利用できません。';
       if(/birth date is required/i.test(raw)) return '生年月日を入力してください。';
       if(/invalid birth date/i.test(raw)) return '正しい生年月日を入力してください。';
       if(/at least 18 years old/i.test(raw)) return '18歳未満の方は登録できません。';
@@ -181,6 +213,7 @@
       passwordConfirm.required=isSignup;
       birthDateField.hidden=!isSignup;
       birthDate.required=isSignup;
+      inviteCodeField.hidden=!isSignup;
       try{
         birthDate.max=getAdultCutoffDate();
       }catch(error){
@@ -189,6 +222,7 @@
       if(!isSignup){
         birthDate.value='';
         passwordConfirm.value='';
+        inviteCode.value='';
       }
       clearMessage();
     }
@@ -243,6 +277,22 @@
         if(age===null){setMessage('正しい生年月日を入力してください。','error');birthDate.focus();return;}
         if(age<18){setMessage('18歳未満の方は登録できません。','error');birthDate.focus();return;}
       }
+      let inviteCodeHash='';
+      if(mode==='signup'){
+        const normalizedInviteCode=normalizeInviteCode(inviteCode.value);
+        try{
+          inviteCodeHash=normalizedInviteCode?await sha256Hex(normalizedInviteCode):'';
+        }catch(_){
+          setMessage('招待コードを確認できませんでした。もう一度お試しください。','error');
+          return;
+        }
+        const inviteValidation=await prevalidateInviteCode(inviteCodeHash);
+        if(inviteValidation&&inviteValidation.valid!==true){
+          setMessage(inviteValidation.message||'招待コードが正しくないか、現在利用できません。','error');
+          inviteCode.focus();
+          return;
+        }
+      }
       if(turnstileSiteKey&&!captchaToken){
         setMessage('CAPTCHA認証を完了してください。','error');
         return;
@@ -254,6 +304,7 @@
           result=await client.auth.signInWithPassword(loginOptions?{email:mail,password:pass,options:loginOptions}:{email:mail,password:pass});
         }else{
           const signupData={birth_date:birthDate.value};
+          if(inviteCodeHash)signupData.invite_code_hash=inviteCodeHash;
           const signupOptions={emailRedirectTo:'https://www.pinastudio.jp/profile.html',data:signupData};
           if(turnstileSiteKey)signupOptions.captchaToken=captchaToken;
           result=await client.auth.signUp({
