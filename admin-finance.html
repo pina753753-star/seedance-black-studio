@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>経営状況 | Pina Studio</title>
+<meta name="theme-color" content="#050506">
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{--bg:#050506;--card:#121216;--line:rgba(255,255,255,.14);--muted:rgba(255,255,255,.64);--gold:#d7b86a;--red:#fb7185;--ok:#86efac}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:640px;margin:0 auto;padding:16px 12px 44px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:26px}.brand{color:#fff;text-decoration:none;font-weight:950;font-size:20px}.back{color:#fff;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:9px 12px;font-size:13px}.hero p{margin:0 0 8px;color:var(--red);font-size:12px;letter-spacing:.16em}.hero h1{margin:0 0 9px;font-size:34px;letter-spacing:-.05em}.lead,.mini{color:var(--muted);font-size:13px;line-height:1.7}.card{border:1px solid var(--line);border-radius:22px;background:var(--card);padding:16px;margin-top:13px}.card h2{margin:0 0 10px;font-size:17px}
+.filterBar{display:flex;gap:8px;margin:0 0 4px}.filterBtn{flex:1;border:1px solid var(--line);background:#18181d;color:#fff;border-radius:999px;padding:10px 8px;font-size:13px;font-weight:900}.filterBtn.active{border-color:rgba(215,184,106,.7);background:rgba(215,184,106,.18)}
+.stat{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.box{border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.04);padding:14px}.box b{display:block;font-size:24px}.box span{color:var(--muted);font-size:12px}
+.breakdownRow{display:flex;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding:11px 0;font-size:14px}.breakdownRow:first-child{border-top:0}
+.message{display:none;margin-top:13px;border-radius:16px;padding:12px;font-size:13px;line-height:1.65}.message.show{display:block}.message.error{background:rgba(251,113,133,.12);border:1px solid rgba(251,113,133,.4)}
+button.reload{width:100%;margin-top:12px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;padding:13px;font-weight:900}
+@media(max-width:430px){.hero h1{font-size:29px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header class="top"><a class="brand" href="./index.html">Pina Studio</a><a class="back" href="./admin.html">管理画面へ戻る</a></header>
+<section class="hero"><p>ADMIN FINANCE</p><h1>📊 経営状況</h1><div class="lead">Stripeの取引記録(Balance Transactions)から、今月・先月・今年の売上を集計して表示します。</div></section>
+
+<section class="card" id="app" hidden>
+  <div class="filterBar">
+    <button class="filterBtn active" data-period="thisMonth" type="button">今月</button>
+    <button class="filterBtn" data-period="lastMonth" type="button">先月</button>
+    <button class="filterBtn" data-period="thisYear" type="button">今年</button>
+  </div>
+  <div class="mini" id="rangeNote">読み込み中</div>
+
+  <div class="stat">
+    <div class="box"><b id="grossAmount">-</b><span>売上(総額)</span></div>
+    <div class="box"><b id="feeAmount">-</b><span>Stripe手数料</span></div>
+    <div class="box"><b id="netAmount">-</b><span>純売上</span></div>
+    <div class="box"><b id="txnCount">-</b><span>取引件数(返金含む)</span></div>
+  </div>
+
+  <h2 style="margin-top:18px">売上内訳</h2>
+  <div class="breakdownRow"><span>サブスクリプション</span><strong id="breakdownSubscription">-</strong></div>
+  <div class="breakdownRow"><span>追加クレジット(都度課金)</span><strong id="breakdownCredit">-</strong></div>
+  <div class="breakdownRow"><span>分類不明</span><strong id="breakdownUnknown">-</strong></div>
+  <div class="mini" style="margin-top:8px">内訳は各取引にStripeの請求書(サブスク更新)が紐づいているかどうかで判定しています。返金は該当する内訳からマイナスされます。</div>
+
+  <button class="reload" id="reloadButton" type="button">最新データに更新</button>
+</section>
+
+<div class="message" id="message"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./auth-config.js?v=4a1f0c1"></script>
+<script>
+const ADMIN_EMAIL='hinaran53@gmail.com';
+const cfg=window.FLOWVID_AUTH||{};
+const client=cfg.supabaseUrl&&cfg.supabaseAnonKey?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
+const $=id=>document.getElementById(id);
+let session=null,currentPeriod='thisMonth',loading=false;
+
+function message(text){$('message').textContent=text;$('message').className='message show error'}
+function clearMessage(){$('message').className='message'}
+
+function formatYen(minorAmount,currency){
+  // Stripeのbalance transactionはJPYの場合ゼロ小数通貨(最小単位=円)。
+  // 想定外の通貨が来た場合はそのまま数値表示する。
+  const value=Number(minorAmount||0);
+  if(String(currency||'jpy').toLowerCase()==='jpy'){
+    return '¥'+value.toLocaleString('ja-JP');
+  }
+  return value.toLocaleString('ja-JP')+' '+String(currency||'').toUpperCase();
+}
+
+async function financeApi(period){
+  if(!session?.access_token)throw new Error('管理者ログインが必要です。');
+  const response=await fetch('/api/admin-finance',{
+    method:'POST',
+    headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
+    body:JSON.stringify({period})
+  });
+  const data=await response.json().catch(()=>null);
+  if(!response.ok||!data?.ok)throw new Error(data?.message||'経営状況の取得に失敗しました。');
+  return data;
+}
+
+function periodLabel(period){
+  if(period==='lastMonth')return '先月';
+  if(period==='thisYear')return '今年';
+  return '今月';
+}
+
+async function loadFinance(){
+  if(loading)return;
+  loading=true;
+  clearMessage();
+  $('rangeNote').textContent='読み込み中';
+  try{
+    const data=await financeApi(currentPeriod);
+    const currency=data.currency;
+    $('grossAmount').textContent=formatYen(data.grossAmount,currency);
+    $('feeAmount').textContent=formatYen(data.fee,currency);
+    $('netAmount').textContent=formatYen(data.net,currency);
+    $('txnCount').textContent=String(data.transactionCount??0);
+    const breakdown=data.breakdown||{};
+    $('breakdownSubscription').textContent=formatYen(breakdown.subscription,currency);
+    $('breakdownCredit').textContent=formatYen(breakdown.credit,currency);
+    $('breakdownUnknown').textContent=formatYen(breakdown.unknown,currency);
+    $('rangeNote').textContent=periodLabel(currentPeriod)+'の集計です。';
+  }catch(error){
+    message(error.message);
+    $('rangeNote').textContent='取得できませんでした。';
+  }finally{
+    loading=false;
+  }
+}
+
+document.querySelectorAll('.filterBtn').forEach(btn=>{
+  btn.onclick=()=>{
+    if(loading)return;
+    currentPeriod=btn.dataset.period;
+    document.querySelectorAll('.filterBtn').forEach(b=>b.classList.toggle('active',b===btn));
+    loadFinance();
+  };
+});
+
+$('reloadButton').onclick=()=>loadFinance();
+
+(async()=>{
+  if(!client){message('Supabase設定を確認できません。');return}
+  const result=await client.auth.getSession();
+  session=result.data?.session||null;
+  if(!session?.user||String(session.user.email||'').toLowerCase()!==ADMIN_EMAIL){location.href='./admin-login.html';return}
+  const profile=await client.from('profiles').select('role').eq('id',session.user.id).maybeSingle();
+  if(profile.error||profile.data?.role!=='admin'){location.href='./admin-login.html';return}
+  $('app').hidden=false;
+  try{
+    await loadFinance();
+  }catch(error){
+    message(error.message);
+  }
+})().catch(()=>{location.href='./admin-login.html'});
+</script>
+</body>
+</html>
