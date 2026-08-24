@@ -22,6 +22,7 @@ const MAX_DURATION = 15;
 // not guarantee a strict global limit across all instances. It only reduces
 // accidental rapid repeat calls from a single warm instance.
 const COOLDOWN_MS = 8000;
+const CLAUDE_CALL_TIMEOUT_MS = 45000;
 const lastCallAt = new Map();
 
 function jsonBody(req) {
@@ -162,21 +163,30 @@ function validateFinalPrompt(prompt, expectedCuts, durationSeconds) {
   return { ok: headingsOk && rangesOk && prompt.length >= 700, headingsOk, rangesOk, ranges };
 }
 
-async function callClaude(apiKey, messages, maxTokens) {
-  const response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + apiKey,
-      'content-type': 'application/json',
-      'HTTP-Referer': 'https://flowvid-studio.vercel.app',
-      'X-Title': 'FlowVid Studio'
-    },
-    body: JSON.stringify({ model: STORYBOARD_MODEL, max_tokens: maxTokens, messages })
-  });
-  const rawText = await response.text();
-  let data;
-  try { data = JSON.parse(rawText); } catch (_) { data = { error: rawText.slice(0, 300) }; }
-  return { response, data };
+async function callClaude(apiKey, messages, maxTokens, timeoutMs = CLAUDE_CALL_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const safeTimeoutMs = Math.max(1, Number(timeoutMs) || CLAUDE_CALL_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), safeTimeoutMs);
+
+  try {
+    const response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + apiKey,
+        'content-type': 'application/json',
+        'HTTP-Referer': 'https://flowvid-studio.vercel.app',
+        'X-Title': 'FlowVid Studio'
+      },
+      body: JSON.stringify({ model: STORYBOARD_MODEL, max_tokens: maxTokens, messages }),
+      signal: controller.signal
+    });
+    const rawText = await response.text();
+    let data;
+    try { data = JSON.parse(rawText); } catch (_) { data = { error: rawText.slice(0, 300) }; }
+    return { response, data };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function unavailable(res) {
@@ -339,4 +349,6 @@ module.exports.buildStoryboardAnalysisInstruction = buildStoryboardAnalysisInstr
 module.exports.buildStoryboardRepairInstruction = buildStoryboardRepairInstruction;
 module.exports.extractTimelineRanges = extractTimelineRanges;
 module.exports.validateFinalPrompt = validateFinalPrompt;
+module.exports.callClaude = callClaude;
+module.exports.CLAUDE_CALL_TIMEOUT_MS = CLAUDE_CALL_TIMEOUT_MS;
 module.exports.MAX_STORY_CONTEXT_CHARS = MAX_STORY_CONTEXT_CHARS;

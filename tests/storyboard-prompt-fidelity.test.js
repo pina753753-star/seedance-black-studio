@@ -93,6 +93,31 @@ test('APIは構造化解析後に完成文を作り、構造違反時だけ修�
   assert.match(apiSource, /if \(!parsed \|\| Number\(parsed\.detected_cuts\) !== expectedCuts \|\| !validation\.ok\)/);
 });
 
+test('Claude通信は45秒で中断しタイマーを必ず解放する', async () => {
+  assert.equal(storyboard.CLAUDE_CALL_TIMEOUT_MS, 45000);
+
+  const originalFetch = global.fetch;
+  let receivedSignal;
+  global.fetch = (_url, options) => new Promise((_resolve, reject) => {
+    receivedSignal = options.signal;
+    options.signal.addEventListener('abort', () => {
+      const error = new Error('aborted');
+      error.name = 'AbortError';
+      reject(error);
+    }, { once: true });
+  });
+
+  try {
+    await assert.rejects(
+      storyboard.callClaude('test-key', [], 1, 5),
+      (error) => error?.name === 'AbortError'
+    );
+    assert.equal(receivedSignal.aborted, true);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('補足指示は最大2000文字で画像と同じ解析へ渡す', () => {
   assert.match(apiSource, /const MAX_STORY_CONTEXT_CHARS = 2000/);
   assert.match(apiSource, /storyContext\.length > MAX_STORY_CONTEXT_CHARS/);
