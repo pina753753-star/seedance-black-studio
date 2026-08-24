@@ -270,6 +270,54 @@ test('生成中カードは進捗・タスクID・完了動画・失敗時の返
   assert.match(source, /function _ptFail[\s\S]*?返金状況を確認できませんでした/);
 });
 
+test('完了カード維持は絵コンテだけに限定し、余分な完了通知を表示しない', () => {
+  const completeStart = source.indexOf('function _ptComplete(');
+  const completeSource = source.slice(completeStart, source.indexOf('function _ptStartPoll', completeStart));
+
+  assert.match(completeSource, /const isStoryboard=uiMode==='storyboard'/);
+  assert.match(completeSource, /if\(isStoryboard\)[\s\S]*?data-pt-complete/);
+  assert.match(completeSource, /else\{setTimeout\(\(\)=>\{_ptRemove\(taskId\)/);
+  assert.doesNotMatch(completeSource, /動画が完成しました/);
+});
+
+test('受付メッセージは絵コンテだけに表示し、通常生成には追加しない', () => {
+  const acceptedStart = source.indexOf('function _ptShowAccepted(');
+  const acceptedSource = source.slice(acceptedStart, source.indexOf('function _ptSafeErrMsg', acceptedStart));
+  const guardStart = source.indexOf('async function guardedStart(');
+  const guardSource = source.slice(guardStart, source.indexOf("$('create').onclick", guardStart));
+
+  assert.match(acceptedSource, /data-ptask-ui-mode/);
+  assert.match(acceptedSource, /!==['"]storyboard['"]\)return/);
+  assert.match(guardSource, /const showStoryboardStatus=sbLocked/);
+  assert.match(guardSource, /if\(showStoryboardStatus\)/);
+});
+
+test('絵コンテ確定画面は画像1枚だけを表示し、追加枠を隠す', () => {
+  const lockStart = source.indexOf('function sbApplyLock(');
+  const lockSource = source.slice(lockStart, source.indexOf("$('sbFile').onchange", lockStart));
+  const addTileStart = source.indexOf('function updateAddTileUi(');
+  const addTileSource = source.slice(addTileStart, source.indexOf('function updateUploadProgressUi', addTileStart));
+  const proceedStart = source.indexOf('function sbProceedToCreate(');
+  const proceedSource = source.slice(proceedStart, source.indexOf('function resetStoryboardInputs', proceedStart));
+
+  assert.match(lockSource, /addTile\.style\.display=locked\?'none':''/);
+  assert.match(addTileSource, /add\.style\.display=sbLocked\?'none'/);
+  assert.match(proceedSource, /\$\('file'\)\.multiple=false/);
+  assert.match(proceedSource, /modeHint\.style\.display='none'/);
+  assert.match(source, /const refUrls=sbLocked\?\[sbGenerationImageUrl\]:urls/);
+});
+
+test('絵コンテ案内と受付通知の文字色は白で統一する', () => {
+  const confirmMarkup = source.match(/<div id="sbConfirmNotice"[^>]+>/)?.[0] || '';
+  const lockMarkup = source.match(/<div id="sbLockNotice"[^>]+>/)?.[0] || '';
+  const pendingMarkup = source.match(/<div id="pendingNotice"[^>]+>/)?.[0] || '';
+
+  for (const markup of [confirmMarkup, lockMarkup, pendingMarkup]) {
+    assert.match(markup, /color:#fff/);
+    assert.doesNotMatch(markup, /color:#(?:86efac|8ed8ff)/);
+  }
+});
+
 test('絵コンテ由来を送信し、通常生成では送信しない', () => {
   const startIndex = source.indexOf('async function start()');
   const startSource = source.slice(startIndex, source.indexOf('function restoreDraft()', startIndex));
