@@ -21,6 +21,47 @@ const SUBSCRIPTION_PLANS_ANNUAL = {
   ultimate: { name: 'Ultimate', amount: 189600, monthly_credits: 5100,  plan: 'ultimate', env: 'STRIPE_PRICE_ULTIMATE_YEARLY'  }
 };
 
+// ── Annual 10%OFF campaign (Standard/Premium/Ultimate annual only) ─────────
+// 2026-10-01 00:00:00 JST = 2026-09-30 15:00:00 UTC. Fixed UTC timestamp so
+// this does not depend on the server's local timezone. Applies a Stripe
+// Coupon on top of the existing (unchanged) annual Price IDs - no new
+// discounted Price ID is created or used. Monthly plans are never affected.
+const ANNUAL_CAMPAIGN_CUTOFF_MS = Date.parse('2026-09-30T15:00:00Z');
+const ANNUAL_CAMPAIGN_COUPON_ENV = 'STRIPE_COUPON_ANNUAL_10_OFF_202609';
+
+function isAnnualCampaignActive(nowMs) {
+  return Number(nowMs) < ANNUAL_CAMPAIGN_CUTOFF_MS;
+}
+
+// Builds the Checkout Session params for an annual subscription, deciding
+// whether to apply the campaign Coupon or fall back to the normal
+// allow_promotion_codes behavior. Kept as a pure function (no Stripe call)
+// so the decision logic is unit-testable without mocking the network.
+function buildAnnualSubscriptionSessionParams({ baseParams, plan, metadata, now, couponEnvValue }) {
+  const params = {
+    ...baseParams,
+    mode: 'subscription',
+    line_items: [lineItemForAnnual(plan)],
+    metadata,
+    subscription_data: { metadata }
+  };
+
+  const campaignActive = isAnnualCampaignActive(now);
+  const couponId = String(couponEnvValue || '').trim();
+
+  if (campaignActive && couponId) {
+    // Auto-apply the campaign discount. allow_promotion_codes is
+    // intentionally omitted here to avoid stacking it with another
+    // promotion code on top of the automatic 10%OFF.
+    params.discounts = [{ coupon: couponId }];
+  } else {
+    // Campaign over, or coupon env var not configured: unchanged behavior.
+    params.allow_promotion_codes = true;
+  }
+
+  return params;
+}
+
 const CREDIT_PACKS = {
   credits_100:  { name: '100 credits',   amount: 500,  credits: 100  },
   credits_300:  { name: '300 credits',   amount: 1300, credits: 300  },
@@ -158,7 +199,7 @@ function sessionBase(user, req, ui) {
   };
 }
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(200).json({ ok: true, endpoint: '/api/stripe-checkout', method: 'POST' });
   }
@@ -202,14 +243,15 @@ module.exports = async function handler(req, res) {
           monthly_credits: String(plan.monthly_credits)
         };
 
-        session = await stripe.checkout.sessions.create({
-          ...sessionBase(user, req, ui),
-          mode: 'subscription',
-          line_items: [lineItemForAnnual(plan)],
-          metadata,
-          subscription_data: { metadata },
-          allow_promotion_codes: true
-        });
+        session = await stripe.checkout.sessions.create(
+          buildAnnualSubscriptionSessionParams({
+            baseParams: sessionBase(user, req, ui),
+            plan,
+            metadata,
+            now: Date.now(),
+            couponEnvValue: process.env[ANNUAL_CAMPAIGN_COUPON_ENV]
+          })
+        );
 
       } else {
         // ── Monthly subscription ─────────────────────────────────
@@ -302,4 +344,16 @@ module.exports = async function handler(req, res) {
       : msg;
     return res.status(500).json({ ok: false, error: safe });
   }
+}
+
+module.exports = handler;
+module.exports._test = {
+  ANNUAL_CAMPAIGN_CUTOFF_MS,
+  ANNUAL_CAMPAIGN_COUPON_ENV,
+  SUBSCRIPTION_PLANS,
+  SUBSCRIPTION_PLANS_ANNUAL,
+  buildAnnualSubscriptionSessionParams,
+  isAnnualCampaignActive,
+  lineItemForAnnual,
+  lineItemForMonthly
 };

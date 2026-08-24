@@ -759,10 +759,14 @@ test('admin-finance.html: computeMonthlySummaryはUSD建ての予定をサーバ
 // =================================================================
 // 修正: Stripe関連3ファイルが無変更(git diffで実ファイル内容を比較)
 // =================================================================
-test('api/stripe-checkout.js・api/stripe-webhook.js・api/admin-finance.jsはgit上で無変更', () => {
+test('api/stripe-webhook.js・api/admin-finance.jsはgit上で無変更', () => {
+  // api/stripe-checkout.jsは、この運営費機能とは無関係の別作業(年額10%OFF
+  // キャンペーン)で意図的に変更されるため、この不変条件からは除外する。
+  // stripe-checkout.js自身の変更範囲はtests/stripe-annual-campaign.test.js
+  // で検証する。
   const { execFileSync } = require('node:child_process');
   const repoRoot = path.join(__dirname, '..');
-  const targets = ['api/stripe-checkout.js', 'api/stripe-webhook.js', 'api/admin-finance.js'];
+  const targets = ['api/stripe-webhook.js', 'api/admin-finance.js'];
 
   for (const target of targets) {
     let diff;
