@@ -89,7 +89,15 @@ test('料金ページはPremium以上の特典と年額合計・毎月付与を�
     assert.match(page, /公開記念価格（期間限定）/);
     assert.match(page, /15秒 300クレジット／30秒 600クレジット/);
     assert.match(page, /終了前にサイト内でお知らせします/);
-    assert.doesNotMatch(page, /通常価格/);
+    // 1080p公開記念価格の文脈で古い「通常価格」表記が復活していないことを
+    // 確認する。年額10%OFFキャンペーン(1080p公開記念価格とは無関係)の
+    // 「期間限定10%OFFは終了しました。通常価格をご確認ください。」という
+    // 案内文だけは意図的な新規追加のため、ここでは除外して判定する。
+    const withoutAnnualCampaignMessage = page.replace(
+      /期間限定10%OFFは終了しました。通常価格をご確認ください。/g,
+      ''
+    );
+    assert.doesNotMatch(withoutAnnualCampaignMessage, /通常価格/);
   }
   assert.match(source, /annualCredits:'9,600'/);
   assert.match(source, /annualCredits:'25,200'/);

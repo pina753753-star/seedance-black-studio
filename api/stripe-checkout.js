@@ -33,11 +33,35 @@ function isAnnualCampaignActive(nowMs) {
   return Number(nowMs) < ANNUAL_CAMPAIGN_CUTOFF_MS;
 }
 
-// Builds the Checkout Session params for an annual subscription, deciding
-// whether to apply the campaign Coupon or fall back to the normal
-// allow_promotion_codes behavior. Kept as a pure function (no Stripe call)
-// so the decision logic is unit-testable without mocking the network.
+// Whether pricing.html's discounted display and the actual Checkout price
+// can be trusted to match: campaign window open AND the Coupon env var is
+// configured. Exposed (as a boolean only, never the Coupon ID) via the
+// unauthenticated GET response so the client can keep its display in sync
+// with server-side reality instead of guessing from the date alone.
+function isAnnualCampaignAvailable(nowMs, couponEnvValue) {
+  return isAnnualCampaignActive(nowMs) && Boolean(String(couponEnvValue || '').trim());
+}
+
+// Decides the Checkout Session params for an annual subscription, or
+// signals that the session must NOT be created at all. Kept as a pure
+// function (no Stripe call) so the decision logic is unit-testable without
+// mocking the network.
+//
+// fail-closed (review fix 1): pricing.html shows the 10%OFF price during
+// the campaign window. If the campaign is time-active but the Coupon env
+// var is missing, silently falling back to the normal price would let a
+// customer pay full price after seeing a discounted price - that mismatch
+// must never reach Stripe. So this case returns { ok: false } and the
+// caller must refuse to start Checkout, rather than creating a Session at
+// the (wrong, undiscounted) full price.
 function buildAnnualSubscriptionSessionParams({ baseParams, plan, metadata, now, couponEnvValue }) {
+  const campaignActive = isAnnualCampaignActive(now);
+  const couponId = String(couponEnvValue || '').trim();
+
+  if (campaignActive && !couponId) {
+    return { ok: false, error: 'ANNUAL_CAMPAIGN_CONFIG_MISSING' };
+  }
+
   const params = {
     ...baseParams,
     mode: 'subscription',
@@ -46,20 +70,17 @@ function buildAnnualSubscriptionSessionParams({ baseParams, plan, metadata, now,
     subscription_data: { metadata }
   };
 
-  const campaignActive = isAnnualCampaignActive(now);
-  const couponId = String(couponEnvValue || '').trim();
-
   if (campaignActive && couponId) {
     // Auto-apply the campaign discount. allow_promotion_codes is
     // intentionally omitted here to avoid stacking it with another
     // promotion code on top of the automatic 10%OFF.
     params.discounts = [{ coupon: couponId }];
   } else {
-    // Campaign over, or coupon env var not configured: unchanged behavior.
+    // Campaign over: unchanged behavior (normal price, promotion codes ok).
     params.allow_promotion_codes = true;
   }
 
-  return params;
+  return { ok: true, params };
 }
 
 const CREDIT_PACKS = {
@@ -201,7 +222,15 @@ function sessionBase(user, req, ui) {
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(200).json({ ok: true, endpoint: '/api/stripe-checkout', method: 'POST' });
+    // annualCampaignAvailable lets pricing.html keep its discounted display
+    // in sync with server-side reality (campaign window open AND the Coupon
+    // env var configured) without ever exposing the Coupon ID itself.
+    return res.status(200).json({
+      ok: true,
+      endpoint: '/api/stripe-checkout',
+      method: 'POST',
+      annualCampaignAvailable: isAnnualCampaignAvailable(Date.now(), process.env[ANNUAL_CAMPAIGN_COUPON_ENV])
+    });
   }
 
   const secretKey = process.env.STRIPE_SECRET_KEY || '';
@@ -243,15 +272,26 @@ async function handler(req, res) {
           monthly_credits: String(plan.monthly_credits)
         };
 
-        session = await stripe.checkout.sessions.create(
-          buildAnnualSubscriptionSessionParams({
-            baseParams: sessionBase(user, req, ui),
-            plan,
-            metadata,
-            now: Date.now(),
-            couponEnvValue: process.env[ANNUAL_CAMPAIGN_COUPON_ENV]
-          })
-        );
+        const annualSession = buildAnnualSubscriptionSessionParams({
+          baseParams: sessionBase(user, req, ui),
+          plan,
+          metadata,
+          now: Date.now(),
+          couponEnvValue: process.env[ANNUAL_CAMPAIGN_COUPON_ENV]
+        });
+
+        if (!annualSession.ok) {
+          // Fail closed: never create a Checkout Session at the (wrong,
+          // undiscounted) full price while pricing.html is showing 10%OFF.
+          console.error('[stripe-checkout] annual campaign coupon env missing:', ANNUAL_CAMPAIGN_COUPON_ENV);
+          return res.status(503).json({
+            ok: false,
+            error: annualSession.error,
+            message: '期間限定価格の設定を確認できないため、現在決済を開始できません。しばらくしてからお試しください。'
+          });
+        }
+
+        session = await stripe.checkout.sessions.create(annualSession.params);
 
       } else {
         // ── Monthly subscription ─────────────────────────────────
@@ -354,6 +394,7 @@ module.exports._test = {
   SUBSCRIPTION_PLANS_ANNUAL,
   buildAnnualSubscriptionSessionParams,
   isAnnualCampaignActive,
+  isAnnualCampaignAvailable,
   lineItemForAnnual,
   lineItemForMonthly
 };
