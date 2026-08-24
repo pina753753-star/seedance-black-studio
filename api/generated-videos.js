@@ -74,6 +74,7 @@ async function verifyStorageObjectExists(url) {
 }
 
 function resolveMode(row) {
+  if (row?.settings?.ui_origin === 'storyboard') return 'storyboard';
   const raw = String(row?.mode || row?.generation_mode || row?.settings?.mode || '').trim();
   if (raw === 'image_to_video' || raw === '画像から動画' || raw === '画像から動画へ') return 'image_to_video';
   if (raw === 'text_to_video' || raw === 'テキストから動画') return 'text_to_video';

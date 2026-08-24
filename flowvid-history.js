@@ -15,7 +15,7 @@
   function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
   function deviceId(){let id=localStorage.getItem(DEVICE_KEY);if(!id){id='dev_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10);localStorage.setItem(DEVICE_KEY,id)}return id}
   function currentMode(){return localStorage.getItem('flowvidGenerateMode')||document.querySelector('[data-mode].on')?.dataset?.mode||'reference_to_video'}
-  function modeLabel(v){v=String(v||'');return v==='image_to_video'?'画像から動画':v==='text_to_video'?'テキストから動画':v==='reference_to_video'?'リファレンス':'Seedance'}
+  function modeLabel(v){v=String(v||'');return v==='image_to_video'?'画像から動画':v==='text_to_video'?'テキストから動画':v==='reference_to_video'?'リファレンス':v==='storyboard'?'絵コンテ':'Seedance'}
   function readDraft(){return safeJson(localStorage.getItem(DRAFT_KEY),'{}')||{}}
   function getRefs(){
     const d=readDraft();

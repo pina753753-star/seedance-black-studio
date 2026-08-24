@@ -55,7 +55,7 @@ module.exports = async function handler(req, res) {
 
     const { data, error } = await db
       .from('generation_tasks')
-      .select('id,mode,model,prompt,resolution,duration_seconds,aspect_ratio,status,api_task_id,polling_url,api_provider,created_at')
+      .select('id,mode,model,prompt,resolution,duration_seconds,aspect_ratio,status,api_task_id,polling_url,api_provider,created_at,settings')
       .eq('user_id', user.id)
       .in('status', ['queued', 'processing'])
       .gte('created_at', cutoffIso)
@@ -63,7 +63,14 @@ module.exports = async function handler(req, res) {
       .limit(10);
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.status(200).json({ ok: true, tasks: data || [] });
+    const tasks = (data || []).map((task) => {
+      const { settings, ...publicTask } = task;
+      return {
+        ...publicTask,
+        ui_mode: settings?.ui_origin === 'storyboard' ? 'storyboard' : task.mode
+      };
+    });
+    return res.status(200).json({ ok: true, tasks });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err?.message || 'Unknown error' });
   }
