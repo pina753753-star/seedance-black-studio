@@ -175,6 +175,7 @@ async function readFlowvidHistory(db, limit, userId) {
       job_id: task.api_task_id || task.id,
       status: 'completed',
       prompt: task.prompt || '',
+      model: task.model || '',
       mode: task.mode || '',
       video_url: watermarkedUrl || outputUrl || '',
       reference_urls: [],
