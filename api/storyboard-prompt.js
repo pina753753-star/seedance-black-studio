@@ -42,34 +42,83 @@ function normalizeAspectRatio(value) {
   return ['9:16', '16:9', '1:1'].includes(aspect) ? aspect : '9:16';
 }
 
-function buildStoryboardPromptInstruction(durationSeconds, aspectRatio) {
+function buildStoryboardAnalysisInstruction(durationSeconds, aspectRatio) {
   return [
-    'あなたは、絵コンテを忠実に動画生成プロンプトへ変換する専門家です。',
-    'アップロードされた絵コンテ画像(複数カットが描かれた1枚の画像)を解析し、',
-    `合計${durationSeconds}秒・アスペクト比${aspectRatio}の動画を1回で生成するための、`,
-    '日本語の単一の統合ビデオ生成プロンプトを1つだけ作成してください。',
+    'あなたは、題材・ジャンル・画風・コマ数を限定せず、1枚の絵コンテを忠実に構造化する専門家です。',
+    '完成プロンプトはまだ書かず、描かれた事実、コマ順、同一性、状態変化、因果関係だけをJSONへ整理してください。',
+    '対象動画: 合計' + durationSeconds + '秒、アスペクト比' + aspectRatio + '。',
     '',
-    '要件:',
-    '- まず内部で、各コマを左上から右、上段から下段の順に1コマずつ個別解析してから統合すること。解析メモ自体は出力しないこと。',
-    '- 各コマの登場人物・動物、同一個体か別個体か、姿、種類、体格、表情、持ち物、小道具、背景、具体的な動作を維持すること。',
-    '- 小型から大型、普段の姿から戦闘時の姿など、コマ間に明確な外見変化がある場合は、省略せず変身・変化として時間展開に記述すること。',
-    '- 元画像に存在しない人物、動物、小道具、設定、出来事を追加しないこと。確認できない内容を創作しないこと。',
-    '- 最終コマの出来事、因果関係、表情、コミカルなオチを別の結末へ変更しないこと。感動的・温かい結末へ置き換えないこと。',
-    '- 元画像が日本アニメ調なら日本アニメ調を維持すること。画像にない3D、実写、写実、フォトリアル、海外カートゥーン等の画風を追加しないこと。',
-    '- キャラクターの種類・体格・顔・模様・装飾品を別のものへ変更しないこと。見た目が判別できない細部は断定しないこと。',
-    '- 小道具の用途や名称を画像だけで断定できない場合、「袋」「小物」など見た目に基づく中立的な表現を使い、お守り等へ勝手に決めないこと。',
-    '- 壁蹴り、方向転換、回収など、絵コンテに描かれた具体的な動作を曖昧な移動表現へ抽象化しすぎないこと。',
-    '- ユーザーの補足指示がある場合は、画像だけでは判別できない物語上の意味を補う情報として忠実に反映すること。画像と補足指示の両方にない内容は追加しないこと。',
-    '- 出力はカットごとのJSON配列ではなく、1つの連続した日本語の文章によるプロンプトにすること。',
-    `- プロンプト文中に、0秒から${durationSeconds}秒までの時間帯ごとの展開を明記すること`,
-    '  (例:「0〜2秒は〜、2〜5秒は〜」のように、絵コンテのカット数に応じて時間帯を配分する)。',
-    '- 合計時間が指定秒数に収まるよう配分すること。',
-    '- 登場人物の外見・服装・背景・画風がカットを通して一貫するよう、プロンプト内で明記すること。',
-    '- 絵コンテ画像内のコマ割りの枠線、説明文字、吹き出し、ページ番号などのメタ情報は',
-    '  映像化しないことをプロンプト内に明記すること。',
+    '解析ルール:',
+    '- コマ番号が明確なら番号順を優先し、なければ視覚的な読み順を判定する。',
+    '- 全コマを1コマずつ解析し、省略、統合、追加、並べ替えをしない。',
+    '- 繰り返し登場する人物、動物、物、場所へ安定したIDを付け、特徴と状態をコマ間で追跡する。',
+    '- 変身、体格・服装・表情の変化、物の開閉・破損・中身、保持者の変更を前後関係とともに記録する。',
+    '- 最終コマは表情だけでなく、視線、口元、手元、足元、小道具、周囲の登場物の具体的な行動まで確認する。',
+    '- 画像にない人物、動物、物、設定、破壊、爆発、光、羽根、武器、攻撃、感情、結末を創作しない。',
+    '- 判別できない細部や用途は断定せず uncertain_details に入れる。',
+    '- ユーザー補足は画像だけでは分からない関係、意味、感情、状態変化、結末を確定する情報として反映する。',
+    '- 枠線、番号、説明文字、吹き出し、ページ番号は映像内容ではなくmetadataとして扱う。',
     '',
-    '出力は次のキーだけを持つJSONオブジェクトのみとしてください。説明文や前後のテキストは不要です。',
-    '{"prompt": "統合ビデオ生成プロンプトの本文", "detected_cuts": 絵コンテから検出したカット数（整数）}'
+    '次のキーだけを持つJSONオブジェクトを返してください:',
+    '{"detected_cuts":0,"layout":{"reading_order":[],"metadata":[]},"style":{"medium":"","genre":"","mood":"","palette":[],"lighting":""},"entities":[{"id":"entity_1","type":"","role":"","stable_features":[],"states_by_cut":{}}],"objects":[{"id":"object_1","stable_features":[],"meaning":"","holder_by_cut":{},"state_by_cut":{}}],"environments":[{"id":"environment_1","stable_features":[],"time_by_cut":{},"changes_by_cut":{}}],"cuts":[{"cut_number":1,"visible_facts":[],"entities":[],"actions":[],"expressions":[],"object_states":[],"camera":"","background":"","transition_from_previous":"","transition_to_next":"","dialogue":[],"sound_clues":[],"uncertain_details":[]}],"story":{"setup":"","incident":"","development":"","climax":"","resolution":"","ending":""},"confirmed_context_facts":[],"uncertain_details":[]}',
+    'detected_cuts と cuts の要素数を必ず一致させてください。'
+  ].join('\n');
+}
+
+function buildStoryboardPromptInstruction(durationSeconds, aspectRatio, expectedCuts) {
+  const cutCount = Math.max(1, Number(expectedCuts) || 1);
+  return [
+    'あなたは、構造化済みの絵コンテ解析から、そのまま動画生成へ使用できる詳細な日本語プロンプトを書く専門家です。',
+    '特定の題材、登場人物、ジャンル、画風を前提にせず、渡された解析JSONとユーザー補足だけを正本にしてください。',
+    '動画: 合計' + durationSeconds + '秒、アスペクト比' + aspectRatio + '、コマ数' + cutCount + '。',
+    '',
+    '絶対ルール:',
+    '- 【秒数ごとの映像】に必ず' + cutCount + '個の時間区間を作り、1コマを1区間へ対応させる。',
+    '- コマを省略、統合、追加、並べ替えしない。',
+    '- 最初を0秒、最後を' + durationSeconds + '秒にし、時間の空白と重複を作らない。',
+    '- 各区間に、状態、具体的な動作、表情、カメラ、速度とタメ、背景、必要な音、次へつながる終了状態を書く。',
+    '- 小道具の保持者や状態が変わる場合、その変化が起きる瞬間を省略しない。',
+    '- 解析にない人物、動物、物、設定、破壊、爆発、光、羽根、武器、攻撃、感情、結末を追加しない。',
+    '- 固有名詞や用途が不明なら創作せず、見た目に基づく中立的な表現を使う。',
+    '- 画風、外見、小道具、場所、時間帯、最終コマの意味を変更しない。',
+    '- confirmed_context_facts を必ず反映する。',
+    '- セリフが確認できない場合はセリフなしとし、人間の言葉を創作しない。',
+    '- 音は描かれた動作から自然に発生するものに限定する。',
+    '- 使用画像は絵コンテ画像1枚だけ。存在しない設定シートや画像2以降を書かない。',
+    '- 枠線、番号、説明文字、吹き出し、余白を映像化しない。',
+    '',
+    '短い要約ではなく、初心者が追記せず使える具体性にする。ただし解析にない内容で長文化しない。',
+    '',
+    '必須見出しと順番:',
+    '【動画生成｜' + durationSeconds + '秒｜絵コンテ使用】',
+    '【基本設定】',
+    '【使用する基準画像】',
+    '【絵コンテの読み順】',
+    '【この動画の目的】',
+    '【登場人物・登場物の固定】',
+    '【重要な小道具】（該当する場合のみ）',
+    '【舞台と時間帯】',
+    '【秒数ごとの映像】',
+    '【セリフ】',
+    '【音・環境音】',
+    '【画風固定】',
+    '【今回の禁止事項】',
+    '',
+    '画風固定と禁止事項は解析内容から動的に作り、特定作品の固定例をコピーしない。',
+    '出力前に、区間数、時間の連続、全コマ、状態変化、小道具、補足、最終コマ、勝手な追加がないことを自己確認する。',
+    '次のJSONだけを返してください:',
+    '{"prompt":"必須見出しを含む完成プロンプト","detected_cuts":' + cutCount + '}'
+  ].join('\n');
+}
+
+function buildStoryboardRepairInstruction(durationSeconds, aspectRatio, expectedCuts) {
+  return [
+    'あなたは動画プロンプトの最終校正担当です。構造化解析を正本にし、下書きの構造違反だけを修正してください。',
+    '新しい内容は追加しないでください。',
+    '時間区間を必ず' + expectedCuts + '個にし、0秒から' + durationSeconds + '秒まで空白・重複なく配分してください。',
+    'アスペクト比' + aspectRatio + '、必須見出し、コマ順、状態変化、小道具、最終コマを維持してください。',
+    '次のJSONだけを返してください:',
+    '{"prompt":"修正済み完成プロンプト","detected_cuts":' + expectedCuts + '}'
   ].join('\n');
 }
 
@@ -87,6 +136,55 @@ function extractJsonObject(text) {
       return null;
     }
   }
+}
+
+function extractTimelineRanges(prompt) {
+  const start = prompt.indexOf('【秒数ごとの映像】');
+  if (start < 0) return [];
+  const tail = prompt.slice(start + '【秒数ごとの映像】'.length);
+  const nextHeading = tail.search(/\n【(?:セリフ|音・環境音|音・声)】/);
+  const section = nextHeading >= 0 ? tail.slice(0, nextHeading) : tail;
+  const ranges = [];
+  const re = /(\d+(?:\.\d+)?)\s*(?:〜|~|－|-|–|—)\s*(\d+(?:\.\d+)?)\s*秒/g;
+  let match;
+  while ((match = re.exec(section))) ranges.push([Number(match[1]), Number(match[2])]);
+  return ranges;
+}
+
+function validateFinalPrompt(prompt, expectedCuts, durationSeconds) {
+  const required = ['【基本設定】', '【使用する基準画像】', '【絵コンテの読み順】', '【この動画の目的】', '【登場人物・登場物の固定】', '【舞台と時間帯】', '【秒数ごとの映像】', '【セリフ】', '【音・環境音】', '【画風固定】', '【今回の禁止事項】'];
+  const ranges = extractTimelineRanges(prompt);
+  const headingsOk = required.every((heading) => prompt.includes(heading));
+  const rangesOk = ranges.length === expectedCuts
+    && ranges[0]?.[0] === 0
+    && ranges[ranges.length - 1]?.[1] === durationSeconds
+    && ranges.every((range, index) => range[1] > range[0] && (index === 0 || range[0] === ranges[index - 1][1]));
+  return { ok: headingsOk && rangesOk && prompt.length >= 700, headingsOk, rangesOk, ranges };
+}
+
+async function callClaude(apiKey, messages, maxTokens) {
+  const response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + apiKey,
+      'content-type': 'application/json',
+      'HTTP-Referer': 'https://flowvid-studio.vercel.app',
+      'X-Title': 'FlowVid Studio'
+    },
+    body: JSON.stringify({ model: STORYBOARD_MODEL, max_tokens: maxTokens, messages })
+  });
+  const rawText = await response.text();
+  let data;
+  try { data = JSON.parse(rawText); } catch (_) { data = { error: rawText.slice(0, 300) }; }
+  return { response, data };
+}
+
+function unavailable(res) {
+  return res.status(503).json({
+    ok: false,
+    error: 'storyboard_prompt_unavailable',
+    message: '現在プロンプトを作成できません。しばらくしてからもう一度お試しください。'
+  });
 }
 
 module.exports = async function handler(req, res) {
@@ -164,72 +262,81 @@ module.exports = async function handler(req, res) {
     return res.status(preSendControl.status).json(preSendControl.body);
   }
 
-  let response, data;
+  const contextBlock = storyContext
+    ? '\n\n<user_story_context>\n' + storyContext + '\n</user_story_context>\nこの補足は画像だけでは分からない意味を確定する情報です。'
+    : '';
+
+  let analysisCall;
   try {
-    response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + apiKey,
-        'content-type': 'application/json',
-        'HTTP-Referer': 'https://flowvid-studio.vercel.app',
-        'X-Title': 'FlowVid Studio'
-      },
-      body: JSON.stringify({
-        model: STORYBOARD_MODEL,
-        max_tokens: 1500,
-        messages: [
-          {
-            role: 'system',
-            content: buildStoryboardPromptInstruction(durationSeconds, aspectRatio)
-          },
-          {
-            role: 'user',
-            content: [
-              { type: 'image_url', image_url: { url: `data:${mediaType};base64,${image}` } },
-              {
-                type: 'text',
-                text: '上記の絵コンテ画像を解析し、指示に従ってJSONのみ返してください。'
-                  + (storyContext ? `\n\nユーザーの補足指示:\n${storyContext}` : '')
-              }
-            ]
-          }
+    analysisCall = await callClaude(apiKey, [
+      { role: 'system', content: buildStoryboardAnalysisInstruction(durationSeconds, aspectRatio) },
+      {
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: 'data:' + mediaType + ';base64,' + image } },
+          { type: 'text', text: '絵コンテを読み順どおりに構造化し、指定JSONだけを返してください。' + contextBlock }
         ]
-      })
-    });
-    const rawText = await response.text();
-    try { data = JSON.parse(rawText); } catch (_) { data = { error: rawText.slice(0, 300) }; }
-  } catch (err) {
-    // Network error / timeout: fail closed, same posture as moderation failures.
-    return res.status(503).json({
-      ok: false,
-      error: 'storyboard_prompt_unavailable',
-      message: '現在プロンプトを作成できません。しばらくしてからもう一度お試しください。'
-    });
+      }
+    ], 3000);
+  } catch (_) {
+    return unavailable(res);
+  }
+  if (!analysisCall.response.ok) return unavailable(res);
+
+  const analysisText = String(analysisCall.data?.choices?.[0]?.message?.content ?? '');
+  const analysis = extractJsonObject(analysisText);
+  const cuts = Array.isArray(analysis?.cuts) ? analysis.cuts : [];
+  if (!analysis || cuts.length < 1 || cuts.length > 30) return unavailable(res);
+  const expectedCuts = cuts.length;
+  analysis.detected_cuts = expectedCuts;
+
+  let writerCall;
+  try {
+    writerCall = await callClaude(apiKey, [
+      { role: 'system', content: buildStoryboardPromptInstruction(durationSeconds, aspectRatio, expectedCuts) },
+      {
+        role: 'user',
+        content: '次の構造化解析を正本として完成プロンプトを作成してください。\n\n<storyboard_analysis>\n'
+          + JSON.stringify(analysis) + '\n</storyboard_analysis>' + contextBlock
+      }
+    ], 4000);
+  } catch (_) {
+    return unavailable(res);
+  }
+  if (!writerCall.response.ok) return unavailable(res);
+
+  let parsed = extractJsonObject(String(writerCall.data?.choices?.[0]?.message?.content ?? ''));
+  let prompt = String(parsed?.prompt || '').trim();
+  let validation = validateFinalPrompt(prompt, expectedCuts, durationSeconds);
+
+  if (!parsed || Number(parsed.detected_cuts) !== expectedCuts || !validation.ok) {
+    let repairCall;
+    try {
+      repairCall = await callClaude(apiKey, [
+        { role: 'system', content: buildStoryboardRepairInstruction(durationSeconds, aspectRatio, expectedCuts) },
+        {
+          role: 'user',
+          content: '<storyboard_analysis>\n' + JSON.stringify(analysis)
+            + '\n</storyboard_analysis>\n\n<draft_prompt>\n' + prompt
+            + '\n</draft_prompt>\n\n構造違反を修正し、指定JSONだけを返してください。'
+        }
+      ], 4000);
+    } catch (_) {
+      return unavailable(res);
+    }
+    if (!repairCall.response.ok) return unavailable(res);
+    parsed = extractJsonObject(String(repairCall.data?.choices?.[0]?.message?.content ?? ''));
+    prompt = String(parsed?.prompt || '').trim();
+    validation = validateFinalPrompt(prompt, expectedCuts, durationSeconds);
   }
 
-  if (!response.ok) {
-    return res.status(503).json({
-      ok: false,
-      error: 'storyboard_prompt_unavailable',
-      message: '現在プロンプトを作成できません。しばらくしてからもう一度お試しください。'
-    });
-  }
-
-  const text = String(data?.choices?.[0]?.message?.content ?? '');
-  const parsed = extractJsonObject(text);
-  const prompt = String(parsed?.prompt || '').trim();
-  if (!parsed || !prompt) {
-    return res.status(503).json({
-      ok: false,
-      error: 'storyboard_prompt_unavailable',
-      message: '現在プロンプトを作成できません。しばらくしてからもう一度お試しください。'
-    });
-  }
-
-  const detectedCuts = Number.isFinite(Number(parsed?.detected_cuts)) ? Number(parsed.detected_cuts) : null;
-
-  return res.status(200).json({ ok: true, prompt, detected_cuts: detectedCuts });
+  if (!parsed || Number(parsed.detected_cuts) !== expectedCuts || !validation.ok) return unavailable(res);
+  return res.status(200).json({ ok: true, prompt, detected_cuts: expectedCuts });
 };
 
 module.exports.buildStoryboardPromptInstruction = buildStoryboardPromptInstruction;
+module.exports.buildStoryboardAnalysisInstruction = buildStoryboardAnalysisInstruction;
+module.exports.buildStoryboardRepairInstruction = buildStoryboardRepairInstruction;
+module.exports.extractTimelineRanges = extractTimelineRanges;
+module.exports.validateFinalPrompt = validateFinalPrompt;
 module.exports.MAX_STORY_CONTEXT_CHARS = MAX_STORY_CONTEXT_CHARS;
