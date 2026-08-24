@@ -256,14 +256,54 @@ function toAmountMinor(inputValue,currency){
 }
 function currentMonthPrefix(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}
 
-function computeMonthlySummary(){
-  const activeJpyMonthly=costsCache.filter(c=>c.is_active&&c.currency==='JPY'&&c.billing_cycle==='monthly');
-  const planned=activeJpyMonthly.reduce((sum,c)=>sum+Number(c.amount_minor||0),0);
+// 今月予定に含める運営費を判定する。
+// - monthly: 毎月発生するため常に含める
+// - usage: 概算(amount_is_estimate=true)の場合のみ、月次目安として含める
+// - yearly / one_time: next_billing_dateが今月中の場合だけ含める
+function isCostPlannedThisMonth(c,monthPrefix){
+  if(!c.is_active)return false;
+  if(c.billing_cycle==='monthly')return true;
+  if(c.billing_cycle==='usage')return Boolean(c.amount_is_estimate);
+  if(c.billing_cycle==='yearly'||c.billing_cycle==='one_time'){
+    return Boolean(c.next_billing_date)&&String(c.next_billing_date).slice(0,7)===monthPrefix;
+  }
+  return false;
+}
+
+// USD建ての予定額をJPYへ換算するレートは、固定値をブラウザに持たず、
+// 必ずサーバー(Frankfurter経由)から取得する。取得できない場合は
+// 予定額を「取得できません」と表示し、0円などの誤った数値は出さない。
+async function computeMonthlySummary(){
   const monthPrefix=currentMonthPrefix();
+  const eligible=costsCache.filter(c=>isCostPlannedThisMonth(c,monthPrefix));
+  const needsUsdRate=eligible.some(c=>c.currency==='USD');
+
+  let usdRate=null,fxFailed=false;
+  if(needsUsdRate){
+    try{
+      const fx=await costsApi('getFxRate');
+      usdRate=Number(fx.rate);
+    }catch(_){fxFailed=true}
+  }
+
+  let planned=0,plannedAvailable=true;
+  for(const c of eligible){
+    if(c.currency==='JPY'){
+      planned+=Number(c.amount_minor||0);
+    }else if(usdRate){
+      planned+=Math.round((Number(c.amount_minor||0)/100)*usdRate);
+    }else{
+      plannedAvailable=false;
+    }
+  }
+
   const actual=paymentsCache.filter(p=>!p.is_voided&&String(p.paid_at||'').startsWith(monthPrefix)).reduce((sum,p)=>sum+Number(p.amount_jpy||0),0);
-  $('costsPlanned').textContent=formatJpy(planned);
+
+  $('costsPlanned').textContent=plannedAvailable?formatJpy(planned):'取得できません';
   $('costsActual').textContent=formatJpy(actual);
-  $('costsRangeNote').textContent='予定はJPY建ての毎月契約(有効なもの)のみ合算しています。USD建ての契約は一覧でご確認ください。実績はブラウザの現在月(今月)の支払い実績(取消分を除く)の円換算合計です。';
+  $('costsRangeNote').textContent=fxFailed
+    ?'USD建ての予定額を円換算するための為替レートを取得できなかったため、予定額の一部が含まれていません。'
+    :'予定は「毎月契約」「概算(見積もり)扱いの従量課金」「今月が次回請求日の毎年契約・一回限りの契約」を、USD建てはサーバー取得の最新レートで円換算して合算しています。実績はブラウザの現在月(今月)の支払い実績(取消分を除く)の円換算合計です。';
 }
 
 function renderCostsList(){
@@ -327,10 +367,16 @@ async function voidPayment(id){
   }catch(error){message(error.message)}
 }
 
-function fillCostSelect(){
+// currentCostを指定すると、無効化済み(is_active=false)でも選択肢に含める。
+// 既存の支払い実績を編集するとき、所属サービスが無効化されていても
+// selectから消えて編集不能にならないようにするため。
+function fillCostSelect(currentCost){
   const select=$('paymentCostSelect');
-  const activeCosts=costsCache.filter(c=>c.is_active);
-  select.innerHTML=activeCosts.map(c=>`<option value="${esc(c.id)}">${esc(c.service_name)}</option>`).join('')||'<option value="">有効な運営費がありません</option>';
+  const options=costsCache.filter(c=>c.is_active);
+  if(currentCost&&!options.some(c=>c.id===currentCost.id)){
+    options.push(currentCost);
+  }
+  select.innerHTML=options.map(c=>`<option value="${esc(c.id)}">${esc(c.service_name)}${c.is_active?'':'(無効)'}</option>`).join('')||'<option value="">有効な運営費がありません</option>';
 }
 
 function openCostForm(cost){
@@ -352,7 +398,8 @@ function closeCostForm(){$('costFormCard').hidden=true;editingCostId=null}
 function openPaymentForm(payment,presetCostId){
   editingPaymentId=payment?payment.id:null;
   $('paymentFormTitle').textContent=payment?'支払い実績を編集':'支払い実績を追加';
-  fillCostSelect();
+  const currentCost=payment?costsCache.find(c=>c.id===payment.operating_cost_id):null;
+  fillCostSelect(currentCost);
   $('paymentCostSelect').value=payment?payment.operating_cost_id:(presetCostId||'');
   $('paymentPaidAt').value=payment?.paid_at||new Date().toISOString().slice(0,10);
   $('paymentAmount').value=payment?(payment.currency==='USD'?(payment.amount_minor/100):payment.amount_minor):'';
@@ -367,14 +414,28 @@ function openPaymentForm(payment,presetCostId){
 }
 function closePaymentForm(){$('paymentFormCard').hidden=true;editingPaymentId=null}
 
+// JPYはmanual_actualを許可しない(常にauto・fx_rate=1)。currency=JPYの
+// 間は、円換算方法の選択肢自体をautoに固定して選べないようにする。
 function updatePaymentManualFieldVisibility(){
-  const method=$('paymentConversionMethod').value;
   const currency=$('paymentCurrency').value;
+  const methodSelect=$('paymentConversionMethod');
+  const manualOption=methodSelect.querySelector('option[value="manual_actual"]');
+
+  if(currency==='JPY'){
+    methodSelect.value='auto';
+    methodSelect.disabled=true;
+    if(manualOption)manualOption.disabled=true;
+  }else{
+    methodSelect.disabled=false;
+    if(manualOption)manualOption.disabled=false;
+  }
+
+  const method=methodSelect.value;
   $('paymentManualJpyField').hidden=method!=='manual_actual';
   if(method==='auto'){
-    $('paymentAutoPreview').textContent=currency==='JPY'?'円建てのため換算は不要です(1:1)。':'保存時にFrankfurterから最新のUSD→JPYレートを取得して換算します。取得できない場合は保存を停止します。';
+    $('paymentAutoPreview').textContent=currency==='JPY'?'円建てのため換算は不要です(1:1)。':'保存時にFrankfurterから支払日時点のUSD→JPYレート(historical rate)を取得して換算します。取得できない場合は保存を停止します。';
   }else{
-    $('paymentAutoPreview').textContent='カード明細などに記載された、実際に円で請求された金額をそのまま入力してください。';
+    $('paymentAutoPreview').textContent='カード明細などに記載された、実際に円で請求された金額をそのまま入力してください。(JPY建ての支払いはこの方法を選択できません)';
   }
 }
 $('paymentConversionMethod').onchange=updatePaymentManualFieldVisibility;
@@ -451,7 +512,7 @@ async function loadCostsTab(){
     paymentsCache=paymentsData.payments||[];
     renderCostsList();
     renderPayments();
-    computeMonthlySummary();
+    await computeMonthlySummary();
     costsLoaded=true;
   }catch(error){
     message(error.message);

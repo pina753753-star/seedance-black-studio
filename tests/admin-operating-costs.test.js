@@ -4,10 +4,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const api = require('../api/admin-operating-costs.js')._test;
 
 const VALID_UUID = '123e4567-e89b-42d3-a456-426614174000';
+const VALID_UUID2 = '223e4567-e89b-42d3-a456-426614174000';
 
 function responseRecorder() {
   return {
@@ -491,4 +493,286 @@ test('fetchUsdToJpyRate: 不正なレスポンス形式(rate欠落・不正日�
 test('fetchUsdToJpyRate: fetch自体が例外を投げた場合も伝播する(推定値へフォールバックしない)', async () => {
   const fetchImpl = async () => { throw new Error('network down'); };
   await assert.rejects(() => fetchUsdToJpyRate({ fetchImpl }), /network down/);
+});
+
+// =================================================================
+// 修正1: 過去paidAtのUSD/autoでhistorical rateを使用
+// =================================================================
+test('fetchUsdToJpyRate: dateを渡すとhistoricalエンドポイントを叩き、実際に返ってきたrate dateを使う', async () => {
+  let calledUrl = null;
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return {
+      ok: true,
+      // 2026-08-01(土)は休日レートのため、実際に返るrate dateは金曜(07-31)にずれることがある。
+      json: async () => ({ amount: 1, base: 'USD', date: '2026-07-31', rates: { JPY: 148.2 } })
+    };
+  };
+
+  const result = await fetchUsdToJpyRate({ fetchImpl, date: '2026-08-01' });
+
+  assert.equal(calledUrl, 'https://api.frankfurter.dev/v1/2026-08-01?base=USD&symbols=JPY');
+  assert.equal(result.date, '2026-07-31'); // 呼び出し元は実際に返ってきたrate dateを使う
+  assert.equal(result.rate, 148.2);
+});
+
+test('fetchUsdToJpyRate: 不正なdate形式は例外を投げる', async () => {
+  await assert.rejects(() => fetchUsdToJpyRate({ fetchImpl: async () => ({ ok: true, json: async () => ({}) }), date: 'not-a-date' }));
+});
+
+test('resolveFxFields: USD/autoは支払日(paidAt)をfetchFxRateへ渡す(登録日の最新レートではない)', async () => {
+  const input = { amountMinor: 2000, currency: 'USD', conversionMethod: 'auto', paidAt: '2026-01-15' };
+  let capturedDate = null;
+  const fetchFxRate = async (dateIso) => { capturedDate = dateIso; return { rate: 140, date: '2026-01-15', source: 'frankfurter' }; };
+
+  const fx = await api.resolveFxFields(input, fetchFxRate);
+
+  assert.equal(capturedDate, '2026-01-15');
+  assert.equal(fx.fxRateDate, '2026-01-15');
+});
+
+test('APIハンドラ: createPaymentはpaidAtをfetchFxRateへ渡す', async () => {
+  let capturedDate = null;
+  const handler = api.createHandler({
+    requireAuth: async () => ({ ok: true, user: { id: 'admin-id', email: 'hinaran53@gmail.com' }, supabase: {} }),
+    authorize: async () => ({ ok: true, admin: { id: 'admin-id' } }),
+    fetchFxRate: async (dateIso) => { capturedDate = dateIso; return { rate: 150, date: dateIso, source: 'frankfurter' }; },
+    rpc: async () => ({ ok: true })
+  });
+
+  const res = responseRecorder();
+  await handler({
+    method: 'POST',
+    body: {
+      action: 'createPayment',
+      operatingCostId: VALID_UUID,
+      paidAt: '2026-03-10',
+      amountMinor: 1000,
+      currency: 'USD',
+      conversionMethod: 'auto'
+    }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(capturedDate, '2026-03-10');
+});
+
+// =================================================================
+// 修正3: JPY/manual_actual拒否、JPYはamount_jpy=amount_minor・rate=1
+// =================================================================
+test('validatePaymentInputPayloadはJPY×manual_actualを拒否する(USDのみmanual_actualを許可)', () => {
+  const base = { operatingCostId: VALID_UUID, paidAt: '2026-08-01', amountMinor: 1000 };
+  assert.equal(api.validatePaymentInputPayload({ ...base, currency: 'JPY', conversionMethod: 'manual_actual', amountJpy: 1000 }), null);
+  assert.notEqual(api.validatePaymentInputPayload({ ...base, currency: 'JPY', conversionMethod: 'auto' }), null);
+  assert.notEqual(api.validatePaymentInputPayload({ ...base, currency: 'USD', conversionMethod: 'manual_actual', amountJpy: 1600 }), null);
+});
+
+test('APIハンドラ: createPaymentでJPY×manual_actualは400になり、RPCを呼ばない', async () => {
+  let rpcCalled = false;
+  const handler = api.createHandler({
+    requireAuth: async () => ({ ok: true, user: { id: 'admin-id', email: 'hinaran53@gmail.com' }, supabase: {} }),
+    authorize: async () => ({ ok: true, admin: { id: 'admin-id' } }),
+    rpc: async () => { rpcCalled = true; return { ok: true }; }
+  });
+
+  const res = responseRecorder();
+  await handler({
+    method: 'POST',
+    body: {
+      action: 'createPayment',
+      operatingCostId: VALID_UUID,
+      paidAt: '2026-08-01',
+      amountMinor: 1000,
+      currency: 'JPY',
+      conversionMethod: 'manual_actual',
+      amountJpy: 1000
+    }
+  }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(rpcCalled, false);
+});
+
+test('resolveFxFields: JPYは常にamount_jpy=amount_minor・fx_rate=1を返す(bodyがmanual_actualを主張しても矯正する)', async () => {
+  const input = { amountMinor: 5000, currency: 'JPY', conversionMethod: 'manual_actual', amountJpy: 999999, paidAt: '2026-08-01' };
+  let fetchCalled = false;
+  const fetchFxRate = async () => { fetchCalled = true; return { rate: 1, date: 'x', source: 'y' }; };
+
+  const fx = await api.resolveFxFields(input, fetchFxRate);
+
+  assert.equal(fetchCalled, false);
+  assert.equal(fx.amountJpy, 5000);
+  assert.equal(fx.fxRate, 1);
+  assert.equal(fx.fxRateDate, null);
+  assert.equal(fx.fxRateSource, null);
+});
+
+// =================================================================
+// 修正5: DB CHECK制約(migrationのSQLテキストで検証)
+// =================================================================
+test('migration: JPY(auto/amount_jpy=amount_minor/fx_rate=1/date・sourceはNULL)の整合性CHECKがある', () => {
+  assert.match(migration, /operating_cost_payments_fx_consistency_check/);
+  assert.match(migration, /currency = 'JPY'\s*\n\s*and conversion_method = 'auto'\s*\n\s*and amount_jpy = amount_minor\s*\n\s*and fx_rate = 1\s*\n\s*and fx_rate_date is null\s*\n\s*and fx_rate_source is null/);
+});
+
+test('migration: USD/autoはfx_rate_date必須・fx_rate_source=frankfurter必須のCHECKがある', () => {
+  assert.match(migration, /currency = 'USD'\s*\n\s*and conversion_method = 'auto'\s*\n\s*and fx_rate_date is not null\s*\n\s*and fx_rate_source = 'frankfurter'/);
+});
+
+test('migration: USD/manual_actualはfx_rate_date・fx_rate_sourceともにNULL必須のCHECKがある', () => {
+  assert.match(migration, /currency = 'USD'\s*\n\s*and conversion_method = 'manual_actual'\s*\n\s*and fx_rate_date is null\s*\n\s*and fx_rate_source is null/);
+});
+
+test('migration: RPC側でもJPY×manual_actualを拒否する例外がある', () => {
+  assert.match(migration, /JPY does not support manual_actual conversion/);
+});
+
+// =================================================================
+// 修正4: payment編集でoperating_cost_idを変更できる
+// =================================================================
+test('validatePaymentUpdatePayloadはoperatingCostIdを含む', () => {
+  const payload = api.validatePaymentUpdatePayload({
+    paymentId: VALID_UUID,
+    operatingCostId: VALID_UUID2,
+    paidAt: '2026-08-01',
+    amountMinor: 1000,
+    currency: 'JPY',
+    conversionMethod: 'auto'
+  });
+  assert.notEqual(payload, null);
+  assert.equal(payload.operatingCostId, VALID_UUID2);
+});
+
+test('APIハンドラ: updatePaymentはp_operating_cost_idをRPCへ渡す(対象サービスの変更が反映される)', async () => {
+  let capturedParams = null;
+  const handler = api.createHandler({
+    requireAuth: async () => ({ ok: true, user: { id: 'admin-id', email: 'hinaran53@gmail.com' }, supabase: {} }),
+    authorize: async () => ({ ok: true, admin: { id: 'admin-id' } }),
+    rpc: async (db, name, params) => { capturedParams = { name, params }; return { ok: true }; }
+  });
+
+  const res = responseRecorder();
+  await handler({
+    method: 'POST',
+    body: {
+      action: 'updatePayment',
+      paymentId: VALID_UUID,
+      operatingCostId: VALID_UUID2, // 元と異なるサービスへ変更
+      paidAt: '2026-08-01',
+      amountMinor: 1000,
+      currency: 'JPY',
+      conversionMethod: 'auto'
+    }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(capturedParams.name, 'admin_update_operating_cost_payment');
+  assert.equal(capturedParams.params.p_operating_cost_id, VALID_UUID2);
+});
+
+test('migration: admin_update_operating_cost_paymentはp_operating_cost_idを受け取り、対象costの存在確認後にUPDATEする', () => {
+  assert.match(migration, /admin_update_operating_cost_payment\(\s*\n\s*p_admin_user_id uuid,\s*\n\s*p_payment_id uuid,\s*\n\s*p_operating_cost_id uuid,/);
+  assert.match(migration, /operating_cost_id = p_operating_cost_id/);
+});
+
+// =================================================================
+// 修正4(続き): 無効サービスに紐づくpayment編集(admin-finance.htmlのUI)
+// =================================================================
+const financeHtmlPath = path.join(__dirname, '..', 'admin-finance.html');
+const financeHtml = fs.readFileSync(financeHtmlPath, 'utf8');
+
+test('admin-finance.html: fillCostSelectは無効化済みでも現在選択中のサービスを選択肢へ含める', () => {
+  const start = financeHtml.indexOf('function fillCostSelect(');
+  const end = financeHtml.indexOf('function openCostForm(', start);
+  const src = financeHtml.slice(start, end);
+
+  const elements = { paymentCostSelect: { innerHTML: '' } };
+  const context = {
+    esc: (v) => String(v ?? ''),
+    $: (id) => elements[id],
+    costsCache: [
+      { id: 'active-1', service_name: 'Active Service', is_active: true }
+    ]
+  };
+  vm.createContext(context);
+  vm.runInContext(`${src}\nthis.fillCostSelect = fillCostSelect;`, context);
+
+  const inactiveCurrent = { id: 'inactive-1', service_name: 'Old Service', is_active: false };
+
+  context.fillCostSelect(inactiveCurrent);
+  assert.match(elements.paymentCostSelect.innerHTML, /value="inactive-1"/);
+  assert.match(elements.paymentCostSelect.innerHTML, /Old Service\(無効\)/);
+  assert.match(elements.paymentCostSelect.innerHTML, /value="active-1"/);
+
+  context.fillCostSelect(null);
+  assert.doesNotMatch(elements.paymentCostSelect.innerHTML, /inactive-1/);
+});
+
+// =================================================================
+// 修正2: 今月予定の集計ルール(admin-finance.htmlのisCostPlannedThisMonth)
+// =================================================================
+function loadIsCostPlannedThisMonth() {
+  const start = financeHtml.indexOf('function isCostPlannedThisMonth(');
+  const end = financeHtml.indexOf('// USD建ての予定額をJPYへ換算', start);
+  const src = financeHtml.slice(start, end);
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(`${src}\nthis.isCostPlannedThisMonth = isCostPlannedThisMonth;`, context);
+  return context.isCostPlannedThisMonth;
+}
+
+test('isCostPlannedThisMonth: monthly(通貨に関わらず有効なら常に今月予定へ含める)', () => {
+  const fn = loadIsCostPlannedThisMonth();
+  const monthPrefix = '2026-08';
+  assert.equal(fn({ is_active: true, billing_cycle: 'monthly', currency: 'JPY' }, monthPrefix), true);
+  assert.equal(fn({ is_active: true, billing_cycle: 'monthly', currency: 'USD' }, monthPrefix), true); // USD monthlyも含む
+  assert.equal(fn({ is_active: false, billing_cycle: 'monthly', currency: 'JPY' }, monthPrefix), false); // 無効は含めない
+});
+
+test('isCostPlannedThisMonth: usageはamount_is_estimate=trueの場合のみ含める', () => {
+  const fn = loadIsCostPlannedThisMonth();
+  const monthPrefix = '2026-08';
+  assert.equal(fn({ is_active: true, billing_cycle: 'usage', amount_is_estimate: true }, monthPrefix), true);
+  assert.equal(fn({ is_active: true, billing_cycle: 'usage', amount_is_estimate: false }, monthPrefix), false);
+});
+
+test('isCostPlannedThisMonth: yearly/one_timeはnext_billing_dateが今月の場合だけ含める', () => {
+  const fn = loadIsCostPlannedThisMonth();
+  const monthPrefix = '2026-08';
+  assert.equal(fn({ is_active: true, billing_cycle: 'yearly', next_billing_date: '2026-08-15' }, monthPrefix), true);
+  assert.equal(fn({ is_active: true, billing_cycle: 'yearly', next_billing_date: '2026-09-15' }, monthPrefix), false);
+  assert.equal(fn({ is_active: true, billing_cycle: 'yearly', next_billing_date: null }, monthPrefix), false);
+  assert.equal(fn({ is_active: true, billing_cycle: 'one_time', next_billing_date: '2026-08-01' }, monthPrefix), true);
+  assert.equal(fn({ is_active: true, billing_cycle: 'one_time', next_billing_date: '2026-07-31' }, monthPrefix), false);
+});
+
+test('admin-finance.html: computeMonthlySummaryはUSD建ての予定をサーバーAPI(getFxRate)で円換算し、固定レートを持たない', () => {
+  assert.match(financeHtml, /costsApi\('getFxRate'\)/);
+  // ブラウザ側に固定為替レート定数を持たないことを確認(150等の決め打ちレートがないか)。
+  const summaryStart = financeHtml.indexOf('async function computeMonthlySummary(');
+  const summaryEnd = financeHtml.indexOf('function renderCostsList(', summaryStart);
+  const summarySrc = financeHtml.slice(summaryStart, summaryEnd);
+  assert.doesNotMatch(summarySrc, /=\s*150(\.\d+)?\s*[;,]/); // 固定USDJPYレートのような即値がないか
+  assert.match(summarySrc, /usdRate=Number\(fx\.rate\)/);
+});
+
+// =================================================================
+// 修正: Stripe関連3ファイルが無変更(git diffで実ファイル内容を比較)
+// =================================================================
+test('api/stripe-checkout.js・api/stripe-webhook.js・api/admin-finance.jsはgit上で無変更', () => {
+  const { execFileSync } = require('node:child_process');
+  const repoRoot = path.join(__dirname, '..');
+  const targets = ['api/stripe-checkout.js', 'api/stripe-webhook.js', 'api/admin-finance.js'];
+
+  for (const target of targets) {
+    let diff;
+    try {
+      diff = execFileSync('git', ['diff', '--stat', 'origin/main...HEAD', '--', target], { cwd: repoRoot }).toString().trim();
+    } catch (_) {
+      // origin/mainが参照できない実行環境(例: シャロークローン)では、
+      // 作業ツリーの未commit差分の有無だけでも確認する。
+      diff = execFileSync('git', ['diff', '--stat', 'HEAD', '--', target], { cwd: repoRoot }).toString().trim();
+    }
+    assert.equal(diff, '', `${target} に差分があってはいけません: ${diff}`);
+  }
 });

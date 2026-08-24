@@ -172,6 +172,10 @@ function validatePaymentInputPayload(body) {
   if (reference.length > 200) return null;
   if (notes.length > 2000) return null;
 
+  // レビュー指摘(修正3): JPYはmanual_actualを許可しない。JPYは常に
+  // auto(fx_rate=1・amount_jpy=amount_minor)で保存する。
+  if (currency === 'JPY' && conversionMethod === 'manual_actual') return null;
+
   const result = {
     operatingCostId,
     paidAt,
@@ -211,18 +215,34 @@ function validateVoidPaymentPayload(body) {
   return { paymentId, voidReason };
 }
 
-// conversionMethod='auto'の場合、JPYはレート固定(1)、USDはFrankfurterから
-// 実際に取得したレートのみを使う。取得に失敗した場合は例外を投げて停止し、
-// 推定レートへは絶対にフォールバックしない。
-// conversionMethod='manual_actual'の場合、ブラウザから送られたamountJpyを
-// 正本として保存し、fxRateはそこから逆算した参考値として保持する
-// (ブラウザ側の自動計算レートは正本として信用しない)。
+// conversionMethod='auto'の場合、JPYはレート固定(1)、USDはFrankfurterの
+// historical rate(支払日=paidAt基準)のみを使う。登録日の最新レートでは
+// なく、実際に支払いが発生した日のレートで換算する(レビュー指摘・修正1)。
+// 取得に失敗した場合は例外を投げて停止し、推定レートへは絶対にフォール
+// バックしない。
+// conversionMethod='manual_actual'(USDのみ許可、レビュー指摘・修正3)の
+// 場合、ブラウザから送られたamountJpyを正本として保存し、fxRateはそこから
+// 逆算した参考値として保持する(ブラウザ側の自動計算レートは正本として
+// 信用しない)。
 async function resolveFxFields(input, fetchFxRate) {
-  const { amountMinor, currency, conversionMethod } = input;
+  const { amountMinor, currency, conversionMethod, paidAt } = input;
 
+  // JPYは常にauto・fx_rate=1・amount_jpy=amount_minorを強制する。
+  // validatePaymentInputPayloadでcurrency=JPY×manual_actualは既に拒否
+  // しているが、ここでも(直接呼び出されるテスト等に備えて)安全側に倒す。
+  if (currency === 'JPY') {
+    return {
+      amountJpy: amountMinor,
+      fxRate: 1,
+      fxRateDate: null,
+      fxRateSource: null
+    };
+  }
+
+  // currency === 'USD'
   if (conversionMethod === 'manual_actual') {
     const amountJpy = input.amountJpy;
-    const baseUnits = currency === 'USD' ? amountMinor / 100 : amountMinor;
+    const baseUnits = amountMinor / 100;
     const fxRate = amountJpy / baseUnits;
 
     return {
@@ -233,17 +253,8 @@ async function resolveFxFields(input, fetchFxRate) {
     };
   }
 
-  // conversionMethod === 'auto'
-  if (currency === 'JPY') {
-    return {
-      amountJpy: amountMinor,
-      fxRate: 1,
-      fxRateDate: null,
-      fxRateSource: null
-    };
-  }
-
-  const { rate, date, source } = await fetchFxRate();
+  // conversionMethod === 'auto': 支払日(paidAt)時点のhistorical rateを使う。
+  const { rate, date, source } = await fetchFxRate(paidAt);
   const amountJpy = Math.round((amountMinor / 100) * rate);
 
   return {
@@ -274,11 +285,13 @@ function createHandler(dependencies = {}) {
   const invoke =
     dependencies.rpc || rpc;
 
+  // dateIsoを渡すとFrankfurterのhistorical rate(支払日基準)を取得する。
+  // 省略時(getFxRateのプレビュー等)は最新レートを取得する。
   const fetchFxRate =
     dependencies.fetchFxRate ||
-    function defaultFetchFxRate() {
+    function defaultFetchFxRate(dateIso) {
       const { fetchUsdToJpyRate } = require('./_lib/fx-rate.js');
-      return fetchUsdToJpyRate();
+      return fetchUsdToJpyRate(dateIso ? { date: dateIso } : {});
     };
 
   return async function handler(req, res) {
@@ -506,6 +519,7 @@ function createHandler(dependencies = {}) {
           {
             p_admin_user_id: adminUserId,
             p_payment_id: payload.paymentId,
+            p_operating_cost_id: payload.operatingCostId,
             p_paid_at: payload.paidAt,
             p_amount_minor: payload.amountMinor,
             p_currency: payload.currency,
@@ -547,8 +561,19 @@ function createHandler(dependencies = {}) {
       }
 
       if (action === 'getFxRate') {
+        const rawDate = String(body?.paidAt || '').trim();
+        const paidAtForPreview = rawDate === '' ? undefined : rawDate;
+
+        if (paidAtForPreview !== undefined && !DATE_RE.test(paidAtForPreview)) {
+          return res.status(400).json({
+            ok: false,
+            error: 'INVALID_DATE',
+            message: '支払日を確認してください。'
+          });
+        }
+
         try {
-          const { rate, date, source } = await fetchFxRate();
+          const { rate, date, source } = await fetchFxRate(paidAtForPreview);
           return res.status(200).json({ ok: true, rate, date, source });
         } catch (_) {
           return res.status(502).json({

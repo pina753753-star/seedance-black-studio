@@ -124,6 +124,38 @@ create table if not exists private.operating_cost_payments (
   constraint operating_cost_payments_conversion_method_check
     check (conversion_method in ('auto', 'manual_actual')),
 
+  -- currency/conversion_method/FX項目間の整合性を、アプリ層のバグにも
+  -- 耐えるようDB制約としても強制する(レビュー指摘: 修正3・修正5)。
+  -- JPY: 常にauto・fx_rate=1・amount_jpy=amount_minor・
+  --      fx_rate_date/fx_rate_sourceはNULL(manual_actualは許可しない)。
+  -- USD+auto: Frankfurterのhistorical rateを使うため、
+  --      fx_rate_date/fx_rate_sourceは必須('frankfurter')。
+  -- USD+manual_actual: 管理者が入力した実額を正本とするため、
+  --      fx_rate_date/fx_rate_sourceはNULL(自動取得はしていない)。
+  constraint operating_cost_payments_fx_consistency_check
+    check (
+      (
+        currency = 'JPY'
+        and conversion_method = 'auto'
+        and amount_jpy = amount_minor
+        and fx_rate = 1
+        and fx_rate_date is null
+        and fx_rate_source is null
+      )
+      or (
+        currency = 'USD'
+        and conversion_method = 'auto'
+        and fx_rate_date is not null
+        and fx_rate_source = 'frankfurter'
+      )
+      or (
+        currency = 'USD'
+        and conversion_method = 'manual_actual'
+        and fx_rate_date is null
+        and fx_rate_source is null
+      )
+    ),
+
   constraint operating_cost_payments_reference_length_check
     check (reference is null or char_length(reference) <= 200),
 
@@ -530,6 +562,38 @@ begin
     raise exception 'invalid conversion method';
   end if;
 
+  -- レビュー指摘(修正3): JPYはmanual_actualを許可しない。常にauto・
+  -- fx_rate=1・amount_jpy=amount_minor・fx_rate_date/sourceはNULLを強制する。
+  if v_currency = 'JPY' then
+    if v_conversion_method <> 'auto' then
+      raise exception 'JPY does not support manual_actual conversion';
+    end if;
+    if p_amount_jpy <> p_amount_minor then
+      raise exception 'JPY amount_jpy must equal amount_minor';
+    end if;
+    if p_fx_rate <> 1 then
+      raise exception 'JPY fx_rate must be 1';
+    end if;
+    if p_fx_rate_date is not null or nullif(btrim(coalesce(p_fx_rate_source, '')), '') is not null then
+      raise exception 'JPY must not have fx_rate_date or fx_rate_source';
+    end if;
+  elsif v_conversion_method = 'auto' then
+    -- USD/auto: Frankfurterのhistorical rateを使うため、取得できた実際の
+    -- レート日付とsource='frankfurter'が必須。
+    if p_fx_rate_date is null then
+      raise exception 'auto conversion requires fx_rate_date';
+    end if;
+    if coalesce(nullif(btrim(coalesce(p_fx_rate_source, '')), ''), '') <> 'frankfurter' then
+      raise exception 'auto conversion requires fx_rate_source = frankfurter';
+    end if;
+  elsif v_conversion_method = 'manual_actual' then
+    -- USD/manual_actual: 自動取得はしていないため、fx_rate_date/sourceは
+    -- 必ずNULLにする(ブラウザ側の自動計算レートを正本として保存しない)。
+    if p_fx_rate_date is not null or nullif(btrim(coalesce(p_fx_rate_source, '')), '') is not null then
+      raise exception 'manual_actual must not have fx_rate_date or fx_rate_source';
+    end if;
+  end if;
+
   insert into private.operating_cost_payments (
     operating_cost_id,
     paid_at,
@@ -582,6 +646,7 @@ grant execute on function public.admin_create_operating_cost_payment(
 create or replace function public.admin_update_operating_cost_payment(
   p_admin_user_id uuid,
   p_payment_id uuid,
+  p_operating_cost_id uuid,
   p_paid_at date,
   p_amount_minor bigint,
   p_currency text,
@@ -625,6 +690,19 @@ begin
     raise exception 'voided payment cannot be edited';
   end if;
 
+  -- レビュー指摘(修正4): 対象サービスの変更を許可する。無効化済み
+  -- (is_active=false)のサービスでも、既存paymentの所属先としては
+  -- 引き続き有効(is_activeでの絞り込みはしない)。
+  if p_operating_cost_id is null then
+    raise exception 'operating cost id is required';
+  end if;
+
+  if not exists (
+    select 1 from private.operating_costs where id = p_operating_cost_id
+  ) then
+    raise exception 'operating cost not found';
+  end if;
+
   if p_paid_at is null then
     raise exception 'paid_at is required';
   end if;
@@ -649,8 +727,37 @@ begin
     raise exception 'invalid conversion method';
   end if;
 
+  -- レビュー指摘(修正3): JPYはmanual_actualを許可しない(create RPCと同じ
+  -- 整合性チェックを更新時にも強制する)。
+  if v_currency = 'JPY' then
+    if v_conversion_method <> 'auto' then
+      raise exception 'JPY does not support manual_actual conversion';
+    end if;
+    if p_amount_jpy <> p_amount_minor then
+      raise exception 'JPY amount_jpy must equal amount_minor';
+    end if;
+    if p_fx_rate <> 1 then
+      raise exception 'JPY fx_rate must be 1';
+    end if;
+    if p_fx_rate_date is not null or nullif(btrim(coalesce(p_fx_rate_source, '')), '') is not null then
+      raise exception 'JPY must not have fx_rate_date or fx_rate_source';
+    end if;
+  elsif v_conversion_method = 'auto' then
+    if p_fx_rate_date is null then
+      raise exception 'auto conversion requires fx_rate_date';
+    end if;
+    if coalesce(nullif(btrim(coalesce(p_fx_rate_source, '')), ''), '') <> 'frankfurter' then
+      raise exception 'auto conversion requires fx_rate_source = frankfurter';
+    end if;
+  elsif v_conversion_method = 'manual_actual' then
+    if p_fx_rate_date is not null or nullif(btrim(coalesce(p_fx_rate_source, '')), '') is not null then
+      raise exception 'manual_actual must not have fx_rate_date or fx_rate_source';
+    end if;
+  end if;
+
   update private.operating_cost_payments
-     set paid_at = p_paid_at,
+     set operating_cost_id = p_operating_cost_id,
+         paid_at = p_paid_at,
          amount_minor = p_amount_minor,
          currency = v_currency,
          amount_jpy = p_amount_jpy,
@@ -670,11 +777,11 @@ end;
 $function$;
 
 revoke all on function public.admin_update_operating_cost_payment(
-  uuid, uuid, date, bigint, text, bigint, numeric, date, text, text, text, text
+  uuid, uuid, uuid, date, bigint, text, bigint, numeric, date, text, text, text, text
 ) from public, anon, authenticated, service_role;
 
 grant execute on function public.admin_update_operating_cost_payment(
-  uuid, uuid, date, bigint, text, bigint, numeric, date, text, text, text, text
+  uuid, uuid, uuid, date, bigint, text, bigint, numeric, date, text, text, text, text
 ) to service_role;
 
 -- =========================================================
@@ -776,3 +883,37 @@ grant execute on function public.admin_list_operating_cost_payments(
 ) to service_role;
 
 commit;
+
+-- =========================================================
+-- ROLLBACK (do NOT run automatically; not executed by this migration)
+--
+-- If this needs to be reverted after production apply, run the following
+-- in a NEW migration file (never edit an already-applied migration) and
+-- in this order, so dependencies drop cleanly:
+--   1. RPCs (functions), because they reference the tables/helper below.
+--   2. The shared private.assert_operating_cost_admin() helper.
+--   3. private.operating_cost_payments (has an FK to operating_costs).
+--   4. private.operating_costs.
+--
+-- begin;
+--
+-- drop function if exists public.admin_list_operating_cost_payments(uuid, uuid, integer);
+-- drop function if exists public.admin_void_operating_cost_payment(uuid, uuid, text);
+-- drop function if exists public.admin_update_operating_cost_payment(uuid, uuid, uuid, date, bigint, text, bigint, numeric, date, text, text, text, text);
+-- drop function if exists public.admin_create_operating_cost_payment(uuid, uuid, date, bigint, text, bigint, numeric, date, text, text, text, text);
+-- drop function if exists public.admin_list_operating_costs(uuid);
+-- drop function if exists public.admin_set_operating_cost_active(uuid, uuid, boolean);
+-- drop function if exists public.admin_update_operating_cost(uuid, uuid, text, text, bigint, text, text, boolean, date, text);
+-- drop function if exists public.admin_create_operating_cost(uuid, text, text, bigint, text, text, boolean, date, text);
+--
+-- drop function if exists private.assert_operating_cost_admin(uuid);
+--
+-- drop table if exists private.operating_cost_payments;
+-- drop table if exists private.operating_costs;
+--
+-- commit;
+--
+-- Note: this does not touch `private` schema itself (shared with
+-- invite_codes/credit_grants/etc.), pgcrypto extension, or any other
+-- feature's tables/functions - only the objects created by this migration.
+-- =========================================================
