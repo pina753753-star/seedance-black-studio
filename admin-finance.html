@@ -254,7 +254,23 @@ function toAmountMinor(inputValue,currency){
   if(!Number.isFinite(n)||n<0)return null;
   return String(currency).toUpperCase()==='USD'?Math.round(n*100):Math.round(n);
 }
-function currentMonthPrefix(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}
+// Phase 1(売上)の期間集計と同じくJST(UTC+9)基準で日付を扱う。
+// new Date().toISOString()はUTC基準のため、JST 00:00〜08:59は前日の
+// 日付になってしまう(レビュー指摘)。ブラウザのタイムゾーン設定に依存
+// しないよう、常にUTC時刻へ+9時間してからYYYY-MM-DD/年月を取り出す。
+const JST_OFFSET_MS=9*60*60*1000;
+function jstDateParts(date=new Date()){
+  const jst=new Date(date.getTime()+JST_OFFSET_MS);
+  return{year:jst.getUTCFullYear(),month:jst.getUTCMonth()+1,day:jst.getUTCDate()};
+}
+function jstTodayIso(date=new Date()){
+  const{year,month,day}=jstDateParts(date);
+  return year+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+}
+function currentMonthPrefix(date=new Date()){
+  const{year,month}=jstDateParts(date);
+  return year+'-'+String(month).padStart(2,'0');
+}
 
 // 今月予定に含める運営費を判定する。
 // - monthly: 毎月発生するため常に含める
@@ -401,7 +417,7 @@ function openPaymentForm(payment,presetCostId){
   const currentCost=payment?costsCache.find(c=>c.id===payment.operating_cost_id):null;
   fillCostSelect(currentCost);
   $('paymentCostSelect').value=payment?payment.operating_cost_id:(presetCostId||'');
-  $('paymentPaidAt').value=payment?.paid_at||new Date().toISOString().slice(0,10);
+  $('paymentPaidAt').value=payment?.paid_at||jstTodayIso();
   $('paymentAmount').value=payment?(payment.currency==='USD'?(payment.amount_minor/100):payment.amount_minor):'';
   $('paymentCurrency').value=payment?.currency||'JPY';
   $('paymentConversionMethod').value=payment?.conversion_method||'auto';

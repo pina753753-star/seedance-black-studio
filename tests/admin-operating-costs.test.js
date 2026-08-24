@@ -776,3 +776,46 @@ test('api/stripe-checkout.js・api/stripe-webhook.js・api/admin-finance.jsはgi
     assert.equal(diff, '', `${target} に差分があってはいけません: ${diff}`);
   }
 });
+
+// =================================================================
+// JST日付修正: 支払日初期値・currentMonthPrefixをJST基準に統一
+// (Phase 1の売上期間集計と同じくJST(UTC+9)を使う)
+// =================================================================
+function loadJstDateHelpers() {
+  const start = financeHtml.indexOf('const JST_OFFSET_MS=');
+  const end = financeHtml.indexOf('function isCostPlannedThisMonth(', start);
+  const src = financeHtml.slice(start, end);
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(`${src}\nthis.jstTodayIso = jstTodayIso;\nthis.currentMonthPrefix = currentMonthPrefix;`, context);
+  return { jstTodayIso: context.jstTodayIso, currentMonthPrefix: context.currentMonthPrefix };
+}
+
+test('JST日付: UTC基準ではなくJST(UTC+9)で日付を計算する(JST 01:00相当でも当日になる)', () => {
+  const { jstTodayIso } = loadJstDateHelpers();
+
+  // UTC 2026-08-24T16:00:00Z = JST 2026-08-25 01:00
+  const utcInstant = new Date('2026-08-24T16:00:00Z');
+  assert.equal(jstTodayIso(utcInstant), '2026-08-25');
+
+  // 同じUTC基準の日付("2026-08-24T16:00:00Z".slice(0,10))とは異なることを
+  // 確認し、UTCのtoISOString().slice(0,10)への後退がないことを保証する。
+  assert.notEqual(jstTodayIso(utcInstant), utcInstant.toISOString().slice(0, 10));
+});
+
+test('JST日付: JST 00:xx台(月初直後)でもcurrentMonthPrefixが新しい月になる', () => {
+  const { currentMonthPrefix } = loadJstDateHelpers();
+
+  // UTC 2026-08-31T15:30:00Z = JST 2026-09-01 00:30
+  const utcInstant = new Date('2026-08-31T15:30:00Z');
+  assert.equal(currentMonthPrefix(utcInstant), '2026-09');
+
+  // UTC基準のまま月を出すと2026-08になってしまう回帰を防ぐ。
+  assert.notEqual(currentMonthPrefix(utcInstant), '2026-08');
+});
+
+test('admin-finance.html: 新規支払い実績の初期値・currentMonthPrefixがjstTodayIso/JST_OFFSET_MSを使っている', () => {
+  assert.match(financeHtml, /\$\('paymentPaidAt'\)\.value=payment\?\.paid_at\|\|jstTodayIso\(\)/);
+  assert.doesNotMatch(financeHtml, /new Date\(\)\.toISOString\(\)\.slice\(0,10\)/);
+  assert.match(financeHtml, /JST_OFFSET_MS=9\*60\*60\*1000/);
+});
