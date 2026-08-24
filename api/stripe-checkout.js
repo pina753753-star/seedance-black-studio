@@ -225,19 +225,11 @@ async function handler(req, res) {
     // annualCampaignAvailable lets pricing.html keep its discounted display
     // in sync with server-side reality (campaign window open AND the Coupon
     // env var configured) without ever exposing the Coupon ID itself.
-    // TEMP DEBUG (branch-only, remove before merge): diagnose why
-    // annualCampaignAvailable stays false in Preview. Never expose the
-    // actual coupon value - only existence/length metadata.
-    const _debugCouponRaw = process.env[ANNUAL_CAMPAIGN_COUPON_ENV];
-    const _debugCouponExists = typeof _debugCouponRaw === 'string' && _debugCouponRaw.length > 0;
     return res.status(200).json({
       ok: true,
       endpoint: '/api/stripe-checkout',
       method: 'POST',
-      annualCampaignAvailable: isAnnualCampaignAvailable(Date.now(), _debugCouponRaw),
-      couponEnvExists: _debugCouponExists,
-      couponEnvLength: typeof _debugCouponRaw === 'string' ? _debugCouponRaw.length : 0,
-      couponEnvTrimmedLength: typeof _debugCouponRaw === 'string' ? _debugCouponRaw.trim().length : 0
+      annualCampaignAvailable: isAnnualCampaignAvailable(Date.now(), process.env[ANNUAL_CAMPAIGN_COUPON_ENV])
     });
   }
 
