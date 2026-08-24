@@ -243,3 +243,82 @@ test('入力初期化はAPI成功と生成ID確認の後だけ実行する', () 
   assert.match(startSource.slice(unsuccessfulReturn, clearIndex), /if\(!res\.ok\)[\s\S]*?return/);
   assert.match(startSource.slice(missingIdReturn, clearIndex), /if\(!jobId&&!pollingUrl\)[\s\S]*?return/);
 });
+
+test('絵コンテ受付成功後も生成中カードと受付通知を維持する', () => {
+  const resetStart = source.indexOf('function resetStoryboardInputs()');
+  const resetSource = source.slice(resetStart, source.indexOf("$('sbRedoBtn').onclick", resetStart));
+  const pendingStart = source.indexOf('async function loadPendingTasks()');
+  const pendingSource = source.slice(pendingStart, source.indexOf('setTimeout(loadPendingTasks', pendingStart));
+  const insertStart = source.indexOf('function _ptInsertCard(');
+  const insertSource = source.slice(insertStart, source.indexOf('function _ptUpdateCardId', insertStart));
+
+  assert.match(source, /id="pendingNotice"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(source, /_ptShowAccepted\(realId\)/);
+  assert.doesNotMatch(resetSource, /pendingSection[^\n]*display='none'/);
+  assert.doesNotMatch(pendingSource, /mode==='storyboard'/);
+  assert.doesNotMatch(insertSource, /mode==='storyboard'/);
+  assert.match(insertSource, /pendingSection'\)\.style\.display='block'/);
+  assert.match(pendingSource, /if\(!tasks\.length\)\{if\(!list\.querySelector\('\[data-ptask-id\]'\)\)\$\('pendingSection'\)\.style\.display='none';return\}/);
+});
+
+test('生成中カードは進捗・タスクID・完了動画・失敗時の返金状態を表示する', () => {
+  assert.match(source, /data-pt-fill/);
+  assert.match(source, /data-pt-id-label/);
+  assert.match(source, /タスクID: /);
+  assert.match(source, /function _ptComplete[\s\S]*?<video controls playsinline/);
+  assert.match(source, /function _ptFail[\s\S]*?クレジットは自動返金されました/);
+  assert.match(source, /function _ptFail[\s\S]*?返金状況を確認できませんでした/);
+});
+
+test('絵コンテ由来を送信し、通常生成では送信しない', () => {
+  const startIndex = source.indexOf('async function start()');
+  const startSource = source.slice(startIndex, source.indexOf('function restoreDraft()', startIndex));
+  assert.match(startSource, /const uiMode=sbLocked\?'storyboard':mode/);
+  assert.match(startSource, /if\(sbLocked\)body\.ui_origin='storyboard'/);
+  assert.doesNotMatch(startSource, /body\.ui_origin='storyboard';[^}]*else/);
+});
+
+test('リロード後の絵コンテ生成中タスクと完了履歴をDB情報から復元する', () => {
+  const pendingApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'pending-tasks.js'), 'utf8');
+  const generatedApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'generated-videos.js'), 'utf8');
+  const history = fs.readFileSync(path.join(__dirname, '..', 'flowvid-history.js'), 'utf8');
+
+  assert.match(pendingApi, /created_at,settings/);
+  assert.match(pendingApi, /settings\?\.ui_origin === 'storyboard' \? 'storyboard' : task\.mode/);
+  assert.match(generatedApi, /settings\?\.ui_origin === 'storyboard'\) return 'storyboard'/);
+  assert.match(history, /v==='storyboard'\?'絵コンテ'/);
+  assert.match(source, /flowvidLoadHistory\(mode==='storyboard'\?'storyboard':mode\)/);
+});
+
+test('絵コンテ由来のDBマーカーは課金前に保存し、失敗時は生成を開始しない', () => {
+  const startApi = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'seedance-start.js'), 'utf8');
+  const marker = startApi.indexOf("settings: { ui_origin: uiOrigin }");
+  const deduction = startApi.indexOf('deduction = await checkAndDeduct', marker);
+  const provider = startApi.indexOf('fetch(providerEndpoint', marker);
+
+  assert.notEqual(marker, -1);
+  assert.ok(marker < deduction);
+  assert.ok(marker < provider);
+  assert.match(startApi.slice(marker, deduction), /\.eq\('user_id', user\.id\)[\s\S]*?\.eq\('status', 'queued'\)[\s\S]*?\.is\('api_task_id', null\)[\s\S]*?\.select\('id'\)/);
+  assert.match(startApi.slice(marker, deduction), /originRows\.length === 1[\s\S]*?if \(!originSaved\)[\s\S]*?releaseTask[\s\S]*?return res\.status\(500\)/);
+});
+
+test('生成IDがない場合は入力を消さず、二重押下をガードする', () => {
+  const startIndex = source.indexOf('async function start()');
+  const startSource = source.slice(startIndex, source.indexOf('function restoreDraft()', startIndex));
+  const missingId = startSource.indexOf('if(!jobId&&!pollingUrl)');
+  const clearIndex = startSource.indexOf('clearAcceptedGenerationInputs(submission)');
+
+  assert.ok(missingId < clearIndex);
+  assert.match(source, /let generationStartGuard=false/);
+  assert.match(source, /if\(generationStartGuard\)return;[\s\S]*?generationStartGuard=true;[\s\S]*?finally\{[\s\S]*?generationStartGuard=false/);
+  assert.match(source, /pendingNotice\.textContent='リクエスト送信中'/);
+  assert.match(source, /window\.flowvidCreateHandler=guardedStart/);
+});
+
+test('モバイルでも生成状態は非表示にされず読み上げ可能', () => {
+  const pendingMarkup = source.slice(source.indexOf('<div id="pendingSection"'), source.indexOf('</main>'));
+  assert.match(pendingMarkup, /id="pendingNotice"[^>]*aria-live="polite"/);
+  assert.match(pendingMarkup, /id="pendingList"/);
+  assert.doesNotMatch(source, /@media\(max-width:[^)]+\)[^{]*\{[^}]*#pendingSection[^}]*display\s*:\s*none/);
+});

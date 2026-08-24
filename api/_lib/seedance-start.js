@@ -383,6 +383,7 @@ module.exports = async function handler(req, res) {
     });
     if (!options.ok) return res.status(400).json({ ok: false, error: options.error, message: options.message });
     const { resolution, aspectRatio, duration, mode, model } = options;
+    const uiOrigin = body.ui_origin === 'storyboard' && mode === 'reference_to_video' ? 'storyboard' : '';
     let generationPlan = 'free';
     if (model === 'bytedance/seedance-2.5') {
       const entitlement = await getSeedance25Entitlement(db, user.id);
@@ -555,6 +556,47 @@ module.exports = async function handler(req, res) {
     }
     taskId = taskResult.id;
     console.log('[seedance-start] task created:', taskId, 'user:', user.id, 'mode:', mode);
+
+    // The database mode remains reference_to_video for provider and pricing
+    // compatibility. Persist only the validated UI origin so pending/history
+    // endpoints can restore storyboard tasks after a reload. Fail before any
+    // credit deduction or provider request if this required marker cannot be
+    // saved; otherwise an accepted storyboard task would become invisible in
+    // the storyboard UI again.
+    if (uiOrigin) {
+      let originRows = null;
+      let originError = null;
+      try {
+        const originResult = await db.from('generation_tasks')
+          .update({ settings: { ui_origin: uiOrigin }, updated_at: new Date().toISOString() })
+          .eq('id', taskId)
+          .eq('user_id', user.id)
+          .eq('status', 'queued')
+          .is('api_task_id', null)
+          .select('id');
+        originRows = originResult.data;
+        originError = originResult.error;
+      } catch (error) {
+        originError = error;
+      }
+      const originSaved = !originError && Array.isArray(originRows) && originRows.length === 1;
+      if (!originSaved) {
+        console.error(
+          '[seedance-start] storyboard UI origin save failed, taskId:',
+          taskId,
+          'updatedRows:',
+          Array.isArray(originRows) ? originRows.length : null,
+          'error:',
+          originError?.message || originError || null
+        );
+        await releaseTask(db, user.id, taskId, 'cancelled', 'Storyboard UI origin could not be saved');
+        return res.status(500).json({
+          ok: false,
+          error: 'storyboard_origin_save_failed',
+          message: '絵コンテの生成状態を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+        });
+      }
+    }
 
     // Deduct balance + ledger rows in one DB transaction.
     deduction = await checkAndDeduct(db, user.id, creditCost, taskId);

@@ -13,6 +13,7 @@ const STORYBOARD_MODEL = 'anthropic/claude-sonnet-4-5';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_STORY_CONTEXT_CHARS = 2000;
 const MIN_DURATION = 1;
 const MAX_DURATION = 15;
 
@@ -43,12 +44,22 @@ function normalizeAspectRatio(value) {
 
 function buildStoryboardPromptInstruction(durationSeconds, aspectRatio) {
   return [
-    'あなたは動画プロンプト作成の専門家です。',
+    'あなたは、絵コンテを忠実に動画生成プロンプトへ変換する専門家です。',
     'アップロードされた絵コンテ画像(複数カットが描かれた1枚の画像)を解析し、',
     `合計${durationSeconds}秒・アスペクト比${aspectRatio}の動画を1回で生成するための、`,
     '日本語の単一の統合ビデオ生成プロンプトを1つだけ作成してください。',
     '',
     '要件:',
+    '- まず内部で、各コマを左上から右、上段から下段の順に1コマずつ個別解析してから統合すること。解析メモ自体は出力しないこと。',
+    '- 各コマの登場人物・動物、同一個体か別個体か、姿、種類、体格、表情、持ち物、小道具、背景、具体的な動作を維持すること。',
+    '- 小型から大型、普段の姿から戦闘時の姿など、コマ間に明確な外見変化がある場合は、省略せず変身・変化として時間展開に記述すること。',
+    '- 元画像に存在しない人物、動物、小道具、設定、出来事を追加しないこと。確認できない内容を創作しないこと。',
+    '- 最終コマの出来事、因果関係、表情、コミカルなオチを別の結末へ変更しないこと。感動的・温かい結末へ置き換えないこと。',
+    '- 元画像が日本アニメ調なら日本アニメ調を維持すること。画像にない3D、実写、写実、フォトリアル、海外カートゥーン等の画風を追加しないこと。',
+    '- キャラクターの種類・体格・顔・模様・装飾品を別のものへ変更しないこと。見た目が判別できない細部は断定しないこと。',
+    '- 小道具の用途や名称を画像だけで断定できない場合、「袋」「小物」など見た目に基づく中立的な表現を使い、お守り等へ勝手に決めないこと。',
+    '- 壁蹴り、方向転換、回収など、絵コンテに描かれた具体的な動作を曖昧な移動表現へ抽象化しすぎないこと。',
+    '- ユーザーの補足指示がある場合は、画像だけでは判別できない物語上の意味を補う情報として忠実に反映すること。画像と補足指示の両方にない内容は追加しないこと。',
     '- 出力はカットごとのJSON配列ではなく、1つの連続した日本語の文章によるプロンプトにすること。',
     `- プロンプト文中に、0秒から${durationSeconds}秒までの時間帯ごとの展開を明記すること`,
     '  (例:「0〜2秒は〜、2〜5秒は〜」のように、絵コンテのカット数に応じて時間帯を配分する)。',
@@ -116,10 +127,18 @@ module.exports = async function handler(req, res) {
   const body = jsonBody(req);
   const image = String(body.image || '').trim();
   const mediaType = String(body.mediaType || 'image/jpeg').toLowerCase();
+  const storyContext = String(body.storyContext || body.story_context || '').trim();
 
   if (!image) return res.status(400).json({ ok: false, error: 'image (base64) is required.' });
   if (!ALLOWED_MIME_TYPES.has(mediaType)) {
     return res.status(415).json({ ok: false, error: `mediaType must be one of: ${Array.from(ALLOWED_MIME_TYPES).join(', ')}` });
+  }
+  if (storyContext.length > MAX_STORY_CONTEXT_CHARS) {
+    return res.status(400).json({
+      ok: false,
+      error: 'story_context_too_long',
+      message: `補足指示は${MAX_STORY_CONTEXT_CHARS}文字以内で入力してください。`
+    });
   }
 
   let imageBuffer;
@@ -167,7 +186,11 @@ module.exports = async function handler(req, res) {
             role: 'user',
             content: [
               { type: 'image_url', image_url: { url: `data:${mediaType};base64,${image}` } },
-              { type: 'text', text: '上記の絵コンテ画像を解析し、指示に従ってJSONのみ返してください。' }
+              {
+                type: 'text',
+                text: '上記の絵コンテ画像を解析し、指示に従ってJSONのみ返してください。'
+                  + (storyContext ? `\n\nユーザーの補足指示:\n${storyContext}` : '')
+              }
             ]
           }
         ]
@@ -207,3 +230,6 @@ module.exports = async function handler(req, res) {
 
   return res.status(200).json({ ok: true, prompt, detected_cuts: detectedCuts });
 };
+
+module.exports.buildStoryboardPromptInstruction = buildStoryboardPromptInstruction;
+module.exports.MAX_STORY_CONTEXT_CHARS = MAX_STORY_CONTEXT_CHARS;

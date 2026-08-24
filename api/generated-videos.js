@@ -74,6 +74,7 @@ async function verifyStorageObjectExists(url) {
 }
 
 function resolveMode(row) {
+  if (row?.settings?.ui_origin === 'storyboard') return 'storyboard';
   const raw = String(row?.mode || row?.generation_mode || row?.settings?.mode || '').trim();
   if (raw === 'image_to_video' || raw === '画像から動画' || raw === '画像から動画へ') return 'image_to_video';
   if (raw === 'text_to_video' || raw === 'テキストから動画') return 'text_to_video';
@@ -99,6 +100,7 @@ async function normalizeGeneratedRow(row) {
     status: row.status || 'completed',
     title: String(row.prompt || '').includes('香水') ? 'Perfume sample' : '生成サンプル',
     prompt: row.prompt || '',
+    model: row.model || '',
     mode: resolveMode(row),
     video_uri: url,
     video_url: url,
@@ -120,6 +122,7 @@ async function normalizeHistoryRow(row) {
     status: row.status || 'completed',
     title: '生成動画',
     prompt: row.prompt || '',
+    model: row.model || '',
     mode: resolveMode(row),
     reference_urls: Array.isArray(row.reference_urls) ? row.reference_urls : [],
     video_uri: url,
