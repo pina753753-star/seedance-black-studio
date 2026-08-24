@@ -11,8 +11,18 @@
 .filterBar{display:flex;gap:8px;margin:0 0 4px}.filterBtn{flex:1;border:1px solid var(--line);background:#18181d;color:#fff;border-radius:999px;padding:10px 8px;font-size:13px;font-weight:900}.filterBtn.active{border-color:rgba(215,184,106,.7);background:rgba(215,184,106,.18)}
 .stat{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.box{border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.04);padding:14px}.box b{display:block;font-size:24px}.box span{color:var(--muted);font-size:12px}
 .breakdownRow{display:flex;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding:11px 0;font-size:14px}.breakdownRow:first-child{border-top:0}
-.message{display:none;margin-top:13px;border-radius:16px;padding:12px;font-size:13px;line-height:1.65}.message.show{display:block}.message.error{background:rgba(251,113,133,.12);border:1px solid rgba(251,113,133,.4)}
+.message{display:none;margin-top:13px;border-radius:16px;padding:12px;font-size:13px;line-height:1.65}.message.show{display:block}.message.error{background:rgba(251,113,133,.12);border:1px solid rgba(251,113,133,.4)}.message.ok{background:rgba(134,239,172,.10);border:1px solid rgba(134,239,172,.32)}
 button.reload{width:100%;margin-top:12px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;padding:13px;font-weight:900}
+.tabBar{display:flex;gap:8px;margin:0 0 4px}.tabBtn{flex:1;border:1px solid var(--line);background:#18181d;color:#fff;border-radius:14px;padding:12px 8px;font-size:14px;font-weight:900}.tabBtn.active{border-color:rgba(215,184,106,.7);background:rgba(215,184,106,.18)}
+.tabPane{display:none}.tabPane.active{display:block}
+label{display:block;margin:12px 0 6px;color:var(--muted);font-size:13px}
+input,select{width:100%;border:1px solid var(--line);background:#18181d;color:#fff;border-radius:14px;padding:12px 13px;font:inherit;font-size:15px;outline:none}input:focus,select:focus{border-color:rgba(215,184,106,.7)}
+.checkboxRow{display:flex;align-items:center;gap:8px;margin-top:12px}.checkboxRow input{width:auto}
+button.primary{width:100%;margin-top:14px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(90deg,#fff,#f5dca4);color:#050506;padding:13px;font-weight:950;font-size:15px}
+button.secondary{width:100%;margin-top:10px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;padding:12px;font-weight:900;font-size:13px}
+button.small{width:auto;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.06);color:#fff;padding:8px 11px;font-weight:900;font-size:12px;margin:6px 6px 0 0}button.small.danger{border-color:rgba(251,113,133,.5);background:rgba(251,113,133,.12)}
+.costRow,.paymentRow{border:1px solid var(--line);border-radius:16px;background:#18181d;padding:13px;margin-top:10px}.costRow.inactive{opacity:.55}.costRow h3{margin:0 0 4px;font-size:15px}.paymentRow.voided{opacity:.5}
+.actionBtns{display:flex;flex-wrap:wrap;gap:0}
 @media(max-width:430px){.hero h1{font-size:29px}}
 </style>
 </head>
@@ -21,6 +31,12 @@ button.reload{width:100%;margin-top:12px;border:1px solid var(--line);border-rad
 <header class="top"><a class="brand" href="./index.html">Pina Studio</a><a class="back" href="./admin.html">管理画面へ戻る</a></header>
 <section class="hero"><p>ADMIN FINANCE</p><h1>📊 経営状況</h1><div class="lead">Stripeの取引記録(Balance Transactions)から、今月・先月・今年の売上を集計して表示します。</div></section>
 
+<div class="tabBar">
+  <button class="tabBtn active" data-tab="revenue" type="button">売上</button>
+  <button class="tabBtn" data-tab="costs" type="button">運営費</button>
+</div>
+
+<div class="tabPane active" id="revenueTab">
 <section class="card" id="app" hidden>
   <div class="filterBar">
     <button class="filterBtn active" data-period="thisMonth" type="button">今月</button>
@@ -44,6 +60,90 @@ button.reload{width:100%;margin-top:12px;border:1px solid var(--line);border-rad
 
   <button class="reload" id="reloadButton" type="button">最新データに更新</button>
 </section>
+</div>
+
+<div class="tabPane" id="costsTab">
+<section class="card" id="costsApp" hidden>
+  <h2>今月の運営費</h2>
+  <div class="stat">
+    <div class="box"><b id="costsPlanned">-</b><span>今月予定</span></div>
+    <div class="box"><b id="costsActual">-</b><span>今月実績</span></div>
+  </div>
+  <div class="mini" id="costsRangeNote">読み込み中</div>
+</section>
+
+<section class="card" id="costsListCard" hidden>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+    <h2 style="margin:0">利用中サービス一覧</h2>
+    <button class="small" id="addCostButton" type="button">＋ 運営費を追加</button>
+  </div>
+  <div class="mini" style="margin-top:6px">停止したサービスは削除せず「無効」表示のまま履歴に残ります。</div>
+  <div id="costsList"></div>
+</section>
+
+<section class="card" id="costFormCard" hidden>
+  <h2 id="costFormTitle">運営費を追加</h2>
+  <label for="costServiceName">サービス名</label>
+  <input id="costServiceName" type="text" maxlength="120" placeholder="例：Vercel">
+  <label for="costCategory">カテゴリ</label>
+  <input id="costCategory" type="text" maxlength="60" placeholder="例：ホスティング">
+  <label for="costAmount">金額(円 または ドル。予定額)</label>
+  <input id="costAmount" type="number" min="0" step="0.01" placeholder="0">
+  <label for="costCurrency">通貨</label>
+  <select id="costCurrency"><option value="JPY">JPY(円)</option><option value="USD">USD(ドル)</option></select>
+  <label for="costBillingCycle">請求サイクル</label>
+  <select id="costBillingCycle">
+    <option value="monthly">毎月</option>
+    <option value="yearly">毎年</option>
+    <option value="usage">従量課金</option>
+    <option value="one_time">一回限り</option>
+  </select>
+  <div class="checkboxRow"><input id="costIsEstimate" type="checkbox"><label for="costIsEstimate" style="margin:0">金額は概算(見積もり)である</label></div>
+  <label for="costNextBillingDate">次回請求日(任意)</label>
+  <input id="costNextBillingDate" type="date">
+  <label for="costNotes">メモ(任意)</label>
+  <input id="costNotes" type="text" maxlength="2000" placeholder="任意のメモ">
+  <button class="primary" id="saveCostButton" type="button">保存する</button>
+  <button class="secondary" id="cancelCostButton" type="button">キャンセル</button>
+</section>
+
+<section class="card" id="paymentsCard" hidden>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+    <h2 style="margin:0">支払い履歴</h2>
+    <button class="small" id="addPaymentButton" type="button">＋ 支払い実績を追加</button>
+  </div>
+  <div class="mini" style="margin-top:6px" id="paymentsNote">最新200件までを表示します。</div>
+  <div id="paymentsList"></div>
+</section>
+
+<section class="card" id="paymentFormCard" hidden>
+  <h2 id="paymentFormTitle">支払い実績を追加</h2>
+  <label for="paymentCostSelect">対象サービス</label>
+  <select id="paymentCostSelect"></select>
+  <label for="paymentPaidAt">支払日</label>
+  <input id="paymentPaidAt" type="date">
+  <label for="paymentAmount">支払額</label>
+  <input id="paymentAmount" type="number" min="0" step="0.01" placeholder="0">
+  <label for="paymentCurrency">通貨</label>
+  <select id="paymentCurrency"><option value="JPY">JPY(円)</option><option value="USD">USD(ドル)</option></select>
+  <label for="paymentConversionMethod">円換算方法</label>
+  <select id="paymentConversionMethod">
+    <option value="auto">自動換算(最新レートを取得)</option>
+    <option value="manual_actual">実際の円請求額を入力する(カード明細など)</option>
+  </select>
+  <div id="paymentAutoPreview" class="mini"></div>
+  <div id="paymentManualJpyField" hidden>
+    <label for="paymentAmountJpy">実際の円請求額</label>
+    <input id="paymentAmountJpy" type="number" min="0" step="1" placeholder="0">
+  </div>
+  <label for="paymentReference">参照番号・請求書番号(任意)</label>
+  <input id="paymentReference" type="text" maxlength="200" placeholder="任意">
+  <label for="paymentNotes">メモ(任意)</label>
+  <input id="paymentNotes" type="text" maxlength="2000" placeholder="任意のメモ">
+  <button class="primary" id="savePaymentButton" type="button">保存する</button>
+  <button class="secondary" id="cancelPaymentButton" type="button">キャンセル</button>
+</section>
+</div>
 
 <div class="message" id="message"></div>
 </main>
@@ -122,6 +222,333 @@ document.querySelectorAll('.filterBtn').forEach(btn=>{
 });
 
 $('reloadButton').onclick=()=>loadFinance();
+
+// =====================================================================
+// Phase 2: 運営費(予定・実績)。売上集計(financeApi/loadFinance)とは
+// 完全に独立した状態・API呼び出しを使う。
+// =====================================================================
+let costsCache=[],paymentsCache=[],costsLoaded=false,editingCostId=null,editingPaymentId=null,costsSubmitting=false;
+
+async function costsApi(action,payload={}){
+  if(!session?.access_token)throw new Error('管理者ログインが必要です。');
+  const response=await fetch('/api/admin-operating-costs',{
+    method:'POST',
+    headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
+    body:JSON.stringify({action,...payload})
+  });
+  const data=await response.json().catch(()=>null);
+  if(!response.ok||!data?.ok)throw new Error(data?.message||'運営費の処理に失敗しました。');
+  return data;
+}
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function costCycleLabel(v){return({monthly:'毎月',yearly:'毎年',usage:'従量課金',one_time:'一回限り'})[v]||v}
+function formatMinor(amountMinor,currency){
+  const n=Number(amountMinor||0);
+  if(String(currency||'').toUpperCase()==='USD')return '$'+(n/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  return '¥'+n.toLocaleString('ja-JP');
+}
+function formatJpy(amountJpy){return '¥'+Number(amountJpy||0).toLocaleString('ja-JP')}
+function toAmountMinor(inputValue,currency){
+  const n=Number(inputValue);
+  if(!Number.isFinite(n)||n<0)return null;
+  return String(currency).toUpperCase()==='USD'?Math.round(n*100):Math.round(n);
+}
+// Phase 1(売上)の期間集計と同じくJST(UTC+9)基準で日付を扱う。
+// new Date().toISOString()はUTC基準のため、JST 00:00〜08:59は前日の
+// 日付になってしまう(レビュー指摘)。ブラウザのタイムゾーン設定に依存
+// しないよう、常にUTC時刻へ+9時間してからYYYY-MM-DD/年月を取り出す。
+const JST_OFFSET_MS=9*60*60*1000;
+function jstDateParts(date=new Date()){
+  const jst=new Date(date.getTime()+JST_OFFSET_MS);
+  return{year:jst.getUTCFullYear(),month:jst.getUTCMonth()+1,day:jst.getUTCDate()};
+}
+function jstTodayIso(date=new Date()){
+  const{year,month,day}=jstDateParts(date);
+  return year+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+}
+function currentMonthPrefix(date=new Date()){
+  const{year,month}=jstDateParts(date);
+  return year+'-'+String(month).padStart(2,'0');
+}
+
+// 今月予定に含める運営費を判定する。
+// - monthly: 毎月発生するため常に含める
+// - usage: 概算(amount_is_estimate=true)の場合のみ、月次目安として含める
+// - yearly / one_time: next_billing_dateが今月中の場合だけ含める
+function isCostPlannedThisMonth(c,monthPrefix){
+  if(!c.is_active)return false;
+  if(c.billing_cycle==='monthly')return true;
+  if(c.billing_cycle==='usage')return Boolean(c.amount_is_estimate);
+  if(c.billing_cycle==='yearly'||c.billing_cycle==='one_time'){
+    return Boolean(c.next_billing_date)&&String(c.next_billing_date).slice(0,7)===monthPrefix;
+  }
+  return false;
+}
+
+// USD建ての予定額をJPYへ換算するレートは、固定値をブラウザに持たず、
+// 必ずサーバー(Frankfurter経由)から取得する。取得できない場合は
+// 予定額を「取得できません」と表示し、0円などの誤った数値は出さない。
+async function computeMonthlySummary(){
+  const monthPrefix=currentMonthPrefix();
+  const eligible=costsCache.filter(c=>isCostPlannedThisMonth(c,monthPrefix));
+  const needsUsdRate=eligible.some(c=>c.currency==='USD');
+
+  let usdRate=null,fxFailed=false;
+  if(needsUsdRate){
+    try{
+      const fx=await costsApi('getFxRate');
+      usdRate=Number(fx.rate);
+    }catch(_){fxFailed=true}
+  }
+
+  let planned=0,plannedAvailable=true;
+  for(const c of eligible){
+    if(c.currency==='JPY'){
+      planned+=Number(c.amount_minor||0);
+    }else if(usdRate){
+      planned+=Math.round((Number(c.amount_minor||0)/100)*usdRate);
+    }else{
+      plannedAvailable=false;
+    }
+  }
+
+  const actual=paymentsCache.filter(p=>!p.is_voided&&String(p.paid_at||'').startsWith(monthPrefix)).reduce((sum,p)=>sum+Number(p.amount_jpy||0),0);
+
+  $('costsPlanned').textContent=plannedAvailable?formatJpy(planned):'取得できません';
+  $('costsActual').textContent=formatJpy(actual);
+  $('costsRangeNote').textContent=fxFailed
+    ?'USD建ての予定額を円換算するための為替レートを取得できなかったため、予定額の一部が含まれていません。'
+    :'予定は「毎月契約」「概算(見積もり)扱いの従量課金」「今月が次回請求日の毎年契約・一回限りの契約」を、USD建てはサーバー取得の最新レートで円換算して合算しています。実績はブラウザの現在月(今月)の支払い実績(取消分を除く)の円換算合計です。';
+}
+
+function renderCostsList(){
+  const el=$('costsList');
+  if(!costsCache.length){el.innerHTML='<div class="mini">登録されている運営費はまだありません。</div>';return}
+  el.innerHTML=costsCache.map(c=>`<div class="costRow${c.is_active?'':' inactive'}">
+    <h3>${esc(c.service_name)}${c.is_active?'':'(無効)'}</h3>
+    <div class="mini">${esc(c.category)} ｜ ${formatMinor(c.amount_minor,c.currency)}${c.amount_is_estimate?'(概算)':''} ｜ ${costCycleLabel(c.billing_cycle)}</div>
+    <div class="mini">${c.next_billing_date?'次回請求日: '+esc(c.next_billing_date):'次回請求日: 未設定'}</div>
+    ${c.notes?`<div class="mini">メモ: ${esc(c.notes)}</div>`:''}
+    <div class="actionBtns">
+      <button class="small" data-cost-edit="${esc(c.id)}" type="button">編集</button>
+      <button class="small${c.is_active?' danger':''}" data-cost-toggle="${esc(c.id)}" type="button">${c.is_active?'無効化':'有効化'}</button>
+      <button class="small" data-cost-add-payment="${esc(c.id)}" type="button">支払い実績を追加</button>
+    </div>
+  </div>`).join('');
+
+  el.querySelectorAll('[data-cost-edit]').forEach(btn=>btn.onclick=()=>openCostForm(costsCache.find(c=>c.id===btn.dataset.costEdit)));
+  el.querySelectorAll('[data-cost-toggle]').forEach(btn=>btn.onclick=()=>toggleCostActive(btn.dataset.costToggle));
+  el.querySelectorAll('[data-cost-add-payment]').forEach(btn=>btn.onclick=()=>openPaymentForm(null,btn.dataset.costAddPayment));
+}
+
+function renderPayments(){
+  const el=$('paymentsList');
+  if(!paymentsCache.length){el.innerHTML='<div class="mini">支払い実績はまだありません。</div>';return}
+  el.innerHTML=paymentsCache.map(p=>{
+    const cost=costsCache.find(c=>c.id===p.operating_cost_id);
+    const buttons=p.is_voided?'':`<div class="actionBtns"><button class="small" data-payment-edit="${esc(p.id)}" type="button">編集</button><button class="small danger" data-payment-void="${esc(p.id)}" type="button">取消</button></div>`;
+    return `<div class="paymentRow${p.is_voided?' voided':''}">
+      <h3 style="margin:0 0 4px;font-size:14px">${esc(p.paid_at)} ｜ ${esc(cost?.service_name||'(削除済みサービス)')}${p.is_voided?'(取消済み)':''}</h3>
+      <div class="mini">${formatMinor(p.amount_minor,p.currency)} → ${formatJpy(p.amount_jpy)}(${p.conversion_method==='manual_actual'?'実額入力':'自動換算 レート'+Number(p.fx_rate||0).toFixed(4)})</div>
+      ${p.reference?`<div class="mini">参照: ${esc(p.reference)}</div>`:''}
+      ${p.is_voided&&p.void_reason?`<div class="mini">取消理由: ${esc(p.void_reason)}</div>`:''}
+      ${buttons}
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-payment-edit]').forEach(btn=>btn.onclick=()=>openPaymentForm(paymentsCache.find(p=>p.id===btn.dataset.paymentEdit)));
+  el.querySelectorAll('[data-payment-void]').forEach(btn=>btn.onclick=()=>voidPayment(btn.dataset.paymentVoid));
+}
+
+async function toggleCostActive(id){
+  const cost=costsCache.find(c=>c.id===id);
+  if(!cost)return;
+  const nextActive=!cost.is_active;
+  if(!confirm(nextActive?`「${cost.service_name}」を有効化しますか？`:`「${cost.service_name}」を無効化しますか？(履歴は残ります)`))return;
+  try{
+    await costsApi('setCostActive',{operatingCostId:id,isActive:nextActive});
+    await loadCostsTab();
+    message('更新しました。','ok');
+  }catch(error){message(error.message)}
+}
+
+async function voidPayment(id){
+  const reason=prompt('取消理由を入力してください(2〜200文字)。');
+  if(reason===null)return;
+  try{
+    await costsApi('voidPayment',{paymentId:id,voidReason:reason});
+    await loadCostsTab();
+    message('支払い実績を取消しました。','ok');
+  }catch(error){message(error.message)}
+}
+
+// currentCostを指定すると、無効化済み(is_active=false)でも選択肢に含める。
+// 既存の支払い実績を編集するとき、所属サービスが無効化されていても
+// selectから消えて編集不能にならないようにするため。
+function fillCostSelect(currentCost){
+  const select=$('paymentCostSelect');
+  const options=costsCache.filter(c=>c.is_active);
+  if(currentCost&&!options.some(c=>c.id===currentCost.id)){
+    options.push(currentCost);
+  }
+  select.innerHTML=options.map(c=>`<option value="${esc(c.id)}">${esc(c.service_name)}${c.is_active?'':'(無効)'}</option>`).join('')||'<option value="">有効な運営費がありません</option>';
+}
+
+function openCostForm(cost){
+  editingCostId=cost?cost.id:null;
+  $('costFormTitle').textContent=cost?'運営費を編集':'運営費を追加';
+  $('costServiceName').value=cost?.service_name||'';
+  $('costCategory').value=cost?.category||'';
+  $('costAmount').value=cost?(cost.currency==='USD'?(cost.amount_minor/100):cost.amount_minor):'';
+  $('costCurrency').value=cost?.currency||'JPY';
+  $('costBillingCycle').value=cost?.billing_cycle||'monthly';
+  $('costIsEstimate').checked=Boolean(cost?.amount_is_estimate);
+  $('costNextBillingDate').value=cost?.next_billing_date||'';
+  $('costNotes').value=cost?.notes||'';
+  $('costFormCard').hidden=false;
+  $('costFormCard').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function closeCostForm(){$('costFormCard').hidden=true;editingCostId=null}
+
+function openPaymentForm(payment,presetCostId){
+  editingPaymentId=payment?payment.id:null;
+  $('paymentFormTitle').textContent=payment?'支払い実績を編集':'支払い実績を追加';
+  const currentCost=payment?costsCache.find(c=>c.id===payment.operating_cost_id):null;
+  fillCostSelect(currentCost);
+  $('paymentCostSelect').value=payment?payment.operating_cost_id:(presetCostId||'');
+  $('paymentPaidAt').value=payment?.paid_at||jstTodayIso();
+  $('paymentAmount').value=payment?(payment.currency==='USD'?(payment.amount_minor/100):payment.amount_minor):'';
+  $('paymentCurrency').value=payment?.currency||'JPY';
+  $('paymentConversionMethod').value=payment?.conversion_method||'auto';
+  $('paymentAmountJpy').value=payment?.amount_jpy||'';
+  $('paymentReference').value=payment?.reference||'';
+  $('paymentNotes').value=payment?.notes||'';
+  updatePaymentManualFieldVisibility();
+  $('paymentFormCard').hidden=false;
+  $('paymentFormCard').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function closePaymentForm(){$('paymentFormCard').hidden=true;editingPaymentId=null}
+
+// JPYはmanual_actualを許可しない(常にauto・fx_rate=1)。currency=JPYの
+// 間は、円換算方法の選択肢自体をautoに固定して選べないようにする。
+function updatePaymentManualFieldVisibility(){
+  const currency=$('paymentCurrency').value;
+  const methodSelect=$('paymentConversionMethod');
+  const manualOption=methodSelect.querySelector('option[value="manual_actual"]');
+
+  if(currency==='JPY'){
+    methodSelect.value='auto';
+    methodSelect.disabled=true;
+    if(manualOption)manualOption.disabled=true;
+  }else{
+    methodSelect.disabled=false;
+    if(manualOption)manualOption.disabled=false;
+  }
+
+  const method=methodSelect.value;
+  $('paymentManualJpyField').hidden=method!=='manual_actual';
+  if(method==='auto'){
+    $('paymentAutoPreview').textContent=currency==='JPY'?'円建てのため換算は不要です(1:1)。':'保存時にFrankfurterから支払日時点のUSD→JPYレート(historical rate)を取得して換算します。取得できない場合は保存を停止します。';
+  }else{
+    $('paymentAutoPreview').textContent='カード明細などに記載された、実際に円で請求された金額をそのまま入力してください。(JPY建ての支払いはこの方法を選択できません)';
+  }
+}
+$('paymentConversionMethod').onchange=updatePaymentManualFieldVisibility;
+$('paymentCurrency').onchange=updatePaymentManualFieldVisibility;
+
+$('addCostButton').onclick=()=>openCostForm(null);
+$('cancelCostButton').onclick=closeCostForm;
+$('addPaymentButton').onclick=()=>openPaymentForm(null,null);
+$('cancelPaymentButton').onclick=closePaymentForm;
+
+$('saveCostButton').onclick=async()=>{
+  if(costsSubmitting)return;
+  const serviceName=$('costServiceName').value.trim();
+  const category=$('costCategory').value.trim();
+  const currency=$('costCurrency').value;
+  const amountMinor=toAmountMinor($('costAmount').value,currency);
+  if(serviceName.length<1){message('サービス名を入力してください。');return}
+  if(category.length<1){message('カテゴリを入力してください。');return}
+  if(amountMinor===null){message('金額を正しく入力してください。');return}
+  costsSubmitting=true;
+  $('saveCostButton').disabled=true;
+  clearMessage();
+  try{
+    const payload={
+      serviceName,category,amountMinor,currency,
+      billingCycle:$('costBillingCycle').value,
+      amountIsEstimate:$('costIsEstimate').checked,
+      nextBillingDate:$('costNextBillingDate').value||null,
+      notes:$('costNotes').value
+    };
+    if(editingCostId){await costsApi('updateCost',{operatingCostId:editingCostId,...payload})}
+    else{await costsApi('createCost',payload)}
+    closeCostForm();
+    await loadCostsTab();
+    message('運営費を保存しました。','ok');
+  }catch(error){message(error.message)}
+  finally{costsSubmitting=false;$('saveCostButton').disabled=false}
+};
+
+$('savePaymentButton').onclick=async()=>{
+  if(costsSubmitting)return;
+  const operatingCostId=$('paymentCostSelect').value;
+  const paidAt=$('paymentPaidAt').value;
+  const currency=$('paymentCurrency').value;
+  const amountMinor=toAmountMinor($('paymentAmount').value,currency);
+  const conversionMethod=$('paymentConversionMethod').value;
+  if(!operatingCostId){message('対象サービスを選択してください。');return}
+  if(!paidAt){message('支払日を入力してください。');return}
+  if(amountMinor===null||amountMinor<=0){message('支払額を正しく入力してください。');return}
+  const payload={operatingCostId,paidAt,amountMinor,currency,conversionMethod,reference:$('paymentReference').value.trim()||null,notes:$('paymentNotes').value};
+  if(conversionMethod==='manual_actual'){
+    const amountJpy=toAmountMinor($('paymentAmountJpy').value,'JPY');
+    if(amountJpy===null||amountJpy<=0){message('実際の円請求額を正しく入力してください。');return}
+    payload.amountJpy=amountJpy;
+  }
+  costsSubmitting=true;
+  $('savePaymentButton').disabled=true;
+  clearMessage();
+  try{
+    if(editingPaymentId){await costsApi('updatePayment',{paymentId:editingPaymentId,...payload})}
+    else{await costsApi('createPayment',payload)}
+    closePaymentForm();
+    await loadCostsTab();
+    message('支払い実績を保存しました。','ok');
+  }catch(error){message(error.message)}
+  finally{costsSubmitting=false;$('savePaymentButton').disabled=false}
+};
+
+async function loadCostsTab(){
+  clearMessage();
+  try{
+    const [costsData,paymentsData]=await Promise.all([costsApi('list'),costsApi('listPayments')]);
+    costsCache=costsData.costs||[];
+    paymentsCache=paymentsData.payments||[];
+    renderCostsList();
+    renderPayments();
+    await computeMonthlySummary();
+    costsLoaded=true;
+  }catch(error){
+    message(error.message);
+  }
+}
+
+document.querySelectorAll('.tabBtn').forEach(btn=>{
+  btn.onclick=async()=>{
+    document.querySelectorAll('.tabBtn').forEach(b=>b.classList.toggle('active',b===btn));
+    const tab=btn.dataset.tab;
+    document.getElementById('revenueTab').classList.toggle('active',tab==='revenue');
+    document.getElementById('costsTab').classList.toggle('active',tab==='costs');
+    if(tab==='costs'&&!costsLoaded){
+      $('costsApp').hidden=false;
+      $('costsListCard').hidden=false;
+      $('paymentsCard').hidden=false;
+      await loadCostsTab();
+    }
+  };
+});
 
 (async()=>{
   if(!client){message('Supabase設定を確認できません。');return}
