@@ -295,6 +295,14 @@ async function handler(req, res) {
 
       } else {
         // ── Monthly subscription ─────────────────────────────────
+        // Team: 複数アカウント・共有クレジット・共有アセット・チーム管理が
+        // 未実装のため販売していない。pricing.html側は購入ボタンを
+        // disabled化済みだが、直接APIを叩かれた場合に備えてサーバー側でも
+        // 常に拒否する(STRIPE_PRICE_TEAM_MONTHLY未設定時の動的価格
+        // フォールバックへは絶対に進ませない)。
+        if (id === 'team') {
+          return res.status(400).json({ ok: false, error: 'Teamプランは現在準備中のため購入できません' });
+        }
         const plan = SUBSCRIPTION_PLANS[id];
         if (!plan) return res.status(400).json({ ok: false, error: 'プランが見つかりません' });
 
