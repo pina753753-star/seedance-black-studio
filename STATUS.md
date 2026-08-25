@@ -586,3 +586,20 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - テスト: 全382件中380件成功。残り2件(`tests/generation-control.test.js`、`api/storyboard-prompt.js`関連)は本変更と無関係の既存事象。
 - Supabase schema・migration、`api/stripe-webhook.js`のクレジット付与仕様、Cronの毎月付与仕様、Standard/Premium/Ultimate/Freeの価格・credits・Checkout、キャンペーン期限には変更なし。
 - PR #208(マージコミット`8ba1c8a`)で`main`へマージ、本番(pinastudio.jp)へ反映済み。
+
+## 作業中: Teamの表示名変更・購入ボタン統一・年額Checkout調査(2026-08-25)
+- 完了した表示修正:
+  - 料金画面上のTeam表示名だけを「Creator Pro」へ変更。内部プランID`team`、Stripe商品名、DB・Webhook・credits・価格は変更していない。
+  - Standard/Premium/Ultimate/Creator Proの購入ボタンを「購入する」に統一。Freeの「無料で試す」は維持。
+  - 表示名変更後もCreator Proの月額・年額クリックが内部ID`team`と正しい`interval`を送ることをテストで確認。
+- 年額Checkout調査:
+  - Creator Pro年額だけ本番で「決済の開始に失敗しました」となる事象を確認。
+  - コード上は他の年額プランと共通経路で、モックテストでは`STRIPE_PRICE_TEAM_YEARLY`と年額10%OFF Couponを指定してCheckout Session作成まで成功。
+  - Stripe Workbenchの失敗ログ(2026-08-25 22:59:00 UTC、request ID `req_3JrmbyQm3aowm4`)で原因を確定。Checkoutへ送られたPrice IDが`price_1U8DxZLdBCVYotQeRS3lsh`で、Stripe上の正しいTeam年額Price ID`price_1U8DxZLdBCVYotQeRS3lshfK`より末尾`fK`が欠けていたため、`resource_missing`(HTTP 400)になっていた。
+  - 原因はVercel環境変数`STRIPE_PRICE_TEAM_YEARLY`の値の入力不足。CouponやCheckoutコードの不具合ではないため、決済API・価格・割引処理は変更していない。
+  - VercelのProduction/Previewにある`STRIPE_PRICE_TEAM_YEARLY`を完全なPrice IDへ修正し、Productionを再デプロイ。
+  - 本番でCreator Pro年額Checkoutが正常に開き、初年度¥3,218,400、翌年以降¥3,576,000/年と表示されることを確認。実購入は行っていない。
+- テスト結果:
+  - 対象テスト45/45件成功。
+  - 全体383件中381件成功。失敗2件は既知の`tests/generation-control.test.js`(`api/storyboard-prompt.js`関連)で今回の変更対象外。
+- 未実施: mainへのマージ、本番デプロイ、Stripe/Vercel/Supabaseの追加設定変更。
