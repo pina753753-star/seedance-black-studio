@@ -547,3 +547,40 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
   - 修正前の既存タスク`a9dbbf0b-f91b-4fdc-8d99-a894dabc22ce`は、既存設定を保持して`ui_origin=storyboard`を追加し、絵コンテ履歴へ補正。DBスキーマ変更なし。
 - 確認結果: 最終状態で全335テスト成功、失敗0件。ビルド、HTML内JavaScript構文検査、`git diff --check`も成功。
 - PR #198(マージコミット`80b7179`)、PR #199(`0ea8e5d`)、PR #200(`d7ca136`)で`main`へマージ。Vercel/Railwayのデプロイ成功後、本番(pinastudio.jp)へ反映済み。
+
+## 完了: 年額サブスクリプション期間限定10%OFFキャンペーン(2026-08-24)
+- 背景: Standard/Premium/Ultimateの年額プランに、2026年9月30日23:59:59(JST)までの期間限定10%OFFキャンペーンを追加する依頼。
+- 対応:
+  - `api/stripe-checkout.js`: 既存の年額Price ID(`STRIPE_PRICE_*_YEARLY`)は変更せず、Stripe Coupon(`discounts:[{coupon}]`)を`STRIPE_COUPON_ANNUAL_10_OFF_202609`環境変数経由で自動適用。期間判定は固定UTCタイムスタンプ(`2026-09-30T15:00:00Z`)で行いサーバーのローカルタイムゾーンに依存しない。月額プランは無変更。
+  - fail-closed設計: キャンペーン期間中にCoupon環境変数が未設定の場合、通常価格へフォールバックせずCheckout Session作成自体を拒否し503(`ANNUAL_CAMPAIGN_CONFIG_MISSING`)を返す。
+  - pricing.html: クリック時点でも`isAnnualCampaignActive()`を再判定し、表示後に期間が終了していた場合は通常価格へ再描画してCheckoutを開始しない(期限跨ぎクリック対策)。
+  - GET `/api/stripe-checkout`で`annualCampaignAvailable`(boolean、Coupon IDは含まない)を返し、pricing.html側の表示をサーバー側の実態と同期。
+- Vercel Preview環境変数(`STRIPE_COUPON_ANNUAL_10_OFF_202609`)が繰り返し反映されないトラブルがあったが、最終的に「一度削除してSensitiveなしで再作成」することで解消(原因はVercel Dashboard側の保存状態にあり、コード側の不具合ではなかった)。
+- 本番Stripe Coupon(Live mode、ID: `mmncIa5Q`、10%、期限9月30日)を作成し、Vercel Production環境変数へ設定。
+- PR #205(マージコミット`d17ce97`)で`main`へマージ、本番(pinastudio.jp)へ反映済み。
+
+## 完了: Teamプランの誤購入防止と年額表示修正(2026-08-24)
+- 背景: Teamプラン(¥298,000/月)は「準備中」ラベル表示だったが、実際にはボタンのdisabled属性・クリックガードが一切なく、ボタンを押すと実際にStripe Checkoutが開始されてしまう不具合が発覚(Codex調査により発見)。また年額タブを選んでもTeamだけ月額表示(¥298,000/月)のまま切り替わらない別の不具合もあった。
+- 対応(PR #206): `pricing.html`に`isPurchaseDisabledPlan(p)`を追加しTeamボタンへdisabled属性・aria-disabled・クリックガードの二重無効化を実装。`api/stripe-checkout.js`の月額分岐にも`id==='team'`を拒否するサーバー側ガードを追加(`STRIPE_PRICE_TEAM_MONTHLY`未設定時の動的price_dataフォールバックを禁止)。
+- 対応(PR #207): 年額タブでTeamが月額表示のまま残る原因(`renderPlans()`の年額分岐に「p.annualを持たないプラン」向けの分岐がなく月額用表示へ落ちていた)を特定し、「年額プランは準備中」の専用表示へ変更。
+- PR #206(マージコミット`76721e7`)、PR #207(マージコミット`e018cfe`)で`main`へマージ、本番反映済み。
+
+## 完了: Teamプランを月額・年額とも購入可能に変更(2026-08-25)
+- 背景: Teamプラン(月額¥298,000/90,000credits)を「大容量クレジットを使いたい個人向けプラン」として正式に購入可能にする依頼。複数アカウント・共有クレジット・共有アセット・チーム管理は未実装のため宣伝しない方針。
+- 対応(`api/stripe-checkout.js`):
+  - `SUBSCRIPTION_PLANS_ANNUAL`にteamを追加(年額¥3,576,000、`monthly_credits:90000`、`env:'STRIPE_PRICE_TEAM_YEARLY'`)。年間合計1,080,000クレジットは毎月90,000ずつ既存Cronで付与し、12か月分の一括付与は行わない。
+  - 月額・年額それぞれにあった`id==='team'`の拒否ガードを削除。既存の`buildAnnualSubscriptionSessionParams`をそのまま使うため、Team年額にも年額10%OFFキャンペーンCoupon(`STRIPE_COUPON_ANNUAL_10_OFF_202609`)が自動適用され、fail-closed(Coupon未設定時503)も同様に効く。Production環境でPrice ID未設定時に動的price_dataへフォールバックしない既存の安全設計は無変更。
+- 対応(`pricing.html`):
+  - Teamに`annual:'3,576,000'`/`campaignAnnual:'3,218,400'`/`annualCredits:'1,080,000'`を追加。既存の年額表示分岐(Standard/Premium/Ultimateと共通)にそのまま乗せた。
+  - ボタンラベルを「準備中」→「Teamにする」に変更。`isPurchaseDisabledPlan(p)`をハードコード判定から`p.purchaseDisabled`フラグ方式に変更し、Teamにはフラグを立てず購入可能にした。`.team .btn`の旧グレー配色を削除し、新色は追加せずFreeと同じ既存のbase `.btn`スタイルを流用。
+  - Teamのfeaturesから未実装4項目(複数アカウント/共有クレジット/共有アセット/チーム管理)を削除。
+- Codexレビューで2回の指摘(APIテストのモック強化、年額テストの日時依存排除)を受け対応済み。テストはStripe SDK/Supabaseをrequire.cache注入でモックし、実Stripe・実Supabaseへ一切通信せずにCheckout Sessionパラメータ(line_items・metadata・discounts)を実行ベースで検証。
+- マージ前に外部設定(Vercel Production環境変数`STRIPE_PRICE_TEAM_MONTHLY`/`STRIPE_PRICE_TEAM_YEARLY`、Stripe LiveのTeam月額・年額Price、Coupon`STRIPE_COUPON_ANNUAL_10_OFF_202609`のTeam商品への適用有無)をユーザー側で確認済み(確認日2026-08-25)。
+- マージ後の本番確認:
+  - Vercel Production最新デプロイ(`dpl_83VL8cJnU28V64tH1QbKao7fm5Kq`)が`READY`であることを確認。
+  - `pinastudio.jp/pricing.html`の配信内容(`plans`配列)で、Team月額¥298,000・年額通常¥3,576,000・年額10%OFF後¥3,218,400・ボタンラベル「Teamにする」(disabled属性なし)を確認。
+  - GET `/api/stripe-checkout`が`annualCampaignAvailable:true`を返すことを確認(サーバー側でキャンペーンCouponが有効であることの傍証)。
+  - **未確認**: 実際に認証済みユーザーとしてTeamボタンをクリックし`POST /api/stripe-checkout`がCheckout Session作成まで到達することは、実ユーザーのログイン認証情報が必要なため確認できていない。ローカルの自動テスト(Stripe SDK/Supabaseをモックした実行ベーステスト)では、Team月額・年額とも正しいPrice ID・metadata・Couponでsessions.createが呼ばれることを検証済み。
+- テスト: 全382件中380件成功。残り2件(`tests/generation-control.test.js`、`api/storyboard-prompt.js`関連)は本変更と無関係の既存事象。
+- Supabase schema・migration、`api/stripe-webhook.js`のクレジット付与仕様、Cronの毎月付与仕様、Standard/Premium/Ultimate/Freeの価格・credits・Checkout、キャンペーン期限には変更なし。
+- PR #208(マージコミット`8ba1c8a`)で`main`へマージ、本番(pinastudio.jp)へ反映済み。
