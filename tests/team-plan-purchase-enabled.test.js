@@ -144,11 +144,23 @@ test('pricing.html: Teamのfeaturesから未実装4機能(複数アカウント/
   }
 });
 
-test('pricing.html: Teamのボタンラベルは「Teamにする」で、月額でも「準備中」ではない', () => {
+test('pricing.html: Teamの表示名はCreator Pro、内部IDはteamのまま、ボタンは「購入する」', () => {
   const start = pricingHtml.indexOf("{cls:'team'");
   const end = pricingHtml.indexOf('\n', start);
   const teamPlanSrc = pricingHtml.slice(start, end);
-  assert.match(teamPlanSrc, /btn:'Teamにする'/);
+  assert.match(teamPlanSrc, /cls:'team',name:'Creator Pro'/);
+  assert.match(teamPlanSrc, /btn:'購入する'/);
+});
+
+test('pricing.html: 有料4プランのボタンは「購入する」に統一し、Freeのラベルは維持する', () => {
+  for (const id of ['standard', 'premium', 'ultimate', 'team']) {
+    const start = pricingHtml.indexOf(`{cls:'${id}'`);
+    const end = pricingHtml.indexOf('\n', start);
+    assert.match(pricingHtml.slice(start, end), /btn:'購入する'/, `${id}のボタンが統一されていません`);
+  }
+  const freeStart = pricingHtml.indexOf("{cls:'free'");
+  const freeEnd = pricingHtml.indexOf('\n', freeStart);
+  assert.match(pricingHtml.slice(freeStart, freeEnd), /btn:'無料で試す'/);
 });
 
 // ---------------------------------------------------------------
