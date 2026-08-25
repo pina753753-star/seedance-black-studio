@@ -16,9 +16,10 @@ const SUBSCRIPTION_PLANS = {
 // Annual subscription plans (billing_interval: year, billed once per year)
 // Credits are granted monthly via Cron; NOT 12x upfront.
 const SUBSCRIPTION_PLANS_ANNUAL = {
-  standard: { name: 'Standard', amount: 35760,  monthly_credits: 800,   plan: 'standard', env: 'STRIPE_PRICE_STANDARD_YEARLY' },
-  premium:  { name: 'Premium',  amount: 83760,  monthly_credits: 2100,  plan: 'premium',  env: 'STRIPE_PRICE_PREMIUM_YEARLY'  },
-  ultimate: { name: 'Ultimate', amount: 189600, monthly_credits: 5100,  plan: 'ultimate', env: 'STRIPE_PRICE_ULTIMATE_YEARLY'  }
+  standard: { name: 'Standard', amount: 35760,   monthly_credits: 800,   plan: 'standard', env: 'STRIPE_PRICE_STANDARD_YEARLY' },
+  premium:  { name: 'Premium',  amount: 83760,   monthly_credits: 2100,  plan: 'premium',  env: 'STRIPE_PRICE_PREMIUM_YEARLY'  },
+  ultimate: { name: 'Ultimate', amount: 189600,  monthly_credits: 5100,  plan: 'ultimate', env: 'STRIPE_PRICE_ULTIMATE_YEARLY'  },
+  team:     { name: 'Team',     amount: 3576000, monthly_credits: 90000, plan: 'team',     env: 'STRIPE_PRICE_TEAM_YEARLY'     }
 };
 
 // ── Annual 10%OFF campaign (Standard/Premium/Ultimate annual only) ─────────
@@ -255,9 +256,6 @@ async function handler(req, res) {
     if (kind === 'subscription') {
       if (isYearly) {
         // ── Annual subscription ──────────────────────────────────
-        if (id === 'team') {
-          return res.status(400).json({ ok: false, error: 'Teamの年額プランは準備中です' });
-        }
         const plan = SUBSCRIPTION_PLANS_ANNUAL[id];
         if (!plan) return res.status(400).json({ ok: false, error: 'プランが見つかりません' });
 
@@ -295,14 +293,6 @@ async function handler(req, res) {
 
       } else {
         // ── Monthly subscription ─────────────────────────────────
-        // Team: 複数アカウント・共有クレジット・共有アセット・チーム管理が
-        // 未実装のため販売していない。pricing.html側は購入ボタンを
-        // disabled化済みだが、直接APIを叩かれた場合に備えてサーバー側でも
-        // 常に拒否する(STRIPE_PRICE_TEAM_MONTHLY未設定時の動的価格
-        // フォールバックへは絶対に進ませない)。
-        if (id === 'team') {
-          return res.status(400).json({ ok: false, error: 'Teamプランは現在準備中のため購入できません' });
-        }
         const plan = SUBSCRIPTION_PLANS[id];
         if (!plan) return res.status(400).json({ ok: false, error: 'プランが見つかりません' });
 

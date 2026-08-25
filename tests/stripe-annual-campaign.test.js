@@ -40,8 +40,8 @@ test('Standard年額: 期間内+Coupon IDありはCouponが適用される', () 
   assert.equal('allow_promotion_codes' in result.params, false);
 });
 
-test('Premium/Ultimate年額も期間内+Coupon IDありはCouponが適用される', () => {
-  for (const id of ['premium', 'ultimate']) {
+test('Premium/Ultimate/Team年額も期間内+Coupon IDありはCouponが適用される', () => {
+  for (const id of ['premium', 'ultimate', 'team']) {
     const plan = api.SUBSCRIPTION_PLANS_ANNUAL[id];
     const result = api.buildAnnualSubscriptionSessionParams({
       baseParams: fakeBaseParams(),
@@ -73,8 +73,8 @@ test('Standard年額: 期間内+Coupon ID未設定はCheckoutを作成せず ok:
   assert.equal('params' in result, false);
 });
 
-test('Premium/Ultimate年額も期間内+Coupon ID未設定はCheckoutを作成しない', () => {
-  for (const id of ['premium', 'ultimate']) {
+test('Premium/Ultimate/Team年額も期間内+Coupon ID未設定はCheckoutを作成しない', () => {
+  for (const id of ['premium', 'ultimate', 'team']) {
     const plan = api.SUBSCRIPTION_PLANS_ANNUAL[id];
     const result = api.buildAnnualSubscriptionSessionParams({
       baseParams: fakeBaseParams(),
@@ -148,7 +148,7 @@ test('lineItemForAnnualは期間の内外に関わらず既存のPrice ID環境�
 // 4. 月額 → 完全無変更
 // ---------------------------------------------------------------
 test('月額プランの定義にはキャンペーン関連フィールドが一切ない', () => {
-  for (const id of ['standard', 'premium', 'ultimate']) {
+  for (const id of ['standard', 'premium', 'ultimate', 'team']) {
     const plan = api.SUBSCRIPTION_PLANS[id];
     assert.ok(plan, `${id} の月額プラン定義が見つかりません`);
     assert.equal('discounts' in plan, false);
@@ -205,8 +205,16 @@ test('pricing.html: 描画時(JST 9/30 23:59)は割引表示OKだが、クリッ
   // 画面を開いたまま10/1 00:00になってからクリック: Checkoutをブロックする。
   assert.equal(shouldBlockAnnualCheckoutClick(standardPlan, JST_00_00_00_ON_1001), true);
 
-  // campaignAnnualを持たないプラン(Free/Team等)はそもそもブロック対象外。
-  assert.equal(shouldBlockAnnualCheckoutClick({ cls: 'team' }, JST_00_00_00_ON_1001), false);
+  // campaignAnnualを持たないプラン(Free等)はそもそもブロック対象外。
+  // (Teamは今回の変更でcampaignAnnualを持つようになったため、以後は
+  // Standard/Premium/Ultimateと同様にブロック対象になる。下のテストで確認)
+  assert.equal(shouldBlockAnnualCheckoutClick({ cls: 'free' }, JST_00_00_00_ON_1001), false);
+
+  // Teamもcampaignキャンペーン対象になったため、期限を跨いだクリックは
+  // Standard/Premium/Ultimateと同様にブロックされる。
+  const teamPlan = { cls: 'team', annual: '3,576,000', campaignAnnual: '3,218,400' };
+  assert.equal(shouldBlockAnnualCheckoutClick(teamPlan, JST_00_00_00_ON_1001), true);
+  assert.equal(shouldBlockAnnualCheckoutClick(teamPlan, JST_23_59_59_ON_930), false);
 
   // 期間内であれば通常通りブロックしない。
   assert.equal(shouldBlockAnnualCheckoutClick(standardPlan, JST_23_59_59_ON_930), false);
@@ -283,6 +291,20 @@ test('年額プランのmonthly_credits・金額・Price ID環境変数名はキ
   assert.equal(api.SUBSCRIPTION_PLANS_ANNUAL.ultimate.env, 'STRIPE_PRICE_ULTIMATE_YEARLY');
 });
 
+test('年額Teamプランの定義(毎月90,000credits・年額¥3,576,000・STRIPE_PRICE_TEAM_YEARLY)が正しい', () => {
+  const plan = api.SUBSCRIPTION_PLANS_ANNUAL.team;
+  assert.ok(plan, 'SUBSCRIPTION_PLANS_ANNUAL.teamが定義されていません');
+  assert.equal(plan.monthly_credits, 90000);
+  assert.equal(plan.amount, 3576000);
+  assert.equal(plan.env, 'STRIPE_PRICE_TEAM_YEARLY');
+  assert.equal(plan.plan, 'team');
+  // 12か月分を一括付与しない: creditsフィールドはmonthly_creditsのみで、
+  // 年間合計(annualCredits/1,080,000)に相当するフィールドはサーバー側の
+  // プラン定義には存在しない(月次付与の起点となるのはmonthly_creditsのみ)。
+  assert.equal('annual_credits' in plan, false);
+  assert.equal('credits' in plan, false);
+});
+
 // ---------------------------------------------------------------
 // 推奨: annualCampaignAvailable(GET応答)はCoupon IDを漏らさず、期間+設定済みの
 // 両方を満たす場合のみtrueを返す
@@ -318,10 +340,11 @@ test('APIハンドラ: GETレスポンスにannualCampaignAvailableのみ含み�
 // ---------------------------------------------------------------
 // その他: campaignAnnualの表示定義・月額表示ロジック無変更の確認
 // ---------------------------------------------------------------
-test('pricing.html: campaignAnnualは年額プラン(Standard/Premium/Ultimate)にのみ設定され、月額表示ロジックは変更されていない', () => {
+test('pricing.html: campaignAnnualは年額プラン(Standard/Premium/Ultimate/Team)に設定され、月額表示ロジックは変更されていない', () => {
   assert.match(pricingHtml, /campaignAnnual:'32,184'/);
   assert.match(pricingHtml, /campaignAnnual:'75,384'/);
   assert.match(pricingHtml, /campaignAnnual:'170,640'/);
+  assert.match(pricingHtml, /campaignAnnual:'3,218,400'/);
   assert.match(pricingHtml, /期間限定10%OFF/);
   assert.match(pricingHtml, /2026年9月30日まで/);
   const monthlyBranchStart = pricingHtml.indexOf('}else{priceHtml=`<div class="price"><span class="yen">¥</span><strong class="amount">${p.monthly}</strong>');
