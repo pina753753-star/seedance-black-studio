@@ -167,18 +167,78 @@ test('api/stripe-checkout.js: SUBSCRIPTION_PLANS.team(月額)の金額・credits
   assert.equal(api.SUBSCRIPTION_PLANS.team.env, 'STRIPE_PRICE_TEAM_MONTHLY');
 });
 
-test('api/stripe-checkout.js: 月額Teamのリクエストは、STRIPE_SECRET_KEYがあれば他プランと同じ経路でCheckout Session作成まで進む(この環境では実際のStripe呼び出し前で止まることのみ確認)', async () => {
-  // この実行環境にはSTRIPE_SECRET_KEY等の秘密情報がないため、実際に
-  // stripe.checkout.sessions.create()やSupabase認証まで到達させることは
-  // できない(=実ネットワークに触れさせない)。ここでは「Teamだから」という
-  // 理由だけで400/403等の専用エラーが返らないことだけを確認する
-  // (STRIPE_SECRET_KEY未設定による500は他プランと共通の経路であり、
-  // Team固有の拒否ではないことを別途ソース検証している)。
-  const handler = require('../api/stripe-checkout.js');
+// ---------------------------------------------------------------
+// api/stripe-checkout.js: Stripe SDK・Supabase認証をモックし、
+// 実Stripe・実Supabaseへ一切通信せずに、Checkout Session作成の
+// パラメータ(line_items・metadata・discounts等)を実行ベースで検証する
+// ---------------------------------------------------------------
+const stripeModulePath = require.resolve('stripe');
+const supabaseModulePath = require.resolve('@supabase/supabase-js');
+const checkoutModulePath = require.resolve('../api/stripe-checkout.js');
+const VALID_TOKEN = 'valid-test-token';
+const FAKE_USER = { id: 'user-team-test', email: 'team-tester@example.com' };
+
+// handler()を、Stripe SDK・@supabase/supabase-jsをフェイクに差し替えた
+// 状態で読み込む。require.cacheへ直接フェイクのモジュールエントリを
+// 注入することで、api/stripe-checkout.js内のrequire('stripe')・
+// require('@supabase/supabase-js')をどちらも横取りする(実ネットワーク・
+// 実Stripe・実Supabaseには一切触れない)。
+function loadHandlerWithMocks(sessionCreateImpl) {
+  const sessionCreateCalls = [];
+
+  class FakeStripe {
+    constructor(_secretKey) {
+      this.checkout = {
+        sessions: {
+          create: async (params) => {
+            sessionCreateCalls.push(params);
+            return (sessionCreateImpl && sessionCreateImpl(params)) || { id: 'sess_fake', client_secret: 'cs_fake' };
+          }
+        }
+      };
+    }
+  }
+
+  const fakeSupabaseClient = {
+    auth: {
+      getUser: async (token) => {
+        if (token === VALID_TOKEN) return { data: { user: FAKE_USER }, error: null };
+        return { data: null, error: new Error('invalid token') };
+      }
+    }
+  };
+
+  const prevStripeEntry = require.cache[stripeModulePath];
+  const prevSupabaseEntry = require.cache[supabaseModulePath];
+  const prevCheckoutEntry = require.cache[checkoutModulePath];
+
+  require.cache[stripeModulePath] = { id: stripeModulePath, filename: stripeModulePath, loaded: true, exports: FakeStripe };
+  require.cache[supabaseModulePath] = {
+    id: supabaseModulePath,
+    filename: supabaseModulePath,
+    loaded: true,
+    exports: { createClient: () => fakeSupabaseClient }
+  };
+  delete require.cache[checkoutModulePath];
+
+  const handler = require(checkoutModulePath);
+
+  return {
+    handler,
+    sessionCreateCalls,
+    restore() {
+      require.cache[stripeModulePath] = prevStripeEntry;
+      require.cache[supabaseModulePath] = prevSupabaseEntry;
+      delete require.cache[checkoutModulePath];
+    }
+  };
+}
+
+function fakeReqRes(body) {
   const req = {
     method: 'POST',
-    headers: { authorization: 'Bearer dummy' },
-    body: JSON.stringify({ kind: 'subscription', id: 'team', billing_interval: 'month' })
+    headers: { authorization: `Bearer ${VALID_TOKEN}` },
+    body: JSON.stringify(body)
   };
   const res = {
     statusCode: 0,
@@ -186,9 +246,124 @@ test('api/stripe-checkout.js: 月額Teamのリクエストは、STRIPE_SECRET_KE
     status(code) { this.statusCode = code; return this; },
     json(value) { this.payload = value; return this; }
   };
+  return { req, res };
+}
 
-  await handler(req, res);
-  // STRIPE_SECRET_KEY未設定のこの環境では500(Missing STRIPE_SECRET_KEY)。
-  // Team固有の400(準備中)ではないことを確認する。
-  assert.equal(res.payload?.error !== 'Teamプランは現在準備中のため購入できません', true);
+test('api/stripe-checkout.js(モック): 月額Teamはstripe.checkout.sessions.createが1回呼ばれ、STRIPE_PRICE_TEAM_MONTHLYのline_items・正しいmetadataになる', async () => {
+  const prevEnv = { ...process.env };
+  // 注意: SUPABASE_URL/SUPABASE_SERVICE_KEY等はapi/stripe-checkout.jsの
+  // モジュールトップレベルで`process.env`から一度だけ読み込まれる定数の
+  // ため、必ず環境変数を設定してからloadHandlerWithMocks()でモジュールを
+  // 新規require()する(順序を間違えると空文字が焼き付いて401になる)。
+  process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+  process.env.SUPABASE_URL = 'https://fake.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key';
+  process.env.STRIPE_PRICE_TEAM_MONTHLY = 'price_team_monthly_fake';
+  const { handler, sessionCreateCalls, restore } = loadHandlerWithMocks();
+  try {
+    const { req, res } = fakeReqRes({ kind: 'subscription', id: 'team', billing_interval: 'month' });
+    await handler(req, res);
+
+    assert.equal(res.payload?.ok, true, `エラー応答になっています: ${JSON.stringify(res.payload)}`);
+    assert.equal(sessionCreateCalls.length, 1, 'stripe.checkout.sessions.createが1回呼ばれる必要があります');
+
+    const params = sessionCreateCalls[0];
+    assert.equal(params.line_items.length, 1);
+    assert.equal(params.line_items[0].price, 'price_team_monthly_fake');
+    assert.equal('price_data' in params.line_items[0], false);
+    assert.equal(params.metadata.plan, 'team');
+    assert.equal(params.metadata.billing_interval, 'month');
+    assert.equal(params.metadata.credits, '90000');
+    assert.equal(params.metadata.monthly_credits, '90000');
+    assert.equal(params.subscription_data.metadata.plan, 'team');
+    assert.equal(params.allow_promotion_codes, true);
+  } finally {
+    restore();
+    process.env = prevEnv;
+  }
+});
+
+test('api/stripe-checkout.js(モック): 年額Teamはstripe.checkout.sessions.createが1回呼ばれ、STRIPE_PRICE_TEAM_YEARLYのline_items・正しいmetadataになり、キャンペーン期間内はCouponが適用され allow_promotion_codes は付かない', async () => {
+  const prevEnv = { ...process.env };
+  process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+  process.env.SUPABASE_URL = 'https://fake.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key';
+  process.env.STRIPE_PRICE_TEAM_YEARLY = 'price_team_yearly_fake';
+  process.env.STRIPE_COUPON_ANNUAL_10_OFF_202609 = 'coupon_fake_10off';
+  const { handler, sessionCreateCalls, restore } = loadHandlerWithMocks();
+  try {
+    const { req, res } = fakeReqRes({ kind: 'subscription', id: 'team', billing_interval: 'year' });
+    await handler(req, res);
+
+    assert.equal(res.payload?.ok, true, `エラー応答になっています: ${JSON.stringify(res.payload)}`);
+    assert.equal(sessionCreateCalls.length, 1, 'stripe.checkout.sessions.createが1回呼ばれる必要があります');
+
+    const params = sessionCreateCalls[0];
+    assert.equal(params.line_items.length, 1);
+    assert.equal(params.line_items[0].price, 'price_team_yearly_fake');
+    assert.equal('price_data' in params.line_items[0], false);
+    assert.equal(params.metadata.plan, 'team');
+    assert.equal(params.metadata.billing_interval, 'year');
+    assert.equal(params.metadata.credits, '90000');
+    assert.equal(params.metadata.monthly_credits, '90000');
+    assert.equal(params.subscription_data.metadata.plan, 'team');
+
+    // キャンペーン期間内(このプロセスの現在時刻は2026-09-30より前)なので
+    // Couponが自動適用され、allow_promotion_codesとは併用されない。
+    assert.deepEqual(params.discounts, [{ coupon: 'coupon_fake_10off' }]);
+    assert.equal('allow_promotion_codes' in params, false);
+  } finally {
+    restore();
+    process.env = prevEnv;
+  }
+});
+
+test('api/stripe-checkout.js(モック): 年額TeamはCoupon環境変数未設定だとfail-closedで503を返し、stripe.checkout.sessions.createは呼ばれない', async () => {
+  const prevEnv = { ...process.env };
+  process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+  process.env.SUPABASE_URL = 'https://fake.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key';
+  process.env.STRIPE_PRICE_TEAM_YEARLY = 'price_team_yearly_fake';
+  delete process.env.STRIPE_COUPON_ANNUAL_10_OFF_202609;
+  const { handler, sessionCreateCalls, restore } = loadHandlerWithMocks();
+  try {
+    const { req, res } = fakeReqRes({ kind: 'subscription', id: 'team', billing_interval: 'year' });
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.payload.error, 'ANNUAL_CAMPAIGN_CONFIG_MISSING');
+    assert.equal(sessionCreateCalls.length, 0, 'Coupon未設定時はCheckout Sessionを作成してはいけません');
+  } finally {
+    restore();
+    process.env = prevEnv;
+  }
+});
+
+test('api/stripe-checkout.js(モック): 未認証(不正トークン)の月額Teamリクエストは401で、stripe.checkout.sessions.createは呼ばれない', async () => {
+  const prevEnv = { ...process.env };
+  process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+  process.env.SUPABASE_URL = 'https://fake.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key';
+  process.env.STRIPE_PRICE_TEAM_MONTHLY = 'price_team_monthly_fake';
+  const { handler, sessionCreateCalls, restore } = loadHandlerWithMocks();
+  try {
+    const req = {
+      method: 'POST',
+      headers: { authorization: 'Bearer invalid-token' },
+      body: JSON.stringify({ kind: 'subscription', id: 'team', billing_interval: 'month' })
+    };
+    const res = {
+      statusCode: 0,
+      payload: null,
+      status(code) { this.statusCode = code; return this; },
+      json(value) { this.payload = value; return this; }
+    };
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(sessionCreateCalls.length, 0);
+  } finally {
+    restore();
+    process.env = prevEnv;
+  }
 });

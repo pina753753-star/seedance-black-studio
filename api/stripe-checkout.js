@@ -22,7 +22,7 @@ const SUBSCRIPTION_PLANS_ANNUAL = {
   team:     { name: 'Team',     amount: 3576000, monthly_credits: 90000, plan: 'team',     env: 'STRIPE_PRICE_TEAM_YEARLY'     }
 };
 
-// ── Annual 10%OFF campaign (Standard/Premium/Ultimate annual only) ─────────
+// ── Annual 10%OFF campaign (Standard/Premium/Ultimate/Team annual only) ────
 // 2026-10-01 00:00:00 JST = 2026-09-30 15:00:00 UTC. Fixed UTC timestamp so
 // this does not depend on the server's local timezone. Applies a Stripe
 // Coupon on top of the existing (unchanged) annual Price IDs - no new
