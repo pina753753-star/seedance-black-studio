@@ -283,6 +283,21 @@ test('api/stripe-checkout.js(モック): 月額Teamはstripe.checkout.sessions.c
   }
 });
 
+// キャンペーン期間内の固定時刻(2026-09-30 23:59:59 JST = 2026-09-30
+// 14:59:59 UTC)。api/stripe-checkout.jsのhandler内部はDate.now()を
+// 直接呼んでキャンペーン判定を行うため、実時間に依存させないよう
+// Date.nowそのものをこの固定値へ差し替える。必ずfinallyで元に戻し、
+// 他のテストへ日時モックが漏れないようにする。
+const CAMPAIGN_ACTIVE_FIXED_NOW = Date.parse('2026-09-30T14:59:59Z');
+
+function withFixedNow(fixedNow, fn) {
+  const originalDateNow = Date.now;
+  Date.now = () => fixedNow;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => { Date.now = originalDateNow; });
+}
+
 test('api/stripe-checkout.js(モック): 年額Teamはstripe.checkout.sessions.createが1回呼ばれ、STRIPE_PRICE_TEAM_YEARLYのline_items・正しいmetadataになり、キャンペーン期間内はCouponが適用され allow_promotion_codes は付かない', async () => {
   const prevEnv = { ...process.env };
   process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
@@ -292,26 +307,28 @@ test('api/stripe-checkout.js(モック): 年額Teamはstripe.checkout.sessions.c
   process.env.STRIPE_COUPON_ANNUAL_10_OFF_202609 = 'coupon_fake_10off';
   const { handler, sessionCreateCalls, restore } = loadHandlerWithMocks();
   try {
-    const { req, res } = fakeReqRes({ kind: 'subscription', id: 'team', billing_interval: 'year' });
-    await handler(req, res);
+    await withFixedNow(CAMPAIGN_ACTIVE_FIXED_NOW, async () => {
+      const { req, res } = fakeReqRes({ kind: 'subscription', id: 'team', billing_interval: 'year' });
+      await handler(req, res);
 
-    assert.equal(res.payload?.ok, true, `エラー応答になっています: ${JSON.stringify(res.payload)}`);
-    assert.equal(sessionCreateCalls.length, 1, 'stripe.checkout.sessions.createが1回呼ばれる必要があります');
+      assert.equal(res.payload?.ok, true, `エラー応答になっています: ${JSON.stringify(res.payload)}`);
+      assert.equal(sessionCreateCalls.length, 1, 'stripe.checkout.sessions.createが1回呼ばれる必要があります');
 
-    const params = sessionCreateCalls[0];
-    assert.equal(params.line_items.length, 1);
-    assert.equal(params.line_items[0].price, 'price_team_yearly_fake');
-    assert.equal('price_data' in params.line_items[0], false);
-    assert.equal(params.metadata.plan, 'team');
-    assert.equal(params.metadata.billing_interval, 'year');
-    assert.equal(params.metadata.credits, '90000');
-    assert.equal(params.metadata.monthly_credits, '90000');
-    assert.equal(params.subscription_data.metadata.plan, 'team');
+      const params = sessionCreateCalls[0];
+      assert.equal(params.line_items.length, 1);
+      assert.equal(params.line_items[0].price, 'price_team_yearly_fake');
+      assert.equal('price_data' in params.line_items[0], false);
+      assert.equal(params.metadata.plan, 'team');
+      assert.equal(params.metadata.billing_interval, 'year');
+      assert.equal(params.metadata.credits, '90000');
+      assert.equal(params.metadata.monthly_credits, '90000');
+      assert.equal(params.subscription_data.metadata.plan, 'team');
 
-    // キャンペーン期間内(このプロセスの現在時刻は2026-09-30より前)なので
-    // Couponが自動適用され、allow_promotion_codesとは併用されない。
-    assert.deepEqual(params.discounts, [{ coupon: 'coupon_fake_10off' }]);
-    assert.equal('allow_promotion_codes' in params, false);
+      // キャンペーン期間内(Date.nowを固定)なのでCouponが自動適用され、
+      // allow_promotion_codesとは併用されない。
+      assert.deepEqual(params.discounts, [{ coupon: 'coupon_fake_10off' }]);
+      assert.equal('allow_promotion_codes' in params, false);
+    });
   } finally {
     restore();
     process.env = prevEnv;
@@ -327,12 +344,14 @@ test('api/stripe-checkout.js(モック): 年額TeamはCoupon環境変数未設�
   delete process.env.STRIPE_COUPON_ANNUAL_10_OFF_202609;
   const { handler, sessionCreateCalls, restore } = loadHandlerWithMocks();
   try {
-    const { req, res } = fakeReqRes({ kind: 'subscription', id: 'team', billing_interval: 'year' });
-    await handler(req, res);
+    await withFixedNow(CAMPAIGN_ACTIVE_FIXED_NOW, async () => {
+      const { req, res } = fakeReqRes({ kind: 'subscription', id: 'team', billing_interval: 'year' });
+      await handler(req, res);
 
-    assert.equal(res.statusCode, 503);
-    assert.equal(res.payload.error, 'ANNUAL_CAMPAIGN_CONFIG_MISSING');
-    assert.equal(sessionCreateCalls.length, 0, 'Coupon未設定時はCheckout Sessionを作成してはいけません');
+      assert.equal(res.statusCode, 503);
+      assert.equal(res.payload.error, 'ANNUAL_CAMPAIGN_CONFIG_MISSING');
+      assert.equal(sessionCreateCalls.length, 0, 'Coupon未設定時はCheckout Sessionを作成してはいけません');
+    });
   } finally {
     restore();
     process.env = prevEnv;
