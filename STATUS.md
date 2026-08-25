@@ -580,7 +580,9 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
   - Vercel Production最新デプロイ(`dpl_83VL8cJnU28V64tH1QbKao7fm5Kq`)が`READY`であることを確認。
   - `pinastudio.jp/pricing.html`の配信内容(`plans`配列)で、Team月額¥298,000・年額通常¥3,576,000・年額10%OFF後¥3,218,400・ボタンラベル「Teamにする」(disabled属性なし)を確認。
   - GET `/api/stripe-checkout`が`annualCampaignAvailable:true`を返すことを確認(サーバー側でキャンペーンCouponが有効であることの傍証)。
-  - **未確認**: 実際に認証済みユーザーとしてTeamボタンをクリックし`POST /api/stripe-checkout`がCheckout Session作成まで到達することは、実ユーザーのログイン認証情報が必要なため確認できていない。ローカルの自動テスト(Stripe SDK/Supabaseをモックした実行ベーステスト)では、Team月額・年額とも正しいPrice ID・metadata・Couponでsessions.createが呼ばれることを検証済み。
+  - 2026-08-25、上記GET `/api/stripe-checkout`の`annualCampaignAvailable:true`を再確認(キャッシュMISS)。
+  - **未確認(実ユーザーCheckout画面)**: 実際に認証済みユーザーとしてTeamボタンをクリックし`POST /api/stripe-checkout`がCheckout Session作成まで到達し、Stripe Checkout画面(月額¥298,000・年額通常¥3,576,000・年額10%OFF後¥3,218,400)が実際に開くことは、実ユーザーのログイン認証情報が必要なため確認できていない。私(Claude)は実ユーザーの認証情報を持たず、確認のためだけに新規実アカウントを作成する対応も、ユーザーへ確認のうえ「コード・GETレスポンスの範囲に留める」方針を選択したため実施していない。
+  - 確認済みの範囲: pricing.html配信内容(`plans`配列の金額・ボタン状態)とGET `/api/stripe-checkout`のサーバー応答、およびローカル自動テスト(Stripe SDK/Supabaseをモックした実行ベーステスト。Team月額・年額とも正しいPrice ID・metadata・Couponで`stripe.checkout.sessions.create`が呼ばれることを検証済み)。POSTでの実際のCheckout Session作成・Checkout画面表示そのものは本番環境では未検証。
 - テスト: 全382件中380件成功。残り2件(`tests/generation-control.test.js`、`api/storyboard-prompt.js`関連)は本変更と無関係の既存事象。
 - Supabase schema・migration、`api/stripe-webhook.js`のクレジット付与仕様、Cronの毎月付与仕様、Standard/Premium/Ultimate/Freeの価格・credits・Checkout、キャンペーン期限には変更なし。
 - PR #208(マージコミット`8ba1c8a`)で`main`へマージ、本番(pinastudio.jp)へ反映済み。
