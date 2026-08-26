@@ -587,7 +587,7 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - Supabase schema・migration、`api/stripe-webhook.js`のクレジット付与仕様、Cronの毎月付与仕様、Standard/Premium/Ultimate/Freeの価格・credits・Checkout、キャンペーン期限には変更なし。
 - PR #208(マージコミット`8ba1c8a`)で`main`へマージ、本番(pinastudio.jp)へ反映済み。
 
-## 作業中: Teamの表示名変更・購入ボタン統一・年額Checkout調査(2026-08-25)
+## 対応: Teamの表示名変更・購入ボタン統一・年額Checkout復旧(2026-08-25)
 - 完了した表示修正:
   - 料金画面上のTeam表示名だけを「Creator Pro」へ変更。内部プランID`team`、Stripe商品名、DB・Webhook・credits・価格は変更していない。
   - Standard/Premium/Ultimate/Creator Proの購入ボタンを「購入する」に統一。Freeの「無料で試す」は維持。
@@ -602,4 +602,3 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - テスト結果:
   - 対象テスト45/45件成功。
   - 全体383件中381件成功。失敗2件は既知の`tests/generation-control.test.js`(`api/storyboard-prompt.js`関連)で今回の変更対象外。
-- 未実施: mainへのマージ、本番デプロイ、Stripe/Vercel/Supabaseの追加設定変更。
