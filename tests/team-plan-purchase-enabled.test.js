@@ -103,7 +103,7 @@ test('pricing.html: Teamボタンのクリックで年額checkoutが正しいint
   assert.deepEqual(checkoutCalls[0], ['subscription', 'team', teamBtn, 'year']);
 });
 
-test('pricing.html: Standard/Premium/Ultimate/Freeのクリック動作はTeam購入可能化後も変わらない', () => {
+test('pricing.html: Standard/Premium/Ultimateのクリック動作はTeam購入可能化後も変わらない', () => {
   const { buttons, checkoutCalls } = loadPricingPlansHandlers({ billing: 'monthly' });
 
   const standardBtn = buttons.find(b => b.dataset.plan === 'standard');
@@ -152,15 +152,15 @@ test('pricing.html: Teamの表示名はCreator Pro、内部IDはteamのまま、
   assert.match(teamPlanSrc, /btn:'購入する'/);
 });
 
-test('pricing.html: 有料4プランのボタンは「購入する」に統一し、Freeのラベルは維持する', () => {
+test('pricing.html: 有料4プランのボタンは「購入する」に統一し、Freeプランは表示対象から除外する', () => {
   for (const id of ['standard', 'premium', 'ultimate', 'team']) {
     const start = pricingHtml.indexOf(`{cls:'${id}'`);
     const end = pricingHtml.indexOf('\n', start);
     assert.match(pricingHtml.slice(start, end), /btn:'購入する'/, `${id}のボタンが統一されていません`);
   }
-  const freeStart = pricingHtml.indexOf("{cls:'free'");
-  const freeEnd = pricingHtml.indexOf('\n', freeStart);
-  assert.match(pricingHtml.slice(freeStart, freeEnd), /btn:'無料で試す'/);
+  assert.doesNotMatch(pricingHtml, /\{cls:'free'/);
+  assert.doesNotMatch(pricingHtml, /name:'Free'/);
+  assert.doesNotMatch(pricingHtml, /btn:'無料で試す'/);
 });
 
 // ---------------------------------------------------------------

@@ -100,13 +100,18 @@ test('pricing.html: 年額タブでのStandard/Premium/Ultimateの表示(10%OFF�
   }
 });
 
-test('pricing.html: 月額タブでのStandard/Premium/Ultimate/Freeの表示はTeam年額対応後も変化しない', () => {
+test('pricing.html: 月額タブではFreeを表示せず、Standard/Premium/Ultimateの表示は変化しない', () => {
   const articles = loadRenderPlans({ billing: 'monthly' });
-  assert.match(articles.free, /初回クレジット/);
+  assert.equal(articles.free, undefined);
   assert.match(articles.standard, /2,980/);
   assert.match(articles.premium, /6,980/);
   assert.match(articles.ultimate, /15,800/);
   for (const cls of ['standard', 'premium', 'ultimate']) {
     assert.match(articles[cls], />\/月</);
   }
+});
+
+test('pricing.html: 年額タブでもFreeを表示しない', () => {
+  const articles = loadRenderPlans({ billing: 'annual', campaignActive: true });
+  assert.equal(articles.free, undefined);
 });
