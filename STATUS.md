@@ -602,3 +602,9 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - テスト結果:
   - 対象テスト45/45件成功。
   - 全体383件中381件成功。失敗2件は既知の`tests/generation-control.test.js`(`api/storyboard-prompt.js`関連)で今回の変更対象外。
+
+## 対応: 料金ページからFreeプランカードを削除(2026-08-26)
+- `pricing.html`のFreeプラン定義を削除し、月額・年額のどちらのタブにもFreeカードを表示しないように変更。
+- Standard/Premium/Ultimate/Creator Proの価格・credits・購入ボタン・Checkout処理は変更していない。
+- 無料登録や動画生成側の機能は変更しておらず、料金ページ上のFreeカード表示だけを削除。
+- 対象テスト46/46件成功。全体384件中382件成功。失敗2件は既知の`tests/generation-control.test.js`(`api/storyboard-prompt.js`関連)で今回の変更対象外。
