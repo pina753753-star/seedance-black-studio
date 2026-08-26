@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>
+    (function(){
+      if(location.hostname === 'pina753753-star.github.io'){
+        var path = location.pathname.replace('/seedance-black-studio','') || '/en/login.html';
+        location.replace('https://flowvid-studio.vercel.app' + path + location.search + location.hash);
+      }
+    })();
+  </script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Log in / Sign up | Pina Studio</title>
+  <link rel="icon" type="image/png" href="/assets/brand/pina-icon-v2-favicon.png">
+  <link rel="apple-touch-icon" href="/assets/brand/pina-icon-v2-favicon.png">
+  <meta name="description" content="Log in to Pina Studio or create a new account.">
+  <meta property="og:title" content="Log in / Sign up | Pina Studio">
+  <meta property="og:description" content="Log in to Pina Studio or create a new account.">
+  <meta property="og:image" content="https://flowvid-studio.vercel.app/assets/brand/pina-ogp-share.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Log in / Sign up | Pina Studio">
+  <meta name="twitter:description" content="Log in to Pina Studio or create a new account.">
+  <meta name="twitter:image" content="https://flowvid-studio.vercel.app/assets/brand/pina-ogp-share.png">
+  <meta name="theme-color" content="#050506" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#050506;--line:rgba(255,255,255,.13);--muted:rgba(255,255,255,.58);--gold:#d7b86a;--violet:#7c3aed;--danger:#fb7185;--ok:#86efac}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:'Inter',ui-sans-serif,system-ui,sans-serif}body{overflow-x:hidden;background:#000}.wrap{position:relative;max-width:900px;margin:0 auto;padding:18px 14px 46px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:42px}.brand{display:flex;gap:12px;align-items:center;color:#fff;text-decoration:none}.top a.back{color:#fff;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.05);border-radius:999px;padding:10px 13px;font-size:13px}.layout{display:grid;gap:16px}.hero{padding:4px 2px}.hero p{margin:0 0 9px;color:var(--gold);font-size:13px;letter-spacing:.18em}.hero h1{font-size:42px;line-height:1.08;letter-spacing:-.05em;margin:0 0 14px}.card{border:1px solid var(--line);border-radius:30px;background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.03));padding:18px}.tabs{display:grid;grid-template-columns:1fr 1fr;background:rgba(0,0,0,.34);border:1px solid var(--line);border-radius:20px;padding:6px;margin-bottom:18px}.tab{border:0;border-radius:15px;background:transparent;color:rgba(255,255,255,.48);font-weight:900;padding:13px}.tab.active{background:#fff;color:#050506}.form{display:grid;gap:12px}.field label{display:block;color:rgba(255,255,255,.54);font-size:13px;margin:0 0 7px}.field input{width:100%;border:1px solid var(--line);background:rgba(0,0,0,.42);color:#fff;border-radius:18px;padding:15px 14px;font-size:16px;outline:none}.field[hidden]{display:none}.fieldHint{margin:7px 2px 0;color:rgba(255,255,255,.42);font-size:12px;line-height:1.6}.primary{width:100%;border:0;border-radius:20px;padding:16px;background:linear-gradient(90deg,#fff,#e2c978,var(--violet));color:#050506;font-weight:950;font-size:16px;margin-top:4px}.primary:disabled{opacity:.52}.message{display:none;border-radius:18px;padding:12px 13px;line-height:1.6;font-size:13px}.message.show{display:block}.message.error{border:1px solid rgba(251,113,133,.35);background:rgba(251,113,133,.10);color:#fecdd3}.message.ok{border:1px solid rgba(134,239,172,.30);background:rgba(134,239,172,.10);color:#dcfce7}.notice{border:1px solid rgba(215,184,106,.26);background:rgba(215,184,106,.08);border-radius:20px;padding:13px;color:rgba(255,255,255,.72);line-height:1.65;font-size:13px}.note{color:rgba(255,255,255,.36);font-size:12px;line-height:1.7;text-align:center;margin-top:14px}.note a{color:#fff}@media(min-width:820px){.layout{grid-template-columns:.95fr 1.05fr;align-items:start}.hero h1{font-size:58px}}@media(max-width:430px){.wrap{padding:16px 12px 38px}.hero h1{font-size:38px}.card{border-radius:27px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a>
+      <a class="back" href="./index.html">Back to home</a>
+    </header>
+    <section class="layout">
+      <div class="hero"><p>LOGIN</p><h1>Log in to start creating.</h1></div>
+      <div class="card">
+        <div class="tabs"><button class="tab active" id="loginTab">Log in</button><button class="tab" id="signupTab">Sign up</button></div>
+        <div class="notice" style="margin-bottom:16px">
+          You must be 18 or older to register. After signing up, open the confirmation link sent to your email before logging in.
+        </div>
+        <form class="form" id="authForm">
+          <div class="field"><label>Email</label><input id="email" type="email" placeholder="you@example.com" autocomplete="email" required></div>
+          <div class="field"><label>Password</label><input id="password" type="password" placeholder="At least 8 characters" autocomplete="current-password" required></div>
+          <div class="field" id="passwordConfirmField" hidden>
+            <label for="passwordConfirm">Confirm password</label>
+            <input id="passwordConfirm" type="password" placeholder="Enter your password again" autocomplete="new-password">
+          </div>
+          <div class="field" id="birthDateField" hidden>
+            <label for="birthDate">Date of birth</label>
+            <input id="birthDate" type="date" autocomplete="bday">
+            <p class="fieldHint">Users under 18 cannot register.</p>
+          </div>
+          <div class="field" id="inviteCodeField" hidden>
+            <label for="inviteCode">Invite code</label>
+            <input id="inviteCode" type="text" placeholder="Enter invite code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64">
+            <p class="fieldHint">A valid invite code may qualify you for signup credits.</p>
+          </div>
+          <div class="field" id="captchaField" hidden><div id="captchaWidget"></div></div>
+          <button class="primary" id="submitBtn">Log in</button>
+          <div class="message" id="message"></div>
+        </form>
+        <p class="note">By signing up, you agree to the <a href="../terms.html">Terms of Service</a> and <a href="../privacy.html">Privacy Policy</a>. These legal pages are currently provided in Japanese.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../auth-config.js?v=4a1f0c1"></script>
+  <script src="../auth-guard.js?v=1"></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=flowvidTurnstileReady&amp;render=explicit" defer></script>
+  <script>
+    let mode='login';
+    const loginTab=document.getElementById('loginTab');
+    const signupTab=document.getElementById('signupTab');
+    const submitBtn=document.getElementById('submitBtn');
+    const form=document.getElementById('authForm');
+    const email=document.getElementById('email');
+    const password=document.getElementById('password');
+    const passwordConfirmField=document.getElementById('passwordConfirmField');
+    const passwordConfirm=document.getElementById('passwordConfirm');
+    const birthDateField=document.getElementById('birthDateField');
+    const birthDate=document.getElementById('birthDate');
+    const inviteCodeField=document.getElementById('inviteCodeField');
+    const inviteCode=document.getElementById('inviteCode');
+    const message=document.getElementById('message');
+    const cfg=window.FLOWVID_AUTH||{};
+    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
+    const authReady=Boolean(client);
+
+    function setMessage(text,type='error'){message.textContent=text;message.className='message show '+type;}
+    function clearMessage(){message.textContent='';message.className='message';}
+
+    const turnstileSiteKey=String(cfg.turnstileSiteKey||'').trim();
+    const captchaField=document.getElementById('captchaField');
+    const captchaWidget=document.getElementById('captchaWidget');
+    let captchaToken='';
+    let captchaWidgetId;
+    window.flowvidCaptchaSuccess=function(token){captchaToken=token||'';};
+    window.flowvidCaptchaExpired=function(){captchaToken='';};
+    if(turnstileSiteKey&&captchaField&&captchaWidget){captchaField.hidden=false;}
+    window.flowvidTurnstileReady=function(){
+      if(!turnstileSiteKey||!captchaWidget||!window.turnstile||captchaWidgetId!==undefined)return;
+      captchaWidgetId=window.turnstile.render(captchaWidget,{
+        sitekey:turnstileSiteKey,
+        theme:'dark',
+        size:'flexible',
+        callback:window.flowvidCaptchaSuccess,
+        'expired-callback':window.flowvidCaptchaExpired,
+        'error-callback':window.flowvidCaptchaExpired
+      });
+    };
+    function resetCaptcha(){
+      captchaToken='';
+      if(turnstileSiteKey&&captchaWidgetId!==undefined&&window.turnstile&&typeof window.turnstile.reset==='function'){
+        try{window.turnstile.reset(captchaWidgetId);}catch(_){}
+      }
+    }
+
+    function formatDateParts(parts){
+      const year=String(parts.year).padStart(4,'0');
+      const month=String(parts.month).padStart(2,'0');
+      const day=String(parts.day).padStart(2,'0');
+      return `${year}-${month}-${day}`;
+    }
+    function getTokyoToday(now=new Date()){
+      const parts=new Intl.DateTimeFormat('en-CA',{
+        timeZone:'Asia/Tokyo',
+        year:'numeric',
+        month:'2-digit',
+        day:'2-digit'
+      }).formatToParts(now);
+      const values={};
+      for(const part of parts){
+        if(part.type==='year'||part.type==='month'||part.type==='day')values[part.type]=Number(part.value);
+      }
+      if(!values.year||!values.month||!values.day)throw new Error('Could not determine the current date in Japan.');
+      return values;
+    }
+    function getAdultCutoffDate(today=getTokyoToday()){
+      const cutoffDay=today.month===2&&today.day===29?28:today.day;
+      return formatDateParts({year:today.year-18,month:today.month,day:cutoffDay});
+    }
+    function isLeapYear(year){return year%4===0&&(year%100!==0||year%400===0);}
+    function daysInMonth(year,month){
+      if(month===2)return isLeapYear(year)?29:28;
+      return [4,6,9,11].includes(month)?30:31;
+    }
+    function parseBirthDate(value){
+      const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value||''));
+      if(!match)return null;
+      const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+      if(month<1||month>12||day<1||day>daysInMonth(year,month))return null;
+      return {year,month,day,value:formatDateParts({year,month,day})};
+    }
+    function calculateFullAge(value,today=getTokyoToday()){
+      const parsed=parseBirthDate(value);
+      if(!parsed)return null;
+      let age=today.year-parsed.year;
+      const beforeBirthday=today.month<parsed.month||(today.month===parsed.month&&today.day<parsed.day);
+      if(beforeBirthday)age-=1;
+      return age;
+    }
+    function normalizeInviteCode(value){
+      return String(value||'').trim().toUpperCase().replace(/\s+/g,'');
+    }
+    async function sha256Hex(value){
+      const bytes=new TextEncoder().encode(value);
+      const digest=await crypto.subtle.digest('SHA-256',bytes);
+      return Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+    }
+    async function prevalidateInviteCode(codeHash){
+      try{
+        const response=await fetch('/api/invite-code/validate',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({codeHash:codeHash||''})
+        });
+        const data=await response.json().catch(()=>null);
+        if(!response.ok||!data?.ok)return null;
+        return data;
+      }catch(_){return null;}
+    }
+    function authMessage(text){
+      const raw=String(text||'');
+      if(/invite code is required/i.test(raw)) return 'Please enter an invite code.';
+      if(/invite code is invalid/i.test(raw)||/invite code usage conflict/i.test(raw)) return 'This invite code is invalid or currently unavailable.';
+      if(/birth date is required/i.test(raw)) return 'Please enter your date of birth.';
+      if(/invalid birth date/i.test(raw)) return 'Please enter a valid date of birth.';
+      if(/at least 18 years old/i.test(raw)) return 'You must be at least 18 years old to register.';
+      if(/age verification unavailable/i.test(raw)) return 'Age verification is temporarily unavailable. Please try again later.';
+      if(/security purposes|30 seconds|rate limit|too many/i.test(raw)) return 'Too many attempts were made in a short time. Please wait about 30 seconds and try again.';
+      if(/invalid login credentials/i.test(raw)) return 'Incorrect email address or password.';
+      if(/email rate limit exceeded/i.test(raw)) return 'Too many confirmation emails were requested. Please wait and try again.';
+      if(/user already registered|already exists/i.test(raw)) return 'This email address is already registered. Please try logging in.';
+      if(/password/i.test(raw)) return 'Password must be at least 8 characters.';
+      return raw || 'An authentication error occurred.';
+    }
+    function setMode(next){
+      mode=next;
+      const isSignup=mode==='signup';
+      loginTab.classList.toggle('active',!isSignup);
+      signupTab.classList.toggle('active',isSignup);
+      submitBtn.textContent=isSignup?'Create account':'Log in';
+      password.autocomplete=isSignup?'new-password':'current-password';
+      passwordConfirmField.hidden=!isSignup;
+      passwordConfirm.required=isSignup;
+      birthDateField.hidden=!isSignup;
+      birthDate.required=isSignup;
+      inviteCodeField.hidden=!isSignup;
+      try{birthDate.max=getAdultCutoffDate();}catch(error){birthDate.removeAttribute('max');}
+      if(!isSignup){
+        birthDate.value='';
+        passwordConfirm.value='';
+        inviteCode.value='';
+      }
+      clearMessage();
+    }
+    function showRedirectMessage(){
+      const text=new URLSearchParams(location.search).get('authMessage');
+      if(!text)return;
+      setMessage(text,'error');
+      try{
+        const cleanUrl=location.pathname+location.hash;
+        history.replaceState(null,'',cleanUrl);
+      }catch(_){}
+    }
+
+    loginTab.onclick=()=>setMode('login');
+    signupTab.onclick=()=>setMode('signup');
+    if(!authReady){
+      setMessage('Login is temporarily unavailable because the connection settings could not be loaded. Please reload in a few minutes.','error');
+      submitBtn.disabled=true;
+    }
+    showRedirectMessage();
+
+    if(client){
+      client.auth.getSession().then(async({data,error})=>{
+        if(error||!data?.session)return;
+        const guard=window.FlowVidAuthGuard;
+        const user=guard?await guard.requireConfirmedUser(client,{redirect:false}):null;
+        if(user)location.replace('../profile.html');
+      }).catch(()=>{});
+    }
+
+    form.onsubmit=async(e)=>{
+      e.preventDefault();
+      if(!client)return;
+      clearMessage();
+      const mail=email.value.trim();
+      const pass=password.value;
+      let result;
+      if(mode==='signup'){
+        if(pass!==passwordConfirm.value){setMessage('Passwords do not match.','error');passwordConfirm.focus();return;}
+        const value=birthDate.value;
+        const parsed=parseBirthDate(value);
+        if(!value){setMessage('Please enter your date of birth.','error');birthDate.focus();return;}
+        if(!parsed){setMessage('Please enter a valid date of birth.','error');birthDate.focus();return;}
+        let today;
+        try{today=getTokyoToday();}
+        catch(error){setMessage('Age verification is temporarily unavailable. Please try again later.','error');return;}
+        if(parsed.value>formatDateParts(today)){setMessage('A future date cannot be used as your date of birth.','error');birthDate.focus();return;}
+        const age=calculateFullAge(value,today);
+        if(age===null){setMessage('Please enter a valid date of birth.','error');birthDate.focus();return;}
+        if(age<18){setMessage('You must be at least 18 years old to register.','error');birthDate.focus();return;}
+      }
+
+      let inviteCodeHash='';
+      if(mode==='signup'){
+        const normalizedInviteCode=normalizeInviteCode(inviteCode.value);
+        try{inviteCodeHash=normalizedInviteCode?await sha256Hex(normalizedInviteCode):'';}
+        catch(_){setMessage('The invite code could not be checked. Please try again.','error');return;}
+        const inviteValidation=await prevalidateInviteCode(inviteCodeHash);
+        if(inviteValidation&&inviteValidation.valid!==true){
+          setMessage(inviteValidation.message||'This invite code is invalid or currently unavailable.','error');
+          inviteCode.focus();
+          return;
+        }
+      }
+
+      if(turnstileSiteKey&&!captchaToken){
+        setMessage('Please complete the CAPTCHA verification.','error');
+        return;
+      }
+
+      submitBtn.disabled=true;
+      try{
+        if(mode==='login'){
+          const loginOptions=turnstileSiteKey?{captchaToken}:undefined;
+          result=await client.auth.signInWithPassword(loginOptions?{email:mail,password:pass,options:loginOptions}:{email:mail,password:pass});
+        }else{
+          const signupData={birth_date:birthDate.value};
+          if(inviteCodeHash)signupData.invite_code_hash=inviteCodeHash;
+          const signupOptions={emailRedirectTo:'https://www.pinastudio.jp/profile.html',data:signupData};
+          if(turnstileSiteKey)signupOptions.captchaToken=captchaToken;
+          result=await client.auth.signUp({
+            email:mail,
+            password:pass,
+            options:signupOptions
+          });
+        }
+      }catch(error){
+        result={error:{message:error?.message||'An authentication error occurred.'}};
+      }finally{
+        submitBtn.disabled=false;
+        resetCaptcha();
+      }
+
+      if(result.error){setMessage(authMessage(result.error.message),'error');return;}
+
+      if(mode==='signup'){
+        if(result.data?.session){
+          try{await client.auth.signOut();}catch(_){}
+        }
+        setMessage('Confirmation email sent. Open the link in the email, then log in.','ok');
+        return;
+      }
+
+      const guard=window.FlowVidAuthGuard;
+      if(guard){
+        const confirmedUser=await guard.requireConfirmedUser(client);
+        if(!confirmedUser)return;
+      }
+      location.href='../profile.html';
+    };
+  </script>
+</body>
+</html>

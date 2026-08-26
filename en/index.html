@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pina Studio</title>
+<link rel="icon" type="image/png" href="/assets/brand/pina-icon-v2-favicon.png">
+<link rel="apple-touch-icon" href="/assets/brand/pina-icon-v2-favicon.png">
+<meta name="description" content="Create and edit high-quality AI videos with Pina Studio using text and images.">
+<meta property="og:title" content="Pina Studio">
+<meta property="og:description" content="Create and edit high-quality AI videos with Pina Studio using text and images.">
+<meta property="og:image" content="https://flowvid-studio.vercel.app/assets/brand/pina-ogp-share.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Pina Studio">
+<meta name="twitter:description" content="Create and edit high-quality AI videos with Pina Studio using text and images.">
+<meta name="twitter:image" content="https://flowvid-studio.vercel.app/assets/brand/pina-ogp-share.png">
+<meta name="theme-color" content="#000000" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{--line:rgba(255,255,255,.12);--muted:rgba(255,255,255,.55);--gold:#d7b86a;--violet:#7c3aed;--cyan:#6ee7f9;--pink:#fb7185}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#000;color:#fff;font-family:'Inter',ui-sans-serif,system-ui,sans-serif;overflow-x:hidden}body.video-open{overflow:hidden}.wrap{max-width:600px;margin:0 auto;padding:16px 14px 48px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:32px}.brand{display:flex;align-items:center;color:#fff;text-decoration:none}.brand img{height:auto;width:120px;display:block}.menuBtn{color:#fff;border:1px solid var(--line);background:rgba(255,255,255,.06);border-radius:999px;width:42px;height:42px;padding:0;font-size:20px;display:grid;place-items:center;cursor:pointer}.hero{margin-bottom:32px;text-align:center}.hero h1{font-size:36px;line-height:1.15;letter-spacing:-.04em;margin:0 0 24px;font-weight:900;color:#fff}.cta-btn{display:inline-block;text-align:center;text-decoration:none;border-radius:16px;padding:15px 36px;font-weight:700;font-size:16px;background:linear-gradient(90deg,#fff,#e2c978,var(--violet));color:#050506}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.realVideo{aspect-ratio:9/16;background:#111;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:0;text-align:left;font:inherit;-webkit-appearance:none;appearance:none;cursor:pointer;overflow:hidden;position:relative}.realVideo video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;background:#000}.drawer{position:fixed;inset:0;z-index:20;display:none}.drawer.open{display:block}.shade{position:absolute;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(10px)}.menu{position:absolute;right:12px;top:12px;width:min(340px,calc(100vw - 24px));border:1px solid var(--line);border-radius:28px;background:#000;padding:18px}.menuHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.menuHead b{font-size:18px;font-weight:700}.close{border:0;background:rgba(255,255,255,.08);color:#fff;border-radius:50%;width:38px;height:38px;font-size:24px;cursor:pointer}.menu a{display:flex;justify-content:space-between;color:#fff;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:16px;padding:14px 16px;margin-top:8px;font-weight:500;font-size:14px}.menu .logout{border-color:rgba(251,113,133,.28)!important;background:rgba(251,113,133,.08)!important}.videoOverlay{position:fixed;inset:0;z-index:40;display:none;background:#000}.videoOverlay.open{display:block}.overlayBox{position:fixed;inset:0;width:100vw;height:100dvh;background:#000;overflow:hidden}.overlayBox video{display:block;width:100vw;height:100dvh;background:#000;object-fit:contain}.overlayClose{position:fixed;left:14px;top:calc(12px + env(safe-area-inset-top,0px));z-index:45;width:34px;height:34px;border:0;border-radius:50%;background:rgba(60,60,60,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:rgba(255,255,255,.9);font-size:18px;font-weight:400;line-height:1;display:grid;place-items:center;cursor:pointer;opacity:0;transition:opacity .2s;pointer-events:none}.overlayClose.on{opacity:1;pointer-events:auto}@media(min-width:600px){.wrap{padding:20px 20px 60px}.hero h1{font-size:48px}}@media(max-width:430px){.hero h1{font-size:30px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header class="top">
+  <a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" /></a>
+  <button class="menuBtn" id="menuBtn" aria-label="Open menu">☰</button>
+</header>
+
+<section class="hero">
+  <h1>Turn ideas into videos.</h1>
+  <a class="cta-btn" href="../generate-prod.html">Start creating</a>
+</section>
+
+<section id="gallery">
+  <div class="grid" id="sampleGrid"></div>
+</section>
+
+<footer style="position:relative;text-align:center;padding:24px 14px 32px;border-top:1px solid rgba(255,255,255,.08);margin-top:32px;">
+  <nav style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px 16px;margin-bottom:12px;">
+    <a href="../terms.html" style="color:rgba(255,255,255,.4);font-size:12px;text-decoration:none;">Terms</a>
+    <a href="../privacy.html" style="color:rgba(255,255,255,.4);font-size:12px;text-decoration:none;">Privacy</a>
+    <a href="../legal.html" style="color:rgba(255,255,255,.4);font-size:12px;text-decoration:none;">Legal Notice</a>
+    <a href="../credits-info.html" style="color:rgba(255,255,255,.4);font-size:12px;text-decoration:none;">Credits & Pricing</a>
+    <a href="../content-policy.html" style="color:rgba(255,255,255,.4);font-size:12px;text-decoration:none;">Content Policy</a>
+    <a href="../help.html" style="color:rgba(255,255,255,.4);font-size:12px;text-decoration:none;">Help Center</a>
+  </nav>
+  <p style="color:rgba(255,255,255,.22);font-size:11px;margin:0;">© 2026 Pina Studio</p>
+</footer>
+</main>
+
+<div class="drawer" id="drawer">
+  <div class="shade" id="shade"></div>
+  <div class="menu">
+    <div class="menuHead"><b>Menu</b><button class="close" id="drawerClose" aria-label="Close menu">×</button></div>
+    <a href="./index.html">Home <span>›</span></a>
+    <a href="../generate-prod.html">Create <span>›</span></a>
+    <a href="./login.html">Log in / Sign up <span>›</span></a>
+    <a href="../profile.html">My Page <span>›</span></a>
+    <a href="../pricing.html">Subscription <span>›</span></a>
+    <a href="../pricing.html#credit">Buy Credits <span>›</span></a>
+    <a href="../help.html">Help Center <span>›</span></a>
+    <a class="logout" href="../logout.html">Log out <span>›</span></a>
+  </div>
+</div>
+
+<div class="videoOverlay" id="videoOverlay">
+  <div class="overlayBox">
+    <button class="overlayClose" id="overlayClose" type="button">×</button>
+    <video id="overlayVideo" controls playsinline></video>
+  </div>
+</div>
+
+<script>
+const drawer=document.getElementById('drawer');
+document.getElementById('menuBtn').onclick=()=>drawer.classList.add('open');
+document.getElementById('shade').onclick=()=>drawer.classList.remove('open');
+document.getElementById('drawerClose').onclick=()=>drawer.classList.remove('open');
+
+const grid=document.getElementById('sampleGrid');
+
+function videoSrc(sample){
+  if(sample?.src)return sample.src;
+  if(sample?.url)return sample.url;
+  if(sample?.video_url)return sample.video_url;
+  if(sample?.video_uri)return '/api/veo-download?uri='+encodeURIComponent(sample.video_uri);
+  return '';
+}
+
+function videoSampleCard(sample){
+  const src=videoSrc(sample);
+  if(!src)return '';
+  return `<button class="realVideo" data-sample-src="${src}" type="button"><video autoplay muted loop playsinline preload="auto" src="${src}"></video></button>`;
+}
+
+async function loadRealSamples(){
+  try{
+    const res=await fetch('/api/generated-videos?limit=2&public=true',{cache:'no-store'});
+    const data=await res.json();
+    const rows=Array.isArray(data.rows)?data.rows:[];
+    const seen=new Set();
+    const realSamples=rows.filter(v=>v.status==='completed'&&(v.video_uri||v.video_url||v.url||v.src)).filter(v=>{
+      const src=videoSrc(v);
+      if(!src||seen.has(src))return false;
+      seen.add(src);return true;
+    }).slice(0,2);
+    grid.innerHTML=realSamples.map(videoSampleCard).join('');
+    grid.querySelectorAll('.realVideo video').forEach(v=>{
+      v.muted=true;v.loop=true;v.playsInline=true;
+      v.setAttribute('muted','');v.setAttribute('playsinline','');
+      v.play().catch(()=>{});
+    });
+  }catch(_){grid.innerHTML='';}
+}
+
+let _ovTimer=null;
+function _wakeOvClose(){
+  const btn=document.getElementById('overlayClose'),v=document.getElementById('overlayVideo');
+  btn.classList.add('on');clearTimeout(_ovTimer);
+  if(!v.paused)_ovTimer=setTimeout(()=>btn.classList.remove('on'),3200);
+}
+function openOverlay(src){
+  const overlay=document.getElementById('videoOverlay');
+  const video=document.getElementById('overlayVideo');
+  video.src=src;document.body.classList.add('video-open');
+  overlay.classList.add('open');video.play().catch(()=>{});_wakeOvClose();
+}
+function closeOverlay(){
+  const overlay=document.getElementById('videoOverlay');
+  const video=document.getElementById('overlayVideo');
+  clearTimeout(_ovTimer);video.pause();video.removeAttribute('src');video.load();
+  overlay.classList.remove('open');document.getElementById('overlayClose').classList.remove('on');
+  document.body.classList.remove('video-open');
+}
+
+grid.addEventListener('click',e=>{
+  const card=e.target.closest('[data-sample-src]');
+  if(card)openOverlay(card.dataset.sampleSrc);
+});
+document.getElementById('overlayClose').onclick=closeOverlay;
+const _ovEl=document.getElementById('videoOverlay');
+_ovEl.addEventListener('click',e=>{
+  if(e.target.id==='videoOverlay'){_wakeOvClose();return;}
+  if(!e.target.closest('#overlayClose'))_wakeOvClose();
+});
+_ovEl.addEventListener('touchstart',_wakeOvClose,{passive:true});
+const _ovVid=document.getElementById('overlayVideo');
+_ovVid.addEventListener('play',_wakeOvClose);
+_ovVid.addEventListener('pause',()=>{document.getElementById('overlayClose').classList.add('on');clearTimeout(_ovTimer);});
+_ovVid.addEventListener('ended',()=>{document.getElementById('overlayClose').classList.add('on');clearTimeout(_ovTimer);});
+
+loadRealSamples();
+</script>
+</body>
+</html>
