@@ -83,9 +83,10 @@ test('pricing.html: 年額タブのTeamは年間合計クレジット1,080,000�
   assert.match(articles.team, /毎月 90,000 credits付与/);
 });
 
-test('pricing.html: 年額タブでもTeamボタンは「Teamにする」のままで、disabled/準備中表示にはならない', () => {
+test('pricing.html: 年額タブでもCreator Proのボタンは「購入する」で、disabled/準備中表示にはならない', () => {
   const articles = loadRenderPlans({ billing: 'annual', campaignActive: true });
-  assert.match(articles.team, /<button class="btn" data-plan="team">Teamにする<\/button>/);
+  assert.match(articles.team, /<h2 class="name">Creator Pro<\/h2>/);
+  assert.match(articles.team, /<button class="btn" data-plan="team">購入する<\/button>/);
   assert.doesNotMatch(articles.team, /disabled/);
   assert.doesNotMatch(articles.team, /準備中/);
 });
