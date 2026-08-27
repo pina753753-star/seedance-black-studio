@@ -4,7 +4,7 @@
   <script>
     (function(){
       if(location.hostname === 'pina753753-star.github.io'){
-        var path = location.pathname.replace('/seedance-black-studio','') || '/en/login.html';
+        var path = location.pathname.replace('/seedance-black-studio','') || '/login-en.html';
         location.replace('https://flowvid-studio.vercel.app' + path + location.search + location.hash);
       }
     })();
@@ -32,8 +32,8 @@
 <body>
   <main class="wrap">
     <header class="top">
-      <a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a>
-      <a class="back" href="./index.html">Back to home</a>
+      <a class="brand" href="./index-en.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a>
+      <a class="back" href="./index-en.html">Back to home</a>
     </header>
     <section class="layout">
       <div class="hero"><p>LOGIN</p><h1>Log in to start creating.</h1></div>
@@ -63,14 +63,14 @@
           <button class="primary" id="submitBtn">Log in</button>
           <div class="message" id="message"></div>
         </form>
-        <p class="note">By signing up, you agree to the <a href="../terms.html">Terms of Service</a> and <a href="../privacy.html">Privacy Policy</a>. These legal pages are currently provided in Japanese.</p>
+        <p class="note">By signing up, you agree to the <a href="./terms.html">Terms of Service</a> and <a href="./privacy.html">Privacy Policy</a>. These legal pages are currently provided in Japanese.</p>
       </div>
     </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="../auth-config.js?v=4a1f0c1"></script>
-  <script src="../auth-guard.js?v=1"></script>
+  <script src="./auth-config.js?v=4a1f0c1"></script>
+  <script src="./auth-guard.js?v=1"></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=flowvidTurnstileReady&amp;render=explicit" defer></script>
   <script>
     let mode='login';
@@ -242,7 +242,7 @@
         if(error||!data?.session)return;
         const guard=window.FlowVidAuthGuard;
         const user=guard?await guard.requireConfirmedUser(client,{redirect:false}):null;
-        if(user)location.replace('../profile.html');
+        if(user)location.replace('./profile.html');
       }).catch(()=>{});
     }
 
@@ -324,7 +324,7 @@
         const confirmedUser=await guard.requireConfirmedUser(client);
         if(!confirmedUser)return;
       }
-      location.href='../profile.html';
+      location.href='./profile.html';
     };
   </script>
 </body>
