@@ -608,3 +608,17 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - Standard/Premium/Ultimate/Creator Proの価格・credits・購入ボタン・Checkout処理は変更していない。
 - 無料登録や動画生成側の機能は変更しておらず、料金ページ上のFreeカード表示だけを削除。
 - 対象テスト46/46件成功。全体384件中382件成功。失敗2件は既知の`tests/generation-control.test.js`(`api/storyboard-prompt.js`関連)で今回の変更対象外。
+
+## 対応: Seedance 2.5・720p生成のcompleted-no-url-timeout事象と、720pのWaveSpeed振り分け(2026-08-27〜28)
+- 事象: 2026年8月27〜28日、Seedance 2.5・720p生成が2件、生成完了後に動画URLが取得できず`completed-no-url-timeout`で失敗した(Supabase `generation_tasks`テーブルで実測確認、タスクID`1d413dd7-e4de-4625-8b0a-a11b9719480e`・`be16fef0-bf5c-4287-b6c3-46abb898d571`、いずれも同一ユーザー)。ユーザーへは550クレジット×2を自動返金済みであることを`credit_transactions`テーブルで実測確認済み。
+- OpenRouterへの実費$13.88については、ユーザー側から回収不可と判断・確定した旨の報告を受けたが、Claude Code側ではOpenRouterの請求画面・APIを直接確認できていないため、この金額自体は確認できません。
+- 原因: 2026年8月21日のcommit(Seedance 2.5・1080pのWaveSpeed対応、PR #184)で、`api/_lib/seedance-start.js`のprovider振り分け条件が`model === 'bytedance/seedance-2.5' && resolution === '1080p'`のままだったため、720p・480pは引き続きOpenRouterへ送られる設定になっていた。
+- 対応(PR #213、2026-08-28):
+  - `api/_lib/seedance-start.js`のprovider振り分け条件を`resolution === '1080p' || resolution === '720p'`に変更し、Seedance 2.5・720pをWaveSpeedへ送るようにした。
+  - 参照音源ガードの判定基準を`provider === 'wavespeed'`から`resolution === '1080p'`へ変更し、振り分け変更に伴う参照音源対象の意図しない拡大(720pでも通ってしまう状態)を防止。既存仕様(1080p限定)を維持。
+  - `generate-prod.html`で、Seedance 2.5選択時に解像度セレクトの480pを非活性・非表示化(WaveSpeed Turboモデルが480p非対応のため)。バックエンドの480p(OpenRouter)経路自体は変更していない。
+  - 全384件中337件成功、失敗6件は本変更前から存在する既知の失敗で変更前後同一であることを確認済み。実際の動画生成・追加課金は行っていない。
+  - 2026-08-28、`main`へマージ(マージコミット`b4d4abab500be2254e4688e0538925a7374ee99a`)、Vercel Production Deployment(`dpl_BFxmQcnE96z33XsgVhS68nwLNSVQ`)が`READY`であることを確認済み。GitHub main上のファイル内容を直接取得し、振り分け条件が意図通りであることをコードそのもので確認済み。
+- 再発監視(PR #214、2026-08-28): `docs/operations/DAILY-OPERATIONS-CHECKLIST.md`の「2. 管理画面」セクションに、`completed-no-url-timeout`再発確認用のチェック項目とSupabase確認用SQL、`api_provider`列による新旧事象の見分け方を追記。マージコミット`e87b3f3294bfc761e634d490cf3eccfac12a801b`。
+  - 追記後、過去7日分のデータで再確認したところ、該当するのは上記の既存2件(いずれも`api_provider = 'openrouter'`、PR #213適用前に発生)のみで、適用後の新規発生は確認できなかった(2026-08-28時点)。
+- 未対応・今後の検討事項: クレジット返金とAPI課金(OpenRouter・WaveSpeed等)のズレを自動検知する仕組み(いわゆる「火災報知器」的な監視)は、現時点で確認できる範囲では作られていない。
