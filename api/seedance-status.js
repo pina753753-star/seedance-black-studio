@@ -380,7 +380,7 @@ async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
   // Find the task — only eligible if still in a non-terminal state
   const { data: task } = await db
     .from('generation_tasks')
-    .select('id')
+    .select('id,api_provider,api_task_id')
     .eq('api_task_id', jobId)
     .in('status', ['queued', 'processing'])
     .order('created_at', { ascending: false })
@@ -396,11 +396,117 @@ async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
     console.error('[seedance-status] atomic refund failed:', error?.message || data?.code || 'unknown', 'taskId:', task.id);
     return { confirmed: false, refunded: false };
   }
+
+  // Best-effort: record the provider's actual per-generation cost after the
+  // refund is confirmed. This is purely informational (generation_tasks.
+  // actual_cost_usd/actual_cost_checked_at, added by migration
+  // 20260828020000) and must never affect the refund result above — any
+  // failure here is logged and swallowed.
+  try {
+    const actualCost = await fetchActualProviderCost({
+      provider: task.api_provider,
+      providerJobId: task.api_task_id
+    });
+    const { error: costUpdateError } = await db
+      .from('generation_tasks')
+      .update({ actual_cost_usd: actualCost, actual_cost_checked_at: new Date().toISOString() })
+      .eq('id', task.id);
+    if (costUpdateError) {
+      console.error('[seedance-status] actual cost update failed (non-fatal):', costUpdateError.message, 'taskId:', task.id);
+    }
+  } catch (costLookupError) {
+    console.error('[seedance-status] actual cost lookup failed (non-fatal):', costLookupError?.message, 'taskId:', task.id);
+  }
+
   return {
     confirmed: ['refunded', 'already_refunded', 'no_charge_found'].includes(data.code),
     refunded: ['refunded', 'already_refunded'].includes(data.code),
     code: data.code
   };
+}
+
+const ACTUAL_COST_FETCH_TIMEOUT_MS = 5000;
+
+// Runs fetch() with a hard timeout via AbortController. Returns the Response
+// on success; throws (caught by the caller) on network error, non-2xx is
+// still returned as a Response and handled by the caller as usual, and a
+// timeout raises AbortError just like any other fetch failure — the caller's
+// existing try/catch already treats all of these as "could not get a cost".
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Fetches the provider's actual per-generation cost (USD) for a failed task,
+// for record-keeping only (generation_tasks.actual_cost_usd). Never throws;
+// returns null when the provider, job id, or API key is missing, when the
+// provider request/parsing fails, or when the request does not complete
+// within ACTUAL_COST_FETCH_TIMEOUT_MS. This is a best-effort side lookup and
+// must never block or fail the refund it runs alongside — a slow or hanging
+// provider billing API only delays the caller by up to
+// ACTUAL_COST_FETCH_TIMEOUT_MS, never indefinitely. Confirmed 2026-08-28
+// against real OpenRouter data: response shape is { data: { total_cost, ... } }.
+async function fetchActualProviderCost({ provider, providerJobId }) {
+  if (!providerJobId) return null;
+
+  if (provider === 'openrouter') {
+    const apiKey = process.env.OPENROUTER_API_KEY || '';
+    if (!apiKey) return null;
+    try {
+      const res = await fetchWithTimeout(
+        `https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(providerJobId)}`,
+        { headers: { Authorization: `Bearer ${apiKey}` } },
+        ACTUAL_COST_FETCH_TIMEOUT_MS
+      );
+      if (!res.ok) return null;
+      const json = await res.json().catch(() => null);
+      const cost = json?.data?.total_cost;
+      return typeof cost === 'number' ? cost : null;
+    } catch (_) {
+      // Includes AbortError from the timeout above; treated the same as any
+      // other lookup failure — return null, refund is unaffected.
+      return null;
+    }
+  }
+
+  if (provider === 'wavespeed') {
+    // NOT YET CONFIRMED: the actual response shape of
+    // POST /api/v3/billings/search (in particular where the per-prediction
+    // `price` field lives) has not been verified against a real WaveSpeed
+    // response as of 2026-08-28. The field path below (`json.data[0].price`)
+    // is a best guess based on the OpenRouter shape and must be verified
+    // before it can be trusted; until then this will likely return null
+    // even when a cost is available.
+    const apiKey = process.env.WAVESPEED_API_KEY || '';
+    if (!apiKey) return null;
+    try {
+      const res = await fetchWithTimeout(
+        'https://api.wavespeed.ai/api/v3/billings/search',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prediction_uuids: [providerJobId] })
+        },
+        ACTUAL_COST_FETCH_TIMEOUT_MS
+      );
+      if (!res.ok) return null;
+      const json = await res.json().catch(() => null);
+      const row = Array.isArray(json?.data) ? json.data[0] : null;
+      const price = row?.price;
+      return typeof price === 'number' ? price : null;
+    } catch (_) {
+      // Includes AbortError from the timeout above; treated the same as any
+      // other lookup failure — return null, refund is unaffected.
+      return null;
+    }
+  }
+
+  return null;
 }
 
 // ---- result-wait grace period helpers ----
