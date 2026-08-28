@@ -427,16 +427,41 @@ async function processRefundIfNeeded(db, jobId, jobStatus, errorMessage) {
 
 const ACTUAL_COST_FETCH_TIMEOUT_MS = 5000;
 
-// Runs fetch() with a hard timeout via AbortController. Returns the Response
-// on success; throws (caught by the caller) on network error, non-2xx is
-// still returned as a Response and handled by the caller as usual, and a
-// timeout raises AbortError just like any other fetch failure — the caller's
-// existing try/catch already treats all of these as "could not get a cost".
-async function fetchWithTimeout(url, options, timeoutMs) {
+// Runs fetch(url) and res.json() as a single unit, guaranteed to settle
+// within timeoutMs of being called — covering BOTH connection/header receipt
+// AND response-body parsing, not just the initial fetch() call. Two
+// independent mechanisms enforce this:
+//   1. An AbortController whose signal is passed to fetch(); aborting cancels
+//      an in-flight request or in-progress body read.
+//   2. A hard backstop timer that resolves this function with null at
+//      timeoutMs regardless of whether the abort above actually interrupted
+//      the underlying request — so even a runtime/library that does not
+//      propagate abort to body consumption cannot make this run longer than
+//      timeoutMs.
+// Resolves with the parsed JSON on a 2xx response, or null on any timeout,
+// network error, non-2xx status, or JSON parse failure. Never throws.
+async function fetchJsonWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let resolveBackstop;
+  const backstop = new Promise((resolve) => { resolveBackstop = resolve; });
+  const timer = setTimeout(() => {
+    controller.abort();
+    resolveBackstop(null);
+  }, timeoutMs);
+
+  const run = (async () => {
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      if (!res.ok) return null;
+      return await res.json().catch(() => null);
+    } catch (_) {
+      // Includes AbortError from the timeout above.
+      return null;
+    }
+  })();
+
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await Promise.race([run, backstop]);
   } finally {
     clearTimeout(timer);
   }
@@ -444,35 +469,27 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 
 // Fetches the provider's actual per-generation cost (USD) for a failed task,
 // for record-keeping only (generation_tasks.actual_cost_usd). Never throws;
-// returns null when the provider, job id, or API key is missing, when the
-// provider request/parsing fails, or when the request does not complete
-// within ACTUAL_COST_FETCH_TIMEOUT_MS. This is a best-effort side lookup and
-// must never block or fail the refund it runs alongside — a slow or hanging
-// provider billing API only delays the caller by up to
-// ACTUAL_COST_FETCH_TIMEOUT_MS, never indefinitely. Confirmed 2026-08-28
-// against real responses: OpenRouter's shape is { data: { total_cost, ... } };
-// WaveSpeed's shape is { data: { items: [ { price, ... } ] } }.
+// returns null when the provider, job id, or API key is missing, or when the
+// provider request/parsing fails. This is a best-effort side lookup and must
+// never block or fail the refund it runs alongside: fetchJsonWithTimeout
+// guarantees the whole network round trip — connection AND JSON body
+// parsing — completes within ACTUAL_COST_FETCH_TIMEOUT_MS, never
+// indefinitely. Confirmed 2026-08-28 against real responses: OpenRouter's
+// shape is { data: { total_cost, ... } }; WaveSpeed's shape is
+// { data: { items: [ { price, ... } ] } }.
 async function fetchActualProviderCost({ provider, providerJobId }) {
   if (!providerJobId) return null;
 
   if (provider === 'openrouter') {
     const apiKey = process.env.OPENROUTER_API_KEY || '';
     if (!apiKey) return null;
-    try {
-      const res = await fetchWithTimeout(
-        `https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(providerJobId)}`,
-        { headers: { Authorization: `Bearer ${apiKey}` } },
-        ACTUAL_COST_FETCH_TIMEOUT_MS
-      );
-      if (!res.ok) return null;
-      const json = await res.json().catch(() => null);
-      const cost = json?.data?.total_cost;
-      return typeof cost === 'number' ? cost : null;
-    } catch (_) {
-      // Includes AbortError from the timeout above; treated the same as any
-      // other lookup failure — return null, refund is unaffected.
-      return null;
-    }
+    const json = await fetchJsonWithTimeout(
+      `https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(providerJobId)}`,
+      { headers: { Authorization: `Bearer ${apiKey}` } },
+      ACTUAL_COST_FETCH_TIMEOUT_MS
+    );
+    const cost = json?.data?.total_cost;
+    return typeof cost === 'number' ? cost : null;
   }
 
   if (provider === 'wavespeed') {
@@ -481,26 +498,18 @@ async function fetchActualProviderCost({ provider, providerJobId }) {
     // { code: 200, data: { items: [ { billing_type, price, prediction: {...} } ] } }.
     const apiKey = process.env.WAVESPEED_API_KEY || '';
     if (!apiKey) return null;
-    try {
-      const res = await fetchWithTimeout(
-        'https://api.wavespeed.ai/api/v3/billings/search',
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prediction_uuids: [providerJobId] })
-        },
-        ACTUAL_COST_FETCH_TIMEOUT_MS
-      );
-      if (!res.ok) return null;
-      const json = await res.json().catch(() => null);
-      const row = Array.isArray(json?.data?.items) ? json.data.items[0] : null;
-      const price = row?.price;
-      return typeof price === 'number' ? price : null;
-    } catch (_) {
-      // Includes AbortError from the timeout above; treated the same as any
-      // other lookup failure — return null, refund is unaffected.
-      return null;
-    }
+    const json = await fetchJsonWithTimeout(
+      'https://api.wavespeed.ai/api/v3/billings/search',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prediction_uuids: [providerJobId] })
+      },
+      ACTUAL_COST_FETCH_TIMEOUT_MS
+    );
+    const row = Array.isArray(json?.data?.items) ? json.data.items[0] : null;
+    const price = row?.price;
+    return typeof price === 'number' ? price : null;
   }
 
   return null;
@@ -1364,5 +1373,8 @@ module.exports._reconcileHelpers = {
   processRefundIfNeeded,
   recordWatermarkWait,
   isResultWaitExpired,
-  validWatermarkUrl
+  validWatermarkUrl,
+  fetchJsonWithTimeout,
+  fetchActualProviderCost,
+  ACTUAL_COST_FETCH_TIMEOUT_MS
 };

@@ -6,6 +6,7 @@ const Module = require('node:module');
 
 process.env.CRON_SECRET = 'test-cron-secret';
 process.env.WAVESPEED_API_KEY = 'test-wavespeed-key';
+process.env.OPENROUTER_API_KEY = 'test-openrouter-key';
 
 const originalLoad = Module._load;
 Module._load = function(request, parent, isMain) {
@@ -24,7 +25,10 @@ try {
 }
 
 const { buildWaveSpeedPayload } = startHandler._test;
-const { normalizeStatus, isCompletedStatus, isFailedStatus, findVideoUrl } = statusHandler._reconcileHelpers;
+const {
+  normalizeStatus, isCompletedStatus, isFailedStatus, findVideoUrl,
+  fetchJsonWithTimeout, fetchActualProviderCost, ACTUAL_COST_FETCH_TIMEOUT_MS
+} = statusHandler._reconcileHelpers;
 
 function response(status, body) {
   return {
@@ -133,4 +137,110 @@ test('WaveSpeed cron rejects missing or incorrect CRON_SECRET', () => {
   assert.equal(reconcileHandler._test.authenticate({ headers: {} }), false);
   assert.equal(reconcileHandler._test.authenticate({ headers: { authorization: 'Bearer wrong' } }), false);
   assert.equal(reconcileHandler._test.authenticate({ headers: { authorization: 'Bearer test-cron-secret' } }), true);
+});
+
+// ---- fetchJsonWithTimeout / fetchActualProviderCost (actual-cost recording on refund) ----
+
+test('fetchJsonWithTimeout resolves with parsed JSON when the response completes quickly', async () => {
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = async () => ({ ok: true, json: async () => ({ hello: 'world' }) });
+    const result = await fetchJsonWithTimeout('https://example.invalid', {}, 1000);
+    assert.deepEqual(result, { hello: 'world' });
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test('fetchJsonWithTimeout returns null for a non-2xx response', async () => {
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = async () => ({ ok: false, status: 500, json: async () => ({ should: 'not be read' }) });
+    const result = await fetchJsonWithTimeout('https://example.invalid', {}, 1000);
+    assert.equal(result, null);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test('fetchJsonWithTimeout is bounded by timeoutMs even when fetch() itself never resolves (connection stage hangs)', async () => {
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = () => new Promise(() => {}); // never settles — simulates a hung connection
+    const start = Date.now();
+    const result = await fetchJsonWithTimeout('https://example.invalid', {}, 150);
+    const elapsed = Date.now() - start;
+    assert.equal(result, null);
+    assert.ok(elapsed < 500, `expected timeout-bounded resolution well under 500ms, took ${elapsed}ms`);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test('fetchJsonWithTimeout is bounded by timeoutMs even when res.json() never resolves (body-read stage hangs) — this is the case fetch()-only timeouts miss', async () => {
+  const previousFetch = global.fetch;
+  try {
+    // Headers arrive immediately (fetch() resolves), but the body never
+    // finishes reading — reproduces the exact bug reported by Codex review:
+    // an AbortController scoped to fetch() alone does not bound this.
+    global.fetch = async () => ({ ok: true, json: () => new Promise(() => {}) });
+    const start = Date.now();
+    const result = await fetchJsonWithTimeout('https://example.invalid', {}, 150);
+    const elapsed = Date.now() - start;
+    assert.equal(result, null);
+    assert.ok(elapsed < 500, `expected timeout-bounded resolution well under 500ms, took ${elapsed}ms`);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test('fetchActualProviderCost extracts OpenRouter total_cost from the confirmed response shape', async () => {
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = async () => ({ ok: true, json: async () => ({ data: { id: 'gen-vid-1', total_cost: 6.94323 } }) });
+    const cost = await fetchActualProviderCost({ provider: 'openrouter', providerJobId: 'gen-vid-1' });
+    assert.equal(cost, 6.94323);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test('fetchActualProviderCost extracts WaveSpeed price from the confirmed response shape (data.items[0].price)', async () => {
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        code: 200,
+        data: { items: [{ billing_type: 'deduct', price: 2.835, prediction: { uuid: 'pred-1', status: 'completed' } }] }
+      })
+    });
+    const price = await fetchActualProviderCost({ provider: 'wavespeed', providerJobId: 'pred-1' });
+    assert.equal(price, 2.835);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test('fetchActualProviderCost returns null (not a hang) when provider/job id/API key is missing', async () => {
+  assert.equal(await fetchActualProviderCost({ provider: 'openrouter', providerJobId: '' }), null);
+  assert.equal(await fetchActualProviderCost({ provider: 'unknown-provider', providerJobId: 'x' }), null);
+});
+
+test('fetchActualProviderCost end-to-end: resolves null within ACTUAL_COST_FETCH_TIMEOUT_MS (5s) even when the provider response body never finishes, proving the refund path is never blocked indefinitely', async () => {
+  const previousFetch = global.fetch;
+  try {
+    assert.equal(ACTUAL_COST_FETCH_TIMEOUT_MS, 5000);
+    global.fetch = async () => ({ ok: true, json: () => new Promise(() => {}) });
+    const start = Date.now();
+    const price = await fetchActualProviderCost({ provider: 'wavespeed', providerJobId: 'pred-1' });
+    const elapsed = Date.now() - start;
+    assert.equal(price, null);
+    // Must actually reach (not short-circuit before) the timeout, and must
+    // never exceed it by more than a small scheduling margin.
+    assert.ok(elapsed >= ACTUAL_COST_FETCH_TIMEOUT_MS - 50, `expected to wait close to the full timeout, took ${elapsed}ms`);
+    assert.ok(elapsed < ACTUAL_COST_FETCH_TIMEOUT_MS + 500, `expected total time to stay bounded near the timeout, took ${elapsed}ms`);
+  } finally {
+    global.fetch = previousFetch;
+  }
 });
