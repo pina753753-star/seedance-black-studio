@@ -622,3 +622,16 @@ Supabase本番プロジェクト(`jflpjsdjmlkmkqfahxwy`, ap-northeast-1, ACTIVE_
 - 再発監視(PR #214、2026-08-28): `docs/operations/DAILY-OPERATIONS-CHECKLIST.md`の「2. 管理画面」セクションに、`completed-no-url-timeout`再発確認用のチェック項目とSupabase確認用SQL、`api_provider`列による新旧事象の見分け方を追記。マージコミット`e87b3f3294bfc761e634d490cf3eccfac12a801b`。
   - 追記後、過去7日分のデータで再確認したところ、該当するのは上記の既存2件(いずれも`api_provider = 'openrouter'`、PR #213適用前に発生)のみで、適用後の新規発生は確認できなかった(2026-08-28時点)。
 - 未対応・今後の検討事項: クレジット返金とAPI課金(OpenRouter・WaveSpeed等)のズレを自動検知する仕組み(いわゆる「火災報知器」的な監視)は、現時点で確認できる範囲では作られていない。
+
+## 完了: Seedance 2.5・720p WaveSpeed振り分けの本番実機確認、実費記録処理の追加とタイムアウト修正(2026-08-28)
+- 本番実機確認: PR #213〜#219の一連の対応後、本番環境でユーザーがSeedance 2.5・720pの実際の動画生成を行い、正常に生成が完了し動画がユーザーの生成履歴に届いたことをユーザーが確認。Supabase実データでも裏付け済み: `generation_tasks`テーブルに`id: 6e899be1-271a-4c8a-8cdf-fa33a3527c5c`(model: `bytedance/seedance-2.5`、resolution: `720p`、api_provider: `wavespeed`、status: `completed`、created_at: `2026-08-28 05:55:27+00`、有効な`output_url`あり)を実測確認した。これにより、PR #213で修正したルーティング変更(720p→WaveSpeed)が本番で実際に機能していることが、コードレビュー・自動テストに加えて実運用でも確認できた。
+- 実費記録処理の追加(PR #217、2026-08-28): `api/seedance-status.js`の`processRefundIfNeeded()`に、返金確定後にOpenRouter/WaveSpeedの生成1件単位の実費を取得し`generation_tasks.actual_cost_usd`/`actual_cost_checked_at`(PR #216で追加済みの列)へ記録する処理を追加。OpenRouterは`GET /api/v1/generation?id={jobId}`の`data.total_cost`、WaveSpeedは`POST /api/v3/billings/search`の`data.items[0].price`(PR #218でパスを`data[0].price`から実機確認済みの`data.items[0].price`へ修正)を使用。実費取得・DB更新は返金処理本体の戻り値に影響しないtry/catch設計。
+- タイムアウトの完全化(PR #219、2026-08-28): Codexによる独立レビューで、実費取得処理のタイムアウト(`AbortController`)が`fetch()`の通信確立部分にしか効いておらず、その後の`res.json()`によるレスポンス本文の読み込みには効いていないという不備が指摘された(WaveSpeedのreconcileは最大5件を直列処理するため、最悪ケースで返金処理全体が理論上25秒以上ブロックされ得る状態だった)。`fetchWithTimeout()`を`fetchJsonWithTimeout()`へ置き換え、AbortControllerによる中断と、`Promise.race`による無条件のハードなバックストップタイマーの二重の仕組みで、「fetch()から`res.json()`完了まで、合計で必ずタイムアウト時間(5秒)以内に完了する(できなければnullを返す)」ことを保証する設計に修正。テスト(`tests/seedance-25-wavespeed-runtime.test.js`に8件追加)で、`res.json()`が永久にハングする状況を再現したうえで実際に約5秒で`null`を返すことを実測確認した。Codexによる再レビューでマージ推奨の判定を得て、2026-08-28にマージ(マージコミット`a13b527810c6e2773fab8dac710a7cc2b44dae20`)。
+- テスト結果: 最終状態で`node --test tests/*.test.js`351件中346件成功。失敗5件は本変更前から存在する既知の失敗で、変更前後で同一のテスト名であることを確認済み。
+- 未対応・今後の検討事項(Codexレビュー指摘、いずれも未修正):
+  1. `generation_tasks.actual_cost_usd`へのDB更新処理自体にはタイムアウトが設定されていない(実費取得側の`fetchJsonWithTimeout`にはタイムアウトがあるが、その後のSupabase `update`呼び出しは対象外)。
+  2. OpenRouterへ渡している生成ID(`api_task_id`)が、実費取得API(`GET /api/v1/generation`)が想定するID形式と一致しているかは、実際に一致した実費取得が成功したケースでの確認ができておらず未検証。
+  3. WaveSpeedの実費取得時、レスポンスの`items`配列について`billing_type`や対象の`prediction` UUIDが該当タスクのものと一致しているかの確認をせず、配列の先頭要素を無条件に採用している。
+  4. 同一タスクに対して`processRefundIfNeeded()`が複数回呼ばれるケース(既存の冪等設計上あり得る)で、後続の実費取得が先行の結果を`actual_cost_usd`ごと`null`で上書きしてしまう可能性がある(同時実行時の後勝ち)。
+  5. 実費が一定額を超えた場合の自動通知(Slack等)は未実装。
+- 確認できないこと: 上記1〜5の各項目が実際に本番で問題を起こした事例は、現時点では確認できない(発生していないのか、単に観測できていないだけかは区別できない)。対応するかどうか、対応する場合の優先順位は別途判断が必要。
