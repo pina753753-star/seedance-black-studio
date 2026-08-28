@@ -335,10 +335,10 @@ module.exports = async function handler(req, res) {
       ok: true,
       endpoint: '/api/seedance-start',
       method: 'POST',
-      provider: 'openrouter (480p/720p) or wavespeed (Seedance 2.5 1080p)',
+      provider: 'openrouter (480p, or non-2.5 models) or wavespeed (Seedance 2.5 720p/1080p)',
       model: DEFAULT_MODEL,
       note: 'POST only. Authorization: Bearer <supabase-jwt> required.',
-      requiredEnv: 'OPENROUTER_API_KEY and WAVESPEED_API_KEY for Seedance 2.5 1080p'
+      requiredEnv: 'OPENROUTER_API_KEY and WAVESPEED_API_KEY for Seedance 2.5 720p/1080p'
     });
   }
 
@@ -404,7 +404,7 @@ module.exports = async function handler(req, res) {
       }
       generationPlan = entitlement.plan;
     }
-    const provider = model === 'bytedance/seedance-2.5' && resolution === '1080p'
+    const provider = model === 'bytedance/seedance-2.5' && (resolution === '1080p' || resolution === '720p')
       ? 'wavespeed'
       : 'openrouter';
     const apiKey = provider === 'wavespeed'
@@ -422,7 +422,7 @@ module.exports = async function handler(req, res) {
     if (!normalizedAudio.ok) {
       return res.status(400).json({ ok: false, error: normalizedAudio.error, message: normalizedAudio.message });
     }
-    if (normalizedAudio.paths.length && (provider !== 'wavespeed' || mode === 'image_to_video')) {
+    if (normalizedAudio.paths.length && (resolution !== '1080p' || mode === 'image_to_video')) {
       return res.status(400).json({
         ok: false,
         error: 'reference_audio_not_supported',
@@ -677,8 +677,8 @@ module.exports = async function handler(req, res) {
     const referenceUrl = String(body.reference_url || '').trim();
     const referenceUrls = imageObjects(body.reference_urls || body.referenceUrls || []);
 
-    // Keep the existing OpenRouter request shape for 480p/720p. Seedance 2.5
-    // at 1080p uses WaveSpeed's dedicated Turbo request shape.
+    // Keep the existing OpenRouter request shape for 480p and non-2.5 models.
+    // Seedance 2.5 at 720p/1080p uses WaveSpeed's dedicated Turbo request shape.
     const payload = provider === 'wavespeed'
       ? buildWaveSpeedPayload({
           providerPrompt,
@@ -756,8 +756,8 @@ module.exports = async function handler(req, res) {
     }
 
     // reserve_generation_task/deduct_generation_credits_atomic initially store
-    // openrouter. Switch only the 1080p task before any WaveSpeed request so the
-    // OpenRouter reconciler can never claim it.
+    // openrouter. Switch only the WaveSpeed-routed task (Seedance 2.5 at 720p/1080p)
+    // before any WaveSpeed request so the OpenRouter reconciler can never claim it.
     if (provider === 'wavespeed') {
       const { data: providerRows, error: providerError } = await db.from('generation_tasks')
         .update({ api_provider: 'wavespeed', updated_at: new Date().toISOString() })

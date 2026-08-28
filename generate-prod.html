@@ -338,7 +338,7 @@ function ensureGenerationModelOptions(){
 function syncSelectModelCapabilities(modelId,durationId,resolutionId,aspectId){
   const is25=modelId===SEEDANCE_25_MODEL;
   const durationEl=$(durationId);if(durationEl){const current=Number(durationEl.value);const allowed=is25?Array.from({length:27},(_,i)=>i+4):[5,8,10,15];durationEl.replaceChildren(...allowed.map(sec=>{const option=document.createElement('option');option.value=String(sec);option.textContent=sec+'秒';return option}));durationEl.value=String(allowed.includes(current)?current:5)}
-  const resolutionEl=$(resolutionId);if(resolutionEl){const opt1080=Array.from(resolutionEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=false}
+  const resolutionEl=$(resolutionId);if(resolutionEl){const opt1080=Array.from(resolutionEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=false;const opt480=Array.from(resolutionEl.options).find(o=>o.value==='480p');if(opt480){opt480.disabled=is25;opt480.hidden=is25}if(is25&&resolutionEl.value==='480p')resolutionEl.value='720p'}
   const aspectEl=$(aspectId);if(aspectEl){const optWide=Array.from(aspectEl.options).find(o=>o.value==='21:9');if(optWide){optWide.disabled=!is25;optWide.hidden=!is25}if(!is25&&aspectEl.value==='21:9')aspectEl.value='16:9'}
 }
 function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?.value||'';return r==='1080p'&&(m==='bytedance/seedance-2.0-fast'||m==='bytedance/seedance-2.0-lite')&&mode==='reference_to_video'}

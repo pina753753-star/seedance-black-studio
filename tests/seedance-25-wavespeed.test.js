@@ -8,9 +8,9 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('1080p start routing uses the approved WaveSpeed models and key', () => {
+test('720p/1080p start routing uses the approved WaveSpeed models and key', () => {
   const source = read('api/_lib/seedance-start.js');
-  assert.match(source, /model === 'bytedance\/seedance-2\.5' && resolution === '1080p'/);
+  assert.match(source, /model === 'bytedance\/seedance-2\.5' && \(resolution === '1080p' \|\| resolution === '720p'\)/);
   assert.match(source, /process\.env\.WAVESPEED_API_KEY/);
   assert.match(source, /bytedance\/seedance-2\.5\/text-to-video-turbo/);
   assert.match(source, /bytedance\/seedance-2\.5\/image-to-video-turbo/);
