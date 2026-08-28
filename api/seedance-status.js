@@ -450,7 +450,8 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 // must never block or fail the refund it runs alongside — a slow or hanging
 // provider billing API only delays the caller by up to
 // ACTUAL_COST_FETCH_TIMEOUT_MS, never indefinitely. Confirmed 2026-08-28
-// against real OpenRouter data: response shape is { data: { total_cost, ... } }.
+// against real responses: OpenRouter's shape is { data: { total_cost, ... } };
+// WaveSpeed's shape is { data: { items: [ { price, ... } ] } }.
 async function fetchActualProviderCost({ provider, providerJobId }) {
   if (!providerJobId) return null;
 
@@ -475,13 +476,9 @@ async function fetchActualProviderCost({ provider, providerJobId }) {
   }
 
   if (provider === 'wavespeed') {
-    // NOT YET CONFIRMED: the actual response shape of
-    // POST /api/v3/billings/search (in particular where the per-prediction
-    // `price` field lives) has not been verified against a real WaveSpeed
-    // response as of 2026-08-28. The field path below (`json.data[0].price`)
-    // is a best guess based on the OpenRouter shape and must be verified
-    // before it can be trusted; until then this will likely return null
-    // even when a cost is available.
+    // Confirmed 2026-08-28 against a real WaveSpeed response: the
+    // per-prediction `price` field lives at data.items[0].price, e.g.
+    // { code: 200, data: { items: [ { billing_type, price, prediction: {...} } ] } }.
     const apiKey = process.env.WAVESPEED_API_KEY || '';
     if (!apiKey) return null;
     try {
@@ -496,7 +493,7 @@ async function fetchActualProviderCost({ provider, providerJobId }) {
       );
       if (!res.ok) return null;
       const json = await res.json().catch(() => null);
-      const row = Array.isArray(json?.data) ? json.data[0] : null;
+      const row = Array.isArray(json?.data?.items) ? json.data.items[0] : null;
       const price = row?.price;
       return typeof price === 'number' ? price : null;
     } catch (_) {
