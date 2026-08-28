@@ -25,8 +25,26 @@
 - [ ] 処理待ち・処理中のタスクが長時間止まっていない
 - [ ] 失敗タスクが急増していない
 - [ ] 最近の生成タスクに不自然な重複がない
+- [ ] Seedance 2.5・720p生成で`completed-no-url-timeout`が再発していない(下記SQL参照)
 
 `admin.html`の数字だけで原因を断定しない。必要な場合は、対象タスクIDを控えてからVercelログやSupabaseを確認する。
+
+**Seedance 2.5・720p生成の`completed-no-url-timeout`確認(PR #213関連、一時的な監視項目)**
+
+2026-08-28、Seedance 2.5・720p生成をOpenRouterからWaveSpeedへ振り分ける変更(PR #213)を本番反映した。この変更の直前に、同条件のタスクが2件`completed-no-url-timeout`で失敗し、550クレジット×2を全額返金する事象が発生している。マージ後しばらくの間、下記SQLをSupabase SQL Editorで実行し、同様の事象が再発していないか確認する。
+
+```sql
+select id, user_id, model, resolution, mode, credit_cost, status, api_provider,
+       api_task_id, error_message, created_at, updated_at, finished_at
+from generation_tasks
+where error_message ilike '%completed-no-url-timeout%'
+  and model = 'bytedance/seedance-2.5'
+  and resolution = '720p'
+  and created_at >= now() - interval '7 days'
+order by created_at desc;
+```
+
+該当行が出た場合は`api_provider`列を確認する。`wavespeed`であればPR #213適用後の新規発生、`openrouter`であればPR #213適用前(振り分け変更前)に発生した既存事象である可能性が高い。新規発生が確認できた場合は、追加のクレジット返金・修正要否を判断する前に、対象タスクの`api_task_id`・`created_at`・`finished_at`を記録してから対応を検討する。
 
 ### 3. 問い合わせと通報
 
