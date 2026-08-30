@@ -24,7 +24,7 @@ try {
   Module._load = originalLoad;
 }
 
-const { buildWaveSpeedPayload } = startHandler._test;
+const { buildWaveSpeedPayload, resolveWaveSpeedModel } = startHandler._test;
 const {
   normalizeStatus, isCompletedStatus, isFailedStatus, findVideoUrl,
   fetchJsonWithTimeout, fetchActualProviderCost, ACTUAL_COST_FETCH_TIMEOUT_MS
@@ -86,6 +86,21 @@ test('WaveSpeed image-to-video payload uses only the first image', () => {
   });
   assert.equal(payload.image, 'https://example.com/first.png');
   assert.equal('reference_images' in payload, false);
+});
+
+test('standard and Turbo resolve to different WaveSpeed endpoints for every generation mode', () => {
+  const expected = {
+    text_to_video: ['bytedance/seedance-2.5/text-to-video', 'bytedance/seedance-2.5/text-to-video-turbo'],
+    reference_to_video: ['bytedance/seedance-2.5/text-to-video', 'bytedance/seedance-2.5/text-to-video-turbo'],
+    storyboard: ['bytedance/seedance-2.5/text-to-video', 'bytedance/seedance-2.5/text-to-video-turbo'],
+    image_to_video: ['bytedance/seedance-2.5/image-to-video', 'bytedance/seedance-2.5/image-to-video-turbo']
+  };
+  for (const [mode, [standardEndpoint, turboEndpoint]] of Object.entries(expected)) {
+    assert.equal(resolveWaveSpeedModel('bytedance/seedance-2.5-standard', mode), standardEndpoint);
+    assert.equal(resolveWaveSpeedModel('bytedance/seedance-2.5', mode), turboEndpoint);
+    assert.notEqual(standardEndpoint, turboEndpoint);
+  }
+  assert.equal(resolveWaveSpeedModel('bytedance/seedance-2.0', 'text_to_video'), '');
 });
 
 test('WaveSpeed status helpers preserve only the approved terminal states', () => {

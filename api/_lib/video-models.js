@@ -69,43 +69,65 @@ const VIDEO_MODELS = Object.freeze({
     notes: Object.freeze(['Reference-to-video at 1080p is blocked by the existing production flow.'])
   }),
 
+  // Keep the legacy ID assigned to the Turbo path. Existing drafts and tasks
+  // already store this value for WaveSpeed Turbo, so reusing it for the
+  // standard endpoint would silently change their selected model.
   'bytedance/seedance-2.5': Object.freeze({
     id: 'bytedance/seedance-2.5',
-    canonicalSlug: 'bytedance/seedance-2.5-20260807',
-    displayName: 'Seedance 2.5',
-    provider: 'openrouter',
-    providersByResolution: Object.freeze({
-      '480p': 'openrouter',
-      '720p': 'openrouter',
-      '1080p': 'wavespeed'
+    canonicalSlug: 'bytedance/seedance-2.5/text-to-video-turbo',
+    displayName: 'Seedance 2.5 Turbo',
+    provider: 'wavespeed',
+    providerModels: Object.freeze({
+      text: 'bytedance/seedance-2.5/text-to-video-turbo',
+      image: 'bytedance/seedance-2.5/image-to-video-turbo'
     }),
     status: MODEL_STATUS.ACTIVE,
     enabledForGeneration: true,
-    metadataConfidence: 'live_openrouter_video_models_api_2026-08-20',
+    metadataConfidence: 'live_wavespeed_model_schema_2026-08-29',
     durations: Object.freeze({ type: 'integer_range', min: 4, max: 30, integerOnly: true }),
-    resolutions: Object.freeze(['480p', '720p', '1080p']),
+    resolutions: Object.freeze(['720p', '1080p']),
     aspectRatios: Object.freeze(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9']),
-    sizes: Object.freeze([
-      '854x480', '752x560', '640x640', '560x752', '480x854', '992x432',
-      '1280x720', '1112x834', '960x960', '834x1112', '720x1280', '1470x630'
-    ]),
     modes: Object.freeze(['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard']),
     frameImages: Object.freeze(['first_frame', 'last_frame']),
     inputReferences: Object.freeze(['image_url', 'audio_url', 'video_url']),
     inputReferenceLimit: 50,
     generateAudio: Object.freeze({ supported: true, currentDefault: true }),
     seed: Object.freeze({ supported: true }),
-    allowedPassthroughParameters: Object.freeze(['watermark', 'req_key', 'output_format']),
-    pricingSkus: Object.freeze({
-      videoTokens: '0.0000107',
-      videoTokensWithoutAudio: '0.0000107',
-      videoTokensWithVideoInput: '0.0000064'
-    }),
     pricingProfile: 'seedance_2_5_v1',
     notes: Object.freeze([
-      'Metadata was retrieved from the OpenRouter video models API on 2026-08-20.',
-      '480p and 720p use OpenRouter; 1080p uses WaveSpeed Seedance 2.5 Turbo.',
+      'WaveSpeed Turbo schema was verified on 2026-08-29.',
+      'The legacy Pina model ID is intentionally retained for existing Turbo drafts and tasks.',
       'Video and audio references are recorded as capabilities but are not exposed by the normal generation UI.',
+      'AI video editing remains a separate application flow and is not enabled by this model entry.'
+    ])
+  }),
+
+  'bytedance/seedance-2.5-standard': Object.freeze({
+    id: 'bytedance/seedance-2.5-standard',
+    canonicalSlug: 'bytedance/seedance-2.5/text-to-video',
+    displayName: 'Seedance 2.5',
+    provider: 'wavespeed',
+    providerModels: Object.freeze({
+      text: 'bytedance/seedance-2.5/text-to-video',
+      image: 'bytedance/seedance-2.5/image-to-video'
+    }),
+    status: MODEL_STATUS.ACTIVE,
+    enabledForGeneration: true,
+    metadataConfidence: 'live_wavespeed_model_schema_2026-08-29',
+    durations: Object.freeze({ type: 'integer_range', min: 4, max: 30, integerOnly: true }),
+    resolutions: Object.freeze(['480p', '720p']),
+    aspectRatios: Object.freeze(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9']),
+    modes: Object.freeze(['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard']),
+    frameImages: Object.freeze(['first_frame', 'last_frame']),
+    inputReferences: Object.freeze(['image_url', 'audio_url', 'video_url']),
+    inputReferenceLimit: 50,
+    generateAudio: Object.freeze({ supported: true, currentDefault: true }),
+    seed: Object.freeze({ supported: true }),
+    pricingProfile: 'seedance_2_5_v1',
+    notes: Object.freeze([
+      'WaveSpeed standard schema was verified on 2026-08-29.',
+      'This ID is separate from the legacy Turbo ID so tasks and history never mix the two variants.',
+      'Pina limits the standard variant to 480p/720p until separate 1080p pricing is approved.',
       'AI video editing remains a separate application flow and is not enabled by this model entry.'
     ])
   }),

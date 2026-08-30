@@ -1,6 +1,9 @@
 'use strict';
 
-const SEEDANCE_25_MODEL = 'bytedance/seedance-2.5';
+const SEEDANCE_25_MODELS = new Set([
+  'bytedance/seedance-2.5',
+  'bytedance/seedance-2.5-standard'
+]);
 const SEEDANCE_25_AUDIO_GUARD_MARKER = '[Pina Studio audio requirements]';
 const SEEDANCE_25_AUDIO_GUARD = `${SEEDANCE_25_AUDIO_GUARD_MARKER}
 Audio must contain only the user's requested original spoken dialogue, natural ambience, and non-musical foley or sound effects. Do not add background music, songs, melodies, humming, or audio resembling any existing work. Preserve the user's exact dialogue text, speaker assignment, language, timing, and emotion.`;
@@ -20,7 +23,7 @@ Do not compose or add a different song.`;
 
 function buildProviderPrompt({ model, prompt, generateAudio = true, hasReferenceAudio = false, referenceAudioSyncMode = 'singing' }) {
   const originalPrompt = String(prompt || '').trim();
-  if (model !== SEEDANCE_25_MODEL || !generateAudio || originalPrompt.includes(SEEDANCE_25_AUDIO_GUARD_MARKER)) {
+  if (!SEEDANCE_25_MODELS.has(model) || !generateAudio || originalPrompt.includes(SEEDANCE_25_AUDIO_GUARD_MARKER)) {
     return originalPrompt;
   }
   const referenceAudioGuidance = referenceAudioSyncMode === 'rhythm'
