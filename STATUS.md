@@ -2,6 +2,25 @@
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
 
+## 2026年8月29日 作業ログ（未commit・未push・本番未反映）
+
+### Seedance 2.5通常版とTurbo版の分離
+
+- 背景: 2026年8月28日の720p障害対応で、画面表示は「Seedance 2.5」のまま、実際の720p/1080pはWaveSpeedのTurboエンドポイントへ送られる状態になっていた。通常版とTurbo版をユーザーが選べず、保存されるモデルIDでも区別できなかった。
+- 対応:
+  - 生成画面と絵コンテ画面に「Seedance 2.5」と「Seedance 2.5 Turbo」を別の選択肢として追加。
+  - 既存の内部ID `bytedance/seedance-2.5` は、保存済み下書き・生成中タスクを別モデルへ変えないためTurbo用として維持。
+  - 通常版には新しい内部ID `bytedance/seedance-2.5-standard` を割り当てた。
+  - 通常版はWaveSpeedの `text-to-video` / `image-to-video`、Turbo版は既存の `text-to-video-turbo` / `image-to-video-turbo` へ送信する。OpenRouterの通常版720pで発生したcompleted-no-url-timeout経路は再導入していない。
+  - 通常版は480p/720p、Turbo版は720p/1080pに限定。通常版1080pは別料金の承認前に開放して原価事故を起こさないようサーバー側でも拒否する。4〜30秒、Premium以上のプラン制限、参照音源の1080p限定、モデレーション、原子的な予約・控除・返金、緊急停止、ポーリング・保存処理は維持。
+  - DB変更は行わず、generation_tasks.modelへ別のモデルIDを保存することで通常版とTurbo版を分離。履歴APIはapi_providerも返し、過去のOpenRouter通常版とWaveSpeed Turboを区別して表示する。
+  - 2026年8月30日にWaveSpeed公式仕様で、通常版は480pが$0.18/秒、720pが$0.36/秒、Turbo版720pが$0.20/秒と再確認。通常版をTurbo版と同額にして原価事故を起こさないよう、既存Turbo版720pの原価比から通常版を480p 495クレジット/30秒、720p 990クレジット/30秒に設定。Turbo版は既存料金を維持。ブラウザ表示とサーバー側計算の一致をテスト済み。
+- 確認:
+  - 対象テスト41/41件成功、料金計算540組み合わせ成功、関連JavaScriptとgenerate-prod.html内インラインスクリプトの構文検査成功、git diff --check成功。
+  - 全体テストの失敗5件は変更前HEADでも同じ5件が失敗することを別worktreeで確認。今回の変更による新規失敗は0件。
+  - 実動画生成、credits消費、本番DB書き込み、Vercel Preview/Productionへの反映は行っていない。
+  - 現在は未commit・未push。ユーザー承認待ち。
+
 ## 2026年8月15日 作業ログ
 
 ### 完了した項目

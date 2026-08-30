@@ -5,11 +5,15 @@ const { getVideoModel, isGenerationEnabledModel } = require('./video-models');
 const MIN_CREDITS = 50;
 const MAX_CREDITS = 400;
 const PRICING_SAFETY_MULTIPLIER = 1.15;
-const SEEDANCE_25_MAX_CREDITS = 600;
-const SEEDANCE_25_CREDITS_PER_SECOND = Object.freeze({
-  '480p': 245 / 30,
-  '720p': 550 / 30,
-  '1080p': 20
+const SEEDANCE_25_PRICING_BY_MODEL = Object.freeze({
+  'bytedance/seedance-2.5': Object.freeze({
+    maxCredits: 600,
+    creditsPerSecond: Object.freeze({ '720p': 550 / 30, '1080p': 20 })
+  }),
+  'bytedance/seedance-2.5-standard': Object.freeze({
+    maxCredits: 990,
+    creditsPerSecond: Object.freeze({ '480p': 495 / 30, '720p': 990 / 30 })
+  })
 });
 
 const PRICING_PROFILES = Object.freeze({
@@ -17,7 +21,7 @@ const PRICING_PROFILES = Object.freeze({
   seedance_fast_v1: Object.freeze({ modelMultiplier: 0.8, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
   seedance_lite_v1: Object.freeze({ modelMultiplier: 0.8, storyboardMultiplier: 1.0, maxCredits: MAX_CREDITS }),
   // Dedicated duration/resolution pricing is applied below for Seedance 2.5.
-  seedance_2_5_v1: Object.freeze({ modelMultiplier: 1.0, storyboardMultiplier: 1.0, maxCredits: SEEDANCE_25_MAX_CREDITS })
+  seedance_2_5_v1: Object.freeze({ modelMultiplier: 1.0, storyboardMultiplier: 1.0, maxCredits: 990 })
 });
 
 function roundUpToFive(value, maxCredits = MAX_CREDITS) {
@@ -45,10 +49,11 @@ function calculateVideoCreditCost(input) {
     throw error;
   }
 
-  if (modelId === 'bytedance/seedance-2.5') {
-    const creditsPerSecond = SEEDANCE_25_CREDITS_PER_SECOND[resolution]
-      || SEEDANCE_25_CREDITS_PER_SECOND['720p'];
-    return roundUpToFive(duration * creditsPerSecond, profile.maxCredits);
+  const seedance25Pricing = SEEDANCE_25_PRICING_BY_MODEL[modelId];
+  if (seedance25Pricing) {
+    const creditsPerSecond = seedance25Pricing.creditsPerSecond[resolution]
+      || seedance25Pricing.creditsPerSecond['720p'];
+    return roundUpToFive(duration * creditsPerSecond, seedance25Pricing.maxCredits);
   }
 
   if (mode === 'storyboard') {

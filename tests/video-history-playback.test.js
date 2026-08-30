@@ -22,8 +22,11 @@ test('履歴カードは保存済みモデルを短い名称で表示する', ()
 
   assert.match(apiSource, /model: row\.model \|\| ''/);
   assert.match(apiSource, /model: task\.model \|\| ''/);
+  assert.match(apiSource, /provider: task\.api_provider \|\| ''/);
+  assert.match(source, /provider:String\(row\?\.provider\|\|row\?\.api_provider/);
   assert.match(source, /model:String\(row\?\.model\|\|row\?\.settings\?\.model\|\|''\)\.trim\(\)/);
-  assert.match(source, /bytedance\/seedance-2\.5'\?'Seedance 2\.5'/);
+  assert.match(source, /bytedance\/seedance-2\.5-standard'\?'Seedance 2\.5'/);
+  assert.match(source, /provider==='wavespeed'\?'Seedance 2\.5 Turbo'/);
   assert.match(source, /bytedance\/seedance-2\.0-fast'\?'Seedance 2\.0 Fast'/);
-  assert.match(source, /\[modelLabel\(it\.model\),it\.aspect/);
+  assert.match(source, /\[modelLabel\(it\.model,it\.provider\),it\.aspect/);
 });

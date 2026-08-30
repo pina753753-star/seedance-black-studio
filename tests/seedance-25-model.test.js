@@ -5,28 +5,39 @@ const assert = require('node:assert/strict');
 const { ACTIVE_MODEL_IDS, getVideoModel } = require('../api/_lib/video-models');
 const { validateVideoGenerationOptions } = require('../api/_lib/video-model-validation');
 
-test('Seedance 2.5 routes only 1080p to WaveSpeed', () => {
-  const model = getVideoModel('bytedance/seedance-2.5');
-  assert.ok(model);
-  assert.equal(model.enabledForGeneration, true);
-  assert.ok(ACTIVE_MODEL_IDS.includes(model.id));
-  assert.deepEqual(model.resolutions, ['480p', '720p', '1080p']);
-  assert.deepEqual(model.providersByResolution, { '480p': 'openrouter', '720p': 'openrouter', '1080p': 'wavespeed' });
-  assert.deepEqual(model.durations, { type: 'integer_range', min: 4, max: 30, integerOnly: true });
-  assert.ok(model.aspectRatios.includes('21:9'));
-  assert.equal(model.pricingSkus.videoTokens, '0.0000107');
+test('Seedance 2.5 standard and Turbo are separate active WaveSpeed models', () => {
+  const standard = getVideoModel('bytedance/seedance-2.5-standard');
+  const turbo = getVideoModel('bytedance/seedance-2.5');
+  for (const model of [standard, turbo]) {
+    assert.ok(model);
+    assert.equal(model.enabledForGeneration, true);
+    assert.equal(model.provider, 'wavespeed');
+    assert.ok(ACTIVE_MODEL_IDS.includes(model.id));
+    assert.deepEqual(model.durations, { type: 'integer_range', min: 4, max: 30, integerOnly: true });
+    assert.ok(model.aspectRatios.includes('21:9'));
+  }
+  assert.equal(standard.displayName, 'Seedance 2.5');
+  assert.deepEqual(standard.resolutions, ['480p', '720p']);
+  assert.deepEqual(standard.providerModels, {
+    text: 'bytedance/seedance-2.5/text-to-video',
+    image: 'bytedance/seedance-2.5/image-to-video'
+  });
+  assert.equal(turbo.displayName, 'Seedance 2.5 Turbo');
+  assert.deepEqual(turbo.resolutions, ['720p', '1080p']);
+  assert.deepEqual(turbo.providerModels, {
+    text: 'bytedance/seedance-2.5/text-to-video-turbo',
+    image: 'bytedance/seedance-2.5/image-to-video-turbo'
+  });
 });
 
 test('Seedance 2.5 accepts its minimum and maximum duration', () => {
-  for (const duration of [4, 30]) {
-    const result = validateVideoGenerationOptions({
-      model: 'bytedance/seedance-2.5',
-      mode: 'reference_to_video',
-      resolution: '720p',
-      aspectRatio: '21:9',
-      duration
-    });
-    assert.equal(result.ok, true, JSON.stringify(result));
+  for (const model of ['bytedance/seedance-2.5-standard', 'bytedance/seedance-2.5']) {
+    for (const duration of [4, 30]) {
+      const result = validateVideoGenerationOptions({
+        model, mode: 'reference_to_video', resolution: '720p', aspectRatio: '21:9', duration
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
   }
 });
 
@@ -43,6 +54,28 @@ test('Seedance 2.5 accepts 1080p and rejects durations outside 4-30 seconds', ()
     assert.equal(result.ok, false);
     assert.equal(result.error, 'invalid_duration');
   }
+});
+
+test('standard accepts 480p while Turbo rejects it', () => {
+  assert.equal(validateVideoGenerationOptions({
+    model: 'bytedance/seedance-2.5-standard', resolution: '480p', duration: 5
+  }).ok, true);
+  const turbo = validateVideoGenerationOptions({
+    model: 'bytedance/seedance-2.5', resolution: '480p', duration: 5
+  });
+  assert.equal(turbo.ok, false);
+  assert.equal(turbo.error, 'invalid_resolution');
+});
+
+test('Turbo accepts 1080p while standard rejects it until separate pricing is approved', () => {
+  assert.equal(validateVideoGenerationOptions({
+    model: 'bytedance/seedance-2.5', resolution: '1080p', duration: 5
+  }).ok, true);
+  const standard = validateVideoGenerationOptions({
+    model: 'bytedance/seedance-2.5-standard', resolution: '1080p', duration: 5
+  });
+  assert.equal(standard.ok, false);
+  assert.equal(standard.error, 'invalid_resolution');
 });
 
 test('empty duration keeps the existing five-second default', () => {
@@ -65,7 +98,7 @@ test('existing Seedance 2.0 constraints and Fast 1080p reference block remain un
   }).error, 'unsupported_combination');
 });
 
-test('the public generation entry point forwards Seedance 2.5 to the core handler', async () => {
+test('the public generation entry point forwards both Seedance 2.5 variants to the core handler', async () => {
   const corePath = require.resolve('../api/_lib/seedance-start');
   const entryPath = require.resolve('../api/seedance-start-priced');
   const originalCore = require.cache[corePath];
@@ -81,7 +114,10 @@ test('the public generation entry point forwards Seedance 2.5 to the core handle
     };
     delete require.cache[entryPath];
     const handler = require(entryPath);
-    await handler({ method: 'POST', body: { model: 'bytedance/seedance-2.5', prompt: 'test' } }, {});
+    for (const model of ['bytedance/seedance-2.5-standard', 'bytedance/seedance-2.5']) {
+      await handler({ method: 'POST', body: { model, prompt: 'test' } }, {});
+      assert.equal(forwardedBody.model, model);
+    }
   } finally {
     if (originalCore) require.cache[corePath] = originalCore;
     else delete require.cache[corePath];
@@ -89,5 +125,4 @@ test('the public generation entry point forwards Seedance 2.5 to the core handle
     else delete require.cache[entryPath];
   }
 
-  assert.equal(forwardedBody.model, 'bytedance/seedance-2.5');
 });

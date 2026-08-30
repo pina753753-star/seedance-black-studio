@@ -26,6 +26,7 @@ test('browser and server credit estimates stay identical for all enabled models'
     'bytedance/seedance-2.0',
     'bytedance/seedance-2.0-fast',
     'bytedance/seedance-2.0-lite',
+    'bytedance/seedance-2.5-standard',
     'bytedance/seedance-2.5'
   ];
   const modes = ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'];

@@ -16,8 +16,19 @@ const { getSeedance25Entitlement } = require('./video-plan-entitlements.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
-const WAVESPEED_TEXT_MODEL = 'bytedance/seedance-2.5/text-to-video-turbo';
-const WAVESPEED_IMAGE_MODEL = 'bytedance/seedance-2.5/image-to-video-turbo';
+const SEEDANCE_25_TURBO_MODEL = 'bytedance/seedance-2.5';
+const SEEDANCE_25_STANDARD_MODEL = 'bytedance/seedance-2.5-standard';
+const SEEDANCE_25_MODELS = new Set([SEEDANCE_25_TURBO_MODEL, SEEDANCE_25_STANDARD_MODEL]);
+const WAVESPEED_MODELS = Object.freeze({
+  [SEEDANCE_25_TURBO_MODEL]: Object.freeze({
+    text: 'bytedance/seedance-2.5/text-to-video-turbo',
+    image: 'bytedance/seedance-2.5/image-to-video-turbo'
+  }),
+  [SEEDANCE_25_STANDARD_MODEL]: Object.freeze({
+    text: 'bytedance/seedance-2.5/text-to-video',
+    image: 'bytedance/seedance-2.5/image-to-video'
+  })
+});
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -86,6 +97,12 @@ function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRat
   else if (waveReferenceUrls.length) payload.reference_images = [...new Set(waveReferenceUrls)];
   if (referenceAudioUrls.length) payload.reference_audios = [...new Set(referenceAudioUrls)];
   return payload;
+}
+
+function resolveWaveSpeedModel(model, mode) {
+  const providerModels = WAVESPEED_MODELS[model];
+  if (!providerModels) return '';
+  return mode === 'image_to_video' ? providerModels.image : providerModels.text;
 }
 
 function extractJobId(data) {
@@ -335,10 +352,10 @@ module.exports = async function handler(req, res) {
       ok: true,
       endpoint: '/api/seedance-start',
       method: 'POST',
-      provider: 'openrouter (480p, or non-2.5 models) or wavespeed (Seedance 2.5 720p/1080p)',
+      provider: 'openrouter (Seedance 2.0) or wavespeed (Seedance 2.5 standard/Turbo)',
       model: DEFAULT_MODEL,
       note: 'POST only. Authorization: Bearer <supabase-jwt> required.',
-      requiredEnv: 'OPENROUTER_API_KEY and WAVESPEED_API_KEY for Seedance 2.5 720p/1080p'
+      requiredEnv: 'OPENROUTER_API_KEY and WAVESPEED_API_KEY for Seedance 2.5 standard/Turbo'
     });
   }
 
@@ -385,7 +402,7 @@ module.exports = async function handler(req, res) {
     const { resolution, aspectRatio, duration, mode, model } = options;
     const uiOrigin = body.ui_origin === 'storyboard' && mode === 'reference_to_video' ? 'storyboard' : '';
     let generationPlan = 'free';
-    if (model === 'bytedance/seedance-2.5') {
+    if (SEEDANCE_25_MODELS.has(model)) {
       const entitlement = await getSeedance25Entitlement(db, user.id);
       if (!entitlement.ok) {
         return res.status(503).json({
@@ -404,9 +421,7 @@ module.exports = async function handler(req, res) {
       }
       generationPlan = entitlement.plan;
     }
-    const provider = model === 'bytedance/seedance-2.5' && (resolution === '1080p' || resolution === '720p')
-      ? 'wavespeed'
-      : 'openrouter';
+    const provider = SEEDANCE_25_MODELS.has(model) ? 'wavespeed' : 'openrouter';
     const apiKey = provider === 'wavespeed'
       ? (process.env.WAVESPEED_API_KEY || '')
       : (process.env.OPENROUTER_API_KEY || '');
@@ -677,8 +692,9 @@ module.exports = async function handler(req, res) {
     const referenceUrl = String(body.reference_url || '').trim();
     const referenceUrls = imageObjects(body.reference_urls || body.referenceUrls || []);
 
-    // Keep the existing OpenRouter request shape for 480p and non-2.5 models.
-    // Seedance 2.5 at 720p/1080p uses WaveSpeed's dedicated Turbo request shape.
+    // Seedance 2.0 keeps the existing OpenRouter request shape. Both Seedance
+    // 2.5 variants use WaveSpeed's request shape, but their endpoint IDs remain
+    // separate so standard and Turbo can never be substituted implicitly.
     const payload = provider === 'wavespeed'
       ? buildWaveSpeedPayload({
           providerPrompt,
@@ -756,8 +772,8 @@ module.exports = async function handler(req, res) {
     }
 
     // reserve_generation_task/deduct_generation_credits_atomic initially store
-    // openrouter. Switch only the WaveSpeed-routed task (Seedance 2.5 at 720p/1080p)
-    // before any WaveSpeed request so the OpenRouter reconciler can never claim it.
+    // openrouter. Switch only a WaveSpeed-routed task before any provider request
+    // so the OpenRouter reconciler can never claim either Seedance 2.5 variant.
     if (provider === 'wavespeed') {
       const { data: providerRows, error: providerError } = await db.from('generation_tasks')
         .update({ api_provider: 'wavespeed', updated_at: new Date().toISOString() })
@@ -783,7 +799,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    const providerModel = mode === 'image_to_video' ? WAVESPEED_IMAGE_MODEL : WAVESPEED_TEXT_MODEL;
+    const providerModel = resolveWaveSpeedModel(model, mode);
     const providerEndpoint = provider === 'wavespeed'
       ? `${WAVESPEED_API_BASE}/${providerModel}`
       : OPENROUTER_VIDEO_ENDPOINT;
@@ -995,4 +1011,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { buildWaveSpeedPayload };
+module.exports._test = { buildWaveSpeedPayload, resolveWaveSpeedModel };

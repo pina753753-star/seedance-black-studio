@@ -88,11 +88,29 @@ assert.equal(calculateVideoCreditCost({
   duration: 30
 }), 550);
 assert.equal(calculateVideoCreditCost({
-  model: 'bytedance/seedance-2.5',
+  model: 'bytedance/seedance-2.5-standard',
   mode: 'image_to_video',
   resolution: '480p',
   duration: 30
-}), 245);
+}), 495);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5-standard',
+  mode: 'reference_to_video',
+  resolution: '720p',
+  duration: 30
+}), 990);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'reference_to_video',
+  resolution: '720p',
+  duration: 30
+}), 550);
+assert.equal(calculateVideoCreditCost({
+  model: 'bytedance/seedance-2.5',
+  mode: 'text_to_video',
+  resolution: '1080p',
+  duration: 30
+}), 600);
 assert.equal(calculateVideoCreditCost({
   model: 'bytedance/seedance-2.5',
   mode: 'text_to_video',
