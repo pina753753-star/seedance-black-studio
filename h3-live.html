@@ -21,24 +21,24 @@
     :root{
       --bg:#050505; --panel:#0b0b0d; --line:rgba(255,255,255,.10);
       --muted:rgba(255,255,255,.56); --text:#f4f6f7;
-      --cyan:#6ee7f9; --cyan-dim:rgba(110,231,249,.16); --live:#fb4d5b; --ok:#86efac;
+      --accent:#e6e9eb; --accent-dim:rgba(255,255,255,.10); --live:#3b82f6; --ok:#cdd2d5;
     }
     *{box-sizing:border-box}
     html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);
       font-family:'Noto Sans JP',ui-sans-serif,system-ui,sans-serif}
     body{display:flex;flex-direction:column;min-height:100dvh;overflow-x:hidden}
-    a{color:var(--cyan);text-decoration:none}
+    a{color:var(--accent);text-decoration:none}
 
     header.bar{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);
-      background:linear-gradient(180deg,rgba(255,255,255,.03),transparent)}
+      background:rgba(255,255,255,.03)}
     .live{display:inline-flex;align-items:center;gap:8px;font-weight:900;letter-spacing:.14em;font-size:12px;
-      border:1px solid rgba(251,77,91,.5);color:#ffd9dd;background:rgba(251,77,91,.12);
+      border:1px solid rgba(59,130,246,.5);color:#d6e4ff;background:rgba(59,130,246,.14);
       padding:6px 11px;border-radius:999px}
     .live .dot{width:8px;height:8px;border-radius:999px;background:var(--live);
-      box-shadow:0 0 0 0 rgba(251,77,91,.7);animation:pulse 1.6s infinite}
-    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(251,77,91,.6)}70%{box-shadow:0 0 0 12px rgba(251,77,91,0)}100%{box-shadow:0 0 0 0 rgba(251,77,91,0)}}
+      box-shadow:0 0 0 0 rgba(59,130,246,.7);animation:pulse 1.6s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(59,130,246,.6)}70%{box-shadow:0 0 0 12px rgba(59,130,246,0)}100%{box-shadow:0 0 0 0 rgba(59,130,246,0)}}
     .wordmark{font-weight:900;letter-spacing:.22em;font-size:13px}
-    .wordmark b{color:var(--cyan)}
+    .wordmark b{color:var(--accent)}
     .bar .spacer{flex:1}
     .chip{border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px;
       padding:7px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
@@ -51,7 +51,7 @@
 
     /* ---- Broadcast stage ---- */
     .stage-wrap{position:relative;display:flex;align-items:center;justify-content:center;
-      padding:22px;min-width:0;background:radial-gradient(1200px 500px at 50% -10%,rgba(110,231,249,.06),transparent)}
+      padding:22px;min-width:0;background:rgba(255,255,255,.03)}
     .stage{position:relative;width:100%;max-width:960px;aspect-ratio:16/9;border-radius:18px;overflow:hidden;
       background:#000;border:1px solid var(--line);box-shadow:0 30px 90px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.05)}
     /* contain, not cover: 16:9 text output fills the frame; a square (or any
@@ -66,16 +66,16 @@
 
     /* generating overlay */
     .gen{position:absolute;inset:0;z-index:2;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;
-      background:radial-gradient(600px 300px at 50% 40%,rgba(110,231,249,.10),rgba(0,0,0,.72))}
+      background:rgba(0,0,0,.72)}
     .gen.show{display:flex}
-    .gen .ring{width:74px;height:74px;border-radius:999px;border:3px solid rgba(110,231,249,.18);
-      border-top-color:var(--cyan);animation:spin 1s linear infinite}
+    .gen .ring{width:74px;height:74px;border-radius:999px;border:3px solid rgba(255,255,255,.18);
+      border-top-color:var(--accent);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
-    .gen .label{font-weight:900;letter-spacing:.3em;font-size:13px;color:var(--cyan)}
+    .gen .label{font-weight:900;letter-spacing:.3em;font-size:13px;color:var(--accent)}
     .gen .sub{font-size:12px;color:var(--muted)}
-    .stage.generating{border-color:rgba(110,231,249,.45);box-shadow:0 0 0 1px rgba(110,231,249,.3),0 30px 90px rgba(0,0,0,.6)}
+    .stage.generating{border-color:rgba(255,255,255,.45);box-shadow:0 0 0 1px rgba(255,255,255,.3),0 30px 90px rgba(0,0,0,.6)}
     .scan{position:absolute;left:0;right:0;height:120px;z-index:2;pointer-events:none;display:none;
-      background:linear-gradient(180deg,transparent,rgba(110,231,249,.16),transparent);animation:scan 2.6s ease-in-out infinite}
+      background:rgba(255,255,255,.12);animation:scan 2.6s ease-in-out infinite}
     .scan.show{display:block}
     @keyframes scan{0%{top:-120px}100%{top:100%}}
 
@@ -83,7 +83,7 @@
       background:rgba(0,0,0,.66);border:1px solid var(--line);border-radius:12px;padding:9px 14px;font-size:12.5px;
       color:var(--text);max-width:88%;text-align:center;display:none}
     .stage .toast.show{display:block}
-    .stage .toast.bad{border-color:rgba(251,77,91,.5);color:#ffd9dd;background:rgba(251,77,91,.14)}
+    .stage .toast.bad{border-color:rgba(255,255,255,.5);color:var(--text);background:rgba(255,255,255,.14)}
 
     /* ---- Chat panel ---- */
     .chat{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line);background:var(--panel)}
@@ -91,54 +91,54 @@
     .chat h2{margin:0;padding:14px 16px;font-size:12px;letter-spacing:.2em;color:var(--muted);border-bottom:1px solid var(--line)}
     .log{flex:1;overflow-y:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:10px;min-height:180px}
     .msg{max-width:92%;border:1px solid var(--line);border-radius:14px;padding:9px 12px;font-size:13px;line-height:1.6}
-    .msg.me{align-self:flex-end;background:var(--cyan-dim);border-color:rgba(110,231,249,.35)}
+    .msg.me{align-self:flex-end;background:var(--accent-dim);border-color:rgba(255,255,255,.22)}
     .msg.sys{align-self:flex-start;background:rgba(255,255,255,.03);color:var(--muted)}
     .msg .meta{display:block;margin-top:5px;font-size:11px;color:var(--muted)}
     .msg .st{font-weight:900;letter-spacing:.08em}
-    .msg .st.processing{color:var(--cyan)}
+    .msg .st.processing{color:var(--accent)}
     .msg .st.completed{color:var(--ok)}
-    .msg .st.failed{color:#ffb4bb}
+    .msg .st.failed{color:#cdd2d5}
     .composer{border-top:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:9px}
     .composer textarea{width:100%;resize:none;min-height:64px;max-height:160px;border:1px solid var(--line);
       background:#000;color:var(--text);border-radius:14px;padding:12px 13px;font:inherit;font-size:14px;outline:none}
-    .composer textarea:focus{border-color:rgba(110,231,249,.55)}
+    .composer textarea:focus{border-color:rgba(255,255,255,.55)}
     .composer .row{display:flex;align-items:center;gap:10px}
     .composer .hint{flex:1;font-size:11.5px;color:var(--muted);line-height:1.5}
     .send{border:0;border-radius:12px;padding:11px 16px;font-weight:900;font-size:14px;
-      background:linear-gradient(90deg,#fff,var(--cyan));color:#04121a;display:inline-flex;align-items:center;gap:8px}
+      background:#ffffff;color:#0b0b0d;display:inline-flex;align-items:center;gap:8px}
     .send:disabled{opacity:.5}
     .send .cost{display:inline-flex;align-items:center;gap:3px;font-weight:900}
-    .send .cost i{width:18px;height:18px;border-radius:999px;background:#04121a;color:#fff;display:grid;place-items:center;font-style:normal;font-size:11px}
-    .gate{display:none;padding:16px;margin:12px;border:1px solid rgba(251,77,91,.4);background:rgba(251,77,91,.10);
-      border-radius:14px;font-size:13px;line-height:1.7;color:#ffd9dd}
+    .send .cost i{width:18px;height:18px;border-radius:999px;background:#0b0b0d;color:#fff;display:grid;place-items:center;font-style:normal;font-size:11px}
+    .gate{display:none;padding:16px;margin:12px;border:1px solid rgba(255,255,255,.20);background:rgba(255,255,255,.06);
+      border-radius:14px;font-size:13px;line-height:1.7;color:var(--text)}
     .gate.show{display:block}
 
     /* "AI generated" marker — always on the stage, part of the broadcast HUD */
     .ai-badge{position:absolute;bottom:14px;right:14px;z-index:3;display:inline-flex;align-items:center;gap:6px;
       font-size:10px;font-weight:900;letter-spacing:.18em;color:rgba(255,255,255,.72);
       border:1px solid var(--line);background:rgba(0,0,0,.5);padding:5px 9px;border-radius:999px;backdrop-filter:blur(2px)}
-    .ai-badge b{color:var(--cyan)}
+    .ai-badge b{color:var(--accent)}
 
     /* mode switch + image drop zone — same tokens as the rest of the composer */
     .modeseg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;align-self:flex-start}
     .modeseg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:700;
       padding:7px 13px;letter-spacing:.04em}
-    .modeseg button.on{background:var(--cyan-dim);color:var(--text)}
+    .modeseg button.on{background:var(--accent-dim);color:var(--text)}
     .dropzone{display:none;border:1px dashed var(--line);border-radius:14px;background:#000;
       padding:14px;text-align:center;font-size:12px;color:var(--muted);line-height:1.6;cursor:pointer}
     .dropzone.show{display:block}
-    .dropzone.dragover{border-color:rgba(110,231,249,.6);background:rgba(110,231,249,.06);color:var(--text)}
-    .dropzone b{color:var(--cyan)}
+    .dropzone.dragover{border-color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);color:var(--text)}
+    .dropzone b{color:var(--accent)}
     .thumb{display:none;align-items:center;gap:10px;border:1px solid var(--line);border-radius:14px;padding:8px;background:#000}
     .thumb.show{display:flex}
     .thumb img{width:56px;height:56px;object-fit:cover;border-radius:10px;flex:none;background:#111}
     .thumb .name{flex:1;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .thumb .st{font-size:11px;font-weight:900;letter-spacing:.06em}
-    .thumb .st.ready{color:var(--ok)} .thumb .st.busy{color:var(--cyan)} .thumb .st.err{color:#ffb4bb}
+    .thumb .st.ready{color:var(--ok)} .thumb .st.busy{color:var(--accent)} .thumb .st.err{color:#cdd2d5}
     .thumb button{border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);
       border-radius:999px;width:26px;height:26px;font-size:14px;line-height:1;flex:none}
     .rights{font-size:11px;color:var(--muted);line-height:1.6}
-    .rights a{color:var(--cyan)}
+    .rights a{color:var(--accent)}
     .msg .frame{display:block;margin-top:6px;max-width:150px;border-radius:10px;border:1px solid var(--line)}
   </style>
 </head>
@@ -197,7 +197,7 @@
         </div>
         <textarea id="input" maxlength="2000" placeholder="配信する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション"></textarea>
         <div class="row">
-          <div class="hint">15秒 / 768p 固定。1本 110 クレジット消費します。</div>
+          <div class="hint" id="hint">15秒 / 768p 固定。1本 110 クレジット消費します。</div>
           <button class="send" id="send" disabled>
             配信する <span class="cost"><i>✦</i>110</span>
           </button>
@@ -231,7 +231,10 @@
       mode: 'text',
       uploadId: null,
       uploadBusy: false,
-      thumbUrl: null
+      thumbUrl: null,
+      // Eligibility hint from /api/h3-live/feed. Used only to pre-disable the
+      // send button; api/h3-live/start.js still does the authoritative checks.
+      gate: { planAllowed: true, hasEnough: true, balance: null, creditCost: 110 }
     };
 
     var IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp'];
@@ -260,17 +263,56 @@
       return { res: res, data: data };
     }
 
-    // ---- balance ----
+    // ---- balance / eligibility ----
+    // The effective balance and the plan/credit gate both come from
+    // /api/h3-live/feed. The server computes the balance the same way the
+    // deduct RPC does (expired subscription / purchased pools count as zero),
+    // so what we show and gate on matches what start.js will actually charge.
+    // Read-only: nothing here writes a balance.
     async function refreshBalance(){
       try{
-        if(!client || !state.user) return;
-        var r = await client.from('credit_balances')
-          .select('free_credits,subscription_credits,purchased_credits')
-          .eq('user_id', state.user.id).maybeSingle();
-        var d = r.data || {};
-        var total = Number(d.free_credits||0) + Number(d.subscription_credits||0) + Number(d.purchased_credits||0);
-        $('balanceChip').innerHTML = '残高 <b>' + total + '</b> クレジット';
+        var out = await api('/api/h3-live/feed');
+        applyEligibility(out.data && out.data.eligibility);
       }catch(_){}
+    }
+
+    function applyEligibility(elig){
+      if(!elig || typeof elig !== 'object') return;
+      state.gate.planAllowed = elig.planAllowed !== false;
+      state.gate.hasEnough = elig.hasEnoughCredits !== false;
+      state.gate.balance = (typeof elig.balance === 'number') ? elig.balance : null;
+      if(typeof elig.creditCost === 'number' && elig.creditCost > 0) state.gate.creditCost = elig.creditCost;
+      if(state.gate.balance != null){
+        $('balanceChip').innerHTML = '残高 <b>' + state.gate.balance + '</b> クレジット';
+      }
+      // Proactive plan gate — same panel the 403 path already uses.
+      $('gate').classList.toggle('show', !state.gate.planAllowed);
+      refreshSendState();
+    }
+
+    // Why the send button is (or isn't) pressable right now.
+    function gateReason(){
+      if(!state.gate.planAllowed) return 'plan';
+      if(state.activeJobId) return 'active';
+      if(state.gate.hasEnough === false) return 'credits';
+      return '';
+    }
+
+    function refreshSendState(){
+      var reason = gateReason();
+      $('send').disabled = state.sending || reason !== '';
+      var el = $('hint');
+      if(!el) return;
+      if(reason === 'plan'){
+        el.textContent = 'H3 Live は Premium 以上のプラン（有効期間内）でご利用いただけます。';
+      }else if(reason === 'active'){
+        el.textContent = '生成中です。完了までお待ちください（同時に生成できるのは1本までです）。';
+      }else if(reason === 'credits'){
+        var b = (state.gate.balance == null) ? '確認できません' : (state.gate.balance + ' クレジット');
+        el.textContent = '残高 ' + b + ' ／ 1本 ' + state.gate.creditCost + ' クレジット必要です。';
+      }else{
+        el.textContent = '15秒 / 768p 固定。1本 ' + state.gate.creditCost + ' クレジット消費します。';
+      }
     }
 
     // ---- rendering ----
@@ -499,6 +541,9 @@
       try{
         var out = await api('/api/h3-live/feed');
         var d = out.data || {};
+        // Keep the balance chip + send-button gate fresh (plan / credits can
+        // change while the page is open).
+        applyEligibility(d.eligibility);
         // Only drive the stage from the feed when we are not actively tracking
         // a job this tab started (pollStatus owns that case).
         if(!state.activeJobId){
@@ -530,9 +575,11 @@
     }
 
     // ---- send ----
+    // `on` toggles the in-flight/composer-busy flag. The final disabled state
+    // also honours the plan / credit / one-active-job gate via refreshSendState.
     function setSendEnabled(on){
       state.sending = !on;
-      $('send').disabled = !on;
+      refreshSendState();
     }
 
     function resetImageInput(){
@@ -542,6 +589,21 @@
 
     async function send(){
       if(state.sending) return;
+
+      // Client-side pre-checks mirror the gate shown on the button. These are a
+      // UX guard only — /api/h3-live/start.js still runs the authoritative plan
+      // eligibility, balance, reserve and deduct checks server-side.
+      if(!state.gate.planAllowed){
+        $('gate').classList.add('show');
+        showToast('H3 Live は Premium 以上のプラン（有効期間内）でご利用いただけます。', true);
+        return;
+      }
+      if(state.activeJobId){ showToast('生成中の動画があります。完了後にもう一度お試しください。', true); return; }
+      if(state.gate.hasEnough === false){
+        showToast('クレジットが不足しています（残高 ' + (state.gate.balance == null ? '—' : state.gate.balance) + ' ／ 必要 ' + state.gate.creditCost + '）。', true);
+        return;
+      }
+
       var text = $('input').value.trim();
       if(!text){ $('input').focus(); return; }
       if(text.length > 2000){ showToast('指示は2000文字までです。', true); return; }
@@ -677,9 +739,10 @@
       $('thumbRemove').addEventListener('click', function(){ clearImage(); setMode('image'); });
 
       setMode('text');
-      setSendEnabled(true);
-
+      // Pull plan + effective balance before enabling the button, so an
+      // ineligible plan / short balance is reflected from the first paint.
       await refreshBalance();
+      setSendEnabled(true);
       await loadHistory();
       pollFeed();
     }
