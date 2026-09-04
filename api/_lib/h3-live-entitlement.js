@@ -11,6 +11,7 @@
 // The allow-list lives in api/_lib/h3-live-config.js (ALLOWED_PLANS) so plan
 // eligibility can be changed in one place.
 
+// 'scale' is a legacy plan (not sold, no checkout path); kept in the allow-list only to match the profiles.plan CHECK constraint and the existing Seedance 2.5 allow-list.
 const { ALLOWED_PLANS } = require('./h3-live-config.js');
 
 function hasH3LivePlanAccess(plan, subscriptionExpiresAt, nowMs = Date.now()) {
