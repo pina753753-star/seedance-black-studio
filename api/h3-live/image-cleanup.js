@@ -6,10 +6,10 @@
 // uploads (public.h3_live_image_uploads rows whose delete_after has passed).
 // Requires Authorization: Bearer <CRON_SECRET>.
 //
-// NOTE: this endpoint is NOT registered in vercel.json's `crons` (that file is
-// out of scope for the H3 Live slice). Until it is scheduled, cleanup relies on
-// the opportunistic sweep every other /api/h3-live/* endpoint runs. This
-// endpoint exists so an operator (or a future cron entry) can force a sweep.
+// NOTE: this endpoint is registered in vercel.json's `crons` (hourly at :47).
+// Between scheduled runs, cleanup also relies on the opportunistic sweep every
+// other /api/h3-live/* endpoint runs. An operator can also hit this endpoint
+// directly to force a sweep.
 
 const { createClient } = require('@supabase/supabase-js');
 const { sweepStaleUploads } = require('../_lib/h3-live-image-store.js');
