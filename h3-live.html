@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <script>
+    (function(){
+      if(location.hostname === 'pina753753-star.github.io'){
+        var path = location.pathname.replace('/seedance-black-studio','') || '/h3-live.html';
+        location.replace('https://flowvid-studio.vercel.app' + path + location.search + location.hash);
+      }
+    })();
+  </script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>H3 Live | Pina Studio</title>
+  <link rel="icon" type="image/png" href="/assets/brand/pina-icon-v2-favicon.png">
+  <link rel="apple-touch-icon" href="/assets/brand/pina-icon-v2-favicon.png">
+  <meta name="description" content="チャットで指示して数秒で動画を生成し、プレビュー画面に映す H3 Live。" />
+  <meta name="theme-color" content="#050505" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#050505; --panel:#0b0b0d; --line:rgba(255,255,255,.10);
+      --muted:rgba(255,255,255,.56); --text:#f4f6f7;
+      --accent:#e6e9eb; --accent-dim:rgba(255,255,255,.10); --live:#3b82f6; --ok:#cdd2d5;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);
+      font-family:'Noto Sans JP',ui-sans-serif,system-ui,sans-serif}
+    body{display:flex;flex-direction:column;min-height:100dvh;overflow-x:hidden}
+    a{color:var(--accent);text-decoration:none}
+
+    header.bar{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.03)}
+    .live{display:inline-flex;align-items:center;gap:8px;font-weight:900;letter-spacing:.14em;font-size:12px;
+      border:1px solid rgba(59,130,246,.5);color:#d6e4ff;background:rgba(59,130,246,.14);
+      padding:6px 11px;border-radius:999px}
+    .live .dot{width:8px;height:8px;border-radius:999px;background:var(--live);
+      box-shadow:0 0 0 0 rgba(59,130,246,.7);animation:pulse 1.6s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(59,130,246,.6)}70%{box-shadow:0 0 0 12px rgba(59,130,246,0)}100%{box-shadow:0 0 0 0 rgba(59,130,246,0)}}
+    .wordmark{font-weight:900;letter-spacing:.22em;font-size:13px}
+    .wordmark b{color:var(--accent)}
+    .bar .spacer{flex:1}
+    .chip{border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px;
+      padding:7px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
+    .chip b{color:var(--text)}
+    .bar a.back{border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px;
+      padding:7px 12px;font-size:12px;color:var(--text)}
+
+    main{flex:1;display:grid;grid-template-columns:1fr 360px;gap:0;min-height:0}
+    @media(max-width:920px){main{grid-template-columns:1fr}}
+
+    /* ---- Preview stage ---- */
+    .stage-wrap{position:relative;display:flex;align-items:center;justify-content:center;
+      padding:22px;min-width:0;background:rgba(255,255,255,.03)}
+    .stage{position:relative;width:100%;max-width:960px;aspect-ratio:16/9;border-radius:18px;overflow:hidden;
+      background:#000;border:1px solid var(--line);box-shadow:0 30px 90px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.05)}
+    /* contain, not cover: 16:9 text output fills the frame; a square (or any
+       non-16:9) image-to-video output is letterboxed on black rather than
+       cropped. The overlays below stay pinned to the .stage box either way. */
+    .stage video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
+    .stage .placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted)}
+    .stage .placeholder .big{font-weight:900;letter-spacing:.3em;font-size:15px;color:rgba(255,255,255,.7)}
+    .stage .tag{position:absolute;top:14px;left:14px;display:flex;gap:8px;align-items:center;z-index:3}
+    .stage .tag .live{font-size:11px;padding:5px 9px}
+    .stage .rec{position:absolute;top:16px;right:16px;font-size:11px;letter-spacing:.2em;color:rgba(255,255,255,.5);z-index:3}
+
+    /* generating overlay */
+    .gen{position:absolute;inset:0;z-index:2;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+      background:rgba(0,0,0,.72)}
+    .gen.show{display:flex}
+    .gen .ring{width:74px;height:74px;border-radius:999px;border:3px solid rgba(255,255,255,.18);
+      border-top-color:var(--accent);animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .gen .label{font-weight:900;letter-spacing:.3em;font-size:13px;color:var(--accent)}
+    .gen .sub{font-size:12px;color:var(--muted)}
+    .stage.generating{border-color:rgba(255,255,255,.45);box-shadow:0 0 0 1px rgba(255,255,255,.3),0 30px 90px rgba(0,0,0,.6)}
+    .scan{position:absolute;left:0;right:0;height:120px;z-index:2;pointer-events:none;display:none;
+      background:rgba(255,255,255,.12);animation:scan 2.6s ease-in-out infinite}
+    .scan.show{display:block}
+    @keyframes scan{0%{top:-120px}100%{top:100%}}
+
+    .stage .toast{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:4;
+      background:rgba(0,0,0,.66);border:1px solid var(--line);border-radius:12px;padding:9px 14px;font-size:12.5px;
+      color:var(--text);max-width:88%;text-align:center;display:none}
+    .stage .toast.show{display:block}
+    .stage .toast.bad{border-color:rgba(255,255,255,.5);color:var(--text);background:rgba(255,255,255,.14)}
+
+    /* ---- Chat panel ---- */
+    .chat{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line);background:var(--panel)}
+    @media(max-width:920px){.chat{border-left:0;border-top:1px solid var(--line)}}
+    .chat h2{margin:0;padding:14px 16px;font-size:12px;letter-spacing:.2em;color:var(--muted);border-bottom:1px solid var(--line)}
+    .log{flex:1;overflow-y:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:10px;min-height:180px}
+    .msg{max-width:92%;border:1px solid var(--line);border-radius:14px;padding:9px 12px;font-size:13px;line-height:1.6}
+    .msg.me{align-self:flex-end;background:var(--accent-dim);border-color:rgba(255,255,255,.22)}
+    .msg.sys{align-self:flex-start;background:rgba(255,255,255,.03);color:var(--muted)}
+    .msg .meta{display:block;margin-top:5px;font-size:11px;color:var(--muted)}
+    .msg .st{font-weight:900;letter-spacing:.08em}
+    .msg .st.processing{color:var(--accent)}
+    .msg .st.completed{color:var(--ok)}
+    .msg .st.failed{color:#cdd2d5}
+    .composer{border-top:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:9px}
+    .composer textarea{width:100%;resize:none;min-height:64px;max-height:160px;border:1px solid var(--line);
+      background:#000;color:var(--text);border-radius:14px;padding:12px 13px;font:inherit;font-size:14px;outline:none}
+    .composer textarea:focus{border-color:rgba(255,255,255,.55)}
+    .composer .row{display:flex;align-items:center;gap:10px}
+    .composer .hint{flex:1;font-size:11.5px;color:var(--muted);line-height:1.5}
+    .send{border:0;border-radius:12px;padding:11px 16px;font-weight:900;font-size:14px;
+      background:#ffffff;color:#0b0b0d;display:inline-flex;align-items:center;gap:8px}
+    .send:disabled{opacity:.5}
+    .send .cost{display:inline-flex;align-items:center;gap:3px;font-weight:900}
+    .send .cost i{width:18px;height:18px;border-radius:999px;background:#0b0b0d;color:#fff;display:grid;place-items:center;font-style:normal;font-size:11px}
+    .gate{display:none;padding:16px;margin:12px;border:1px solid rgba(255,255,255,.20);background:rgba(255,255,255,.06);
+      border-radius:14px;font-size:13px;line-height:1.7;color:var(--text)}
+    .gate.show{display:block}
+
+    /* "AI generated" marker — always on the stage, part of the preview HUD */
+    .ai-badge{position:absolute;bottom:14px;right:14px;z-index:3;display:inline-flex;align-items:center;gap:6px;
+      font-size:10px;font-weight:900;letter-spacing:.18em;color:rgba(255,255,255,.72);
+      border:1px solid var(--line);background:rgba(0,0,0,.5);padding:5px 9px;border-radius:999px;backdrop-filter:blur(2px)}
+    .ai-badge b{color:var(--accent)}
+
+    /* mode switch + image drop zone — same tokens as the rest of the composer */
+    .modeseg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;align-self:flex-start}
+    .modeseg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:700;
+      padding:7px 13px;letter-spacing:.04em}
+    .modeseg button.on{background:var(--accent-dim);color:var(--text)}
+    .dropzone{display:none;border:1px dashed var(--line);border-radius:14px;background:#000;
+      padding:14px;text-align:center;font-size:12px;color:var(--muted);line-height:1.6;cursor:pointer}
+    .dropzone.show{display:block}
+    .dropzone.dragover{border-color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);color:var(--text)}
+    .dropzone b{color:var(--accent)}
+    .thumb{display:none;align-items:center;gap:10px;border:1px solid var(--line);border-radius:14px;padding:8px;background:#000}
+    .thumb.show{display:flex}
+    .thumb img{width:56px;height:56px;object-fit:cover;border-radius:10px;flex:none;background:#111}
+    .thumb .name{flex:1;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .thumb .st{font-size:11px;font-weight:900;letter-spacing:.06em}
+    .thumb .st.ready{color:var(--ok)} .thumb .st.busy{color:var(--accent)} .thumb .st.err{color:#cdd2d5}
+    .thumb button{border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);
+      border-radius:999px;width:26px;height:26px;font-size:14px;line-height:1;flex:none}
+    .rights{font-size:11px;color:var(--muted);line-height:1.6}
+    .rights a{color:var(--accent)}
+    .msg .frame{display:block;margin-top:6px;max-width:150px;border-radius:10px;border:1px solid var(--line)}
+  </style>
+</head>
+<body>
+  <header class="bar">
+    <span class="live"><span class="dot"></span><span id="statusBadgeText">READY</span></span>
+    <span class="wordmark">H3&nbsp;<b>LIVE</b></span>
+    <span class="spacer"></span>
+    <span class="chip" id="balanceChip">残高 <b>–</b> クレジット</span>
+    <a class="back" href="./index.html">閉じる</a>
+  </header>
+
+  <main>
+    <section class="stage-wrap">
+      <div class="stage" id="stage">
+        <div class="tag"><span class="live"><span class="dot"></span>PREVIEW</span></div>
+        <div class="rec" id="recClock">READY</div>
+        <div class="placeholder" id="placeholder">
+          <div class="big">READY</div>
+          <div>チャットで指示を送ると、ここに生成した映像が表示されます。</div>
+        </div>
+        <video id="video" playsinline muted loop hidden></video>
+        <div class="scan" id="scan"></div>
+        <div class="gen" id="gen">
+          <div class="ring"></div>
+          <div class="label">GENERATING</div>
+          <div class="sub" id="genSub">映像を生成しています…</div>
+        </div>
+        <div class="ai-badge"><b>✦</b> AI生成</div>
+        <div class="toast" id="toast"></div>
+      </div>
+    </section>
+
+    <section class="chat">
+      <h2>生成チャット</h2>
+      <div class="gate" id="gate">
+        H3 Live は Premium 以上のプラン（有効期間内）でご利用いただけます。
+        <div style="margin-top:8px"><a href="/pricing.html#monthly">プランを見る →</a></div>
+      </div>
+      <div class="log" id="log"></div>
+      <div class="composer">
+        <div class="modeseg" id="modeSeg">
+          <button type="button" data-mode="text" class="on">テキスト</button>
+          <button type="button" data-mode="image">画像+テキスト</button>
+        </div>
+        <div class="dropzone" id="dropzone">
+          画像をドラッグ＆ドロップ、または<b>クリックして選択</b><br>
+          JPEG / PNG / WebP・20MBまで（動画の1フレーム目になります）
+        </div>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden>
+        <div class="thumb" id="thumb">
+          <img id="thumbImg" alt="">
+          <span class="name" id="thumbName"></span>
+          <span class="st" id="thumbSt"></span>
+          <button type="button" id="thumbRemove" title="画像を外す">×</button>
+        </div>
+        <textarea id="input" maxlength="2000" placeholder="生成する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション"></textarea>
+        <div class="row">
+          <div class="hint" id="hint">15秒 / 768p 固定。1本 110 クレジット消費します。</div>
+          <button class="send" id="send" disabled>
+            生成する <span class="cost"><i>✦</i>110</span>
+          </button>
+        </div>
+        <div class="rights" id="rights" style="display:none">
+          画像はご自身に使用権があるものだけをアップロードしてください。第三者の著作権・商標・肖像権・パブリシティ権を侵害する画像、実在人物を欺くような利用は禁止です。
+          規約に反するコンテンツは削除・利用停止の対象になります（<a href="./content-policy.html">コンテンツポリシー</a> ／ <a href="./help.html">報告・お問い合わせ</a>）。
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-config.js?v=4a1f0c1"></script>
+  <script src="./auth-guard.js?v=1"></script>
+  <script>
+  (function(){
+    var $ = function(id){ return document.getElementById(id); };
+    var client = (typeof window.flowvidSupabaseClient === 'function') ? window.flowvidSupabaseClient() : null;
+
+    var state = {
+      user: null,
+      activeJobId: null,
+      pendingIdemKey: null,
+      sending: false,
+      statusTimer: null,
+      feedTimer: null,
+      clockTimer: null,
+      genStartedAt: 0,
+      lastRenderedStatus: null,
+      mode: 'text',
+      uploadId: null,
+      uploadBusy: false,
+      thumbUrl: null,
+      // Eligibility hint from /api/h3-live/feed. Used only to pre-disable the
+      // send button; api/h3-live/start.js still does the authoritative checks.
+      gate: { planAllowed: true, hasEnough: true, balance: null, creditCost: 110 }
+    };
+
+    var IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+    var IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+    function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+    async function getToken(){
+      try{
+        if(!client) return '';
+        var r = await client.auth.getSession();
+        return (r && r.data && r.data.session && r.data.session.access_token) || '';
+      }catch(_){ return ''; }
+    }
+
+    async function api(path, opts){
+      opts = opts || {};
+      var token = await getToken();
+      if(!token){ location.href = './login.html'; throw new Error('no session'); }
+      var headers = Object.assign({ 'Authorization': 'Bearer ' + token }, opts.headers || {});
+      if(opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      var res = await fetch(path, { method: opts.method || 'GET', headers: headers, body: opts.body || undefined });
+      var data = null;
+      try{ data = await res.json(); }catch(_){ data = null; }
+      return { res: res, data: data };
+    }
+
+    // ---- balance / eligibility ----
+    // The effective balance and the plan/credit gate both come from
+    // /api/h3-live/feed. The server computes the balance the same way the
+    // deduct RPC does (expired subscription / purchased pools count as zero),
+    // so what we show and gate on matches what start.js will actually charge.
+    // Read-only: nothing here writes a balance.
+    async function refreshBalance(){
+      try{
+        var out = await api('/api/h3-live/feed');
+        applyEligibility(out.data && out.data.eligibility);
+      }catch(_){}
+    }
+
+    function applyEligibility(elig){
+      if(!elig || typeof elig !== 'object') return;
+      state.gate.planAllowed = elig.planAllowed !== false;
+      state.gate.hasEnough = elig.hasEnoughCredits !== false;
+      state.gate.balance = (typeof elig.balance === 'number') ? elig.balance : null;
+      if(typeof elig.creditCost === 'number' && elig.creditCost > 0) state.gate.creditCost = elig.creditCost;
+      if(state.gate.balance != null){
+        $('balanceChip').innerHTML = '残高 <b>' + state.gate.balance + '</b> クレジット';
+      }
+      // Proactive plan gate — same panel the 403 path already uses.
+      $('gate').classList.toggle('show', !state.gate.planAllowed);
+      refreshSendState();
+    }
+
+    // Why the send button is (or isn't) pressable right now.
+    function gateReason(){
+      if(!state.gate.planAllowed) return 'plan';
+      if(state.activeJobId) return 'active';
+      if(state.gate.hasEnough === false) return 'credits';
+      return '';
+    }
+
+    function refreshSendState(){
+      var reason = gateReason();
+      $('send').disabled = state.sending || reason !== '';
+      var el = $('hint');
+      if(!el) return;
+      if(reason === 'plan'){
+        el.textContent = 'H3 Live は Premium 以上のプラン（有効期間内）でご利用いただけます。';
+      }else if(reason === 'active'){
+        el.textContent = '生成中です。完了までお待ちください（同時に生成できるのは1本までです）。';
+      }else if(reason === 'credits'){
+        var b = (state.gate.balance == null) ? '確認できません' : (state.gate.balance + ' クレジット');
+        el.textContent = '残高 ' + b + ' ／ 1本 ' + state.gate.creditCost + ' クレジット必要です。';
+      }else{
+        el.textContent = '15秒 / 768p 固定。1本 ' + state.gate.creditCost + ' クレジット消費します。';
+      }
+    }
+
+    // ---- rendering ----
+    function showToast(msg, bad){
+      var t = $('toast');
+      t.textContent = msg;
+      t.className = 'toast show' + (bad ? ' bad' : '');
+      clearTimeout(t._h);
+      t._h = setTimeout(function(){ t.className = 'toast'; }, bad ? 8000 : 4500);
+    }
+
+    // Header status pill — mirrors the stage's generating / idle state.
+    // Text only; the .live class / colour / animation are left untouched.
+    function setStatusBadge(on){
+      var el = $('statusBadgeText');
+      if(el) el.textContent = on ? 'GENERATING' : 'READY';
+    }
+
+    function setGenerating(on, subText){
+      $('stage').classList.toggle('generating', !!on);
+      $('gen').classList.toggle('show', !!on);
+      $('scan').classList.toggle('show', !!on);
+      setStatusBadge(!!on);
+      if(subText) $('genSub').textContent = subText;
+      if(on){
+        $('placeholder').style.display = 'none';
+        if(!state.genStartedAt) state.genStartedAt = Date.now();
+        startClock('GENERATING');
+      }else{
+        state.genStartedAt = 0;
+      }
+    }
+
+    function startClock(label){
+      stopClock();
+      state.clockTimer = setInterval(function(){
+        var secs = state.genStartedAt ? Math.floor((Date.now() - state.genStartedAt)/1000) : 0;
+        $('recClock').textContent = label + ' ' + String(Math.floor(secs/60)).padStart(2,'0') + ':' + String(secs%60).padStart(2,'0');
+      }, 1000);
+    }
+    function stopClock(){ if(state.clockTimer){ clearInterval(state.clockTimer); state.clockTimer = null; } }
+
+    function playVideo(url){
+      setGenerating(false);
+      stopClock();
+      $('recClock').textContent = '再生中';
+      var v = $('video');
+      v.src = url;
+      v.hidden = false;
+      $('placeholder').style.display = 'none';
+      v.play().catch(function(){});
+    }
+
+    function toStandby(){
+      setGenerating(false);
+      stopClock();
+      $('recClock').textContent = 'READY';
+      var v = $('video');
+      if(!v.src){ $('placeholder').style.display = 'flex'; }
+    }
+
+    // ---- image input mode ----
+    function setThumbStatus(kind, text){
+      var st = $('thumbSt');
+      st.className = 'st ' + (kind || '');
+      st.textContent = text || '';
+    }
+
+    function clearImage(){
+      state.uploadId = null;
+      state.uploadBusy = false;
+      // Keep any object URL already handed to a chat bubble alive; just drop our
+      // reference. The browser reclaims it on unload.
+      state.thumbUrl = null;
+      $('thumb').className = 'thumb';
+      $('thumbImg').removeAttribute('src');
+      $('thumbName').textContent = '';
+      setThumbStatus('', '');
+      $('fileInput').value = '';
+    }
+
+    function setMode(mode){
+      state.mode = mode === 'image' ? 'image' : 'text';
+      var seg = $('modeSeg').querySelectorAll('button');
+      for(var i=0;i<seg.length;i++){ seg[i].classList.toggle('on', seg[i].dataset.mode === state.mode); }
+      var isImg = state.mode === 'image';
+      $('dropzone').classList.toggle('show', isImg && !state.uploadId);
+      $('rights').style.display = isImg ? 'block' : 'none';
+      $('input').placeholder = isImg
+        ? 'この画像をどう動かすか指示… 例：カメラをゆっくり引く、風で髪がなびく'
+        : '生成する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション';
+      if(!isImg) clearImage();
+    }
+
+    async function uploadImage(file){
+      if(!file) return;
+      if(IMAGE_MIME.indexOf(file.type) < 0){ showToast('JPEG / PNG / WebP の画像を選択してください。', true); return; }
+      if(file.size > IMAGE_MAX_BYTES){ showToast('画像は20MB以下にしてください。', true); return; }
+
+      clearImage();
+      state.uploadBusy = true;
+      state.thumbUrl = URL.createObjectURL(file);
+      $('thumbImg').src = state.thumbUrl;
+      $('thumbName').textContent = file.name || 'image';
+      $('thumb').className = 'thumb show';
+      $('dropzone').classList.remove('show');
+      setThumbStatus('busy', 'アップロード中');
+      setSendEnabled(false);
+
+      try{
+        var slot = await api('/api/h3-live/image-upload-url', {
+          method: 'POST',
+          body: JSON.stringify({ contentType: file.type, byteSize: file.size, filename: file.name || 'frame' })
+        });
+        var d = slot.data || {};
+        if(slot.res.status === 403){
+          $('gate').classList.add('show');
+          clearImage(); setSendEnabled(true);
+          showToast(d.message || 'このプランではご利用いただけません。', true);
+          return;
+        }
+        if(!slot.res.ok || !d.uploadId || !d.path || !d.token){
+          clearImage(); setSendEnabled(true);
+          showToast((d && (d.message || d.error)) || '画像アップロードを開始できませんでした。', true);
+          return;
+        }
+
+        var up = await client.storage
+          .from(d.bucket || 'h3-live-image-quarantine')
+          .uploadToSignedUrl(d.path, d.token, file, { contentType: file.type });
+        if(up && up.error){
+          clearImage(); setSendEnabled(true);
+          showToast('画像のアップロードに失敗しました。もう一度お試しください。', true);
+          return;
+        }
+
+        state.uploadId = d.uploadId;
+        state.uploadBusy = false;
+        setThumbStatus('ready', '準備完了');
+        setSendEnabled(true);
+      }catch(e){
+        clearImage(); setSendEnabled(true);
+        showToast('画像のアップロード中に通信エラーが発生しました。', true);
+      }
+    }
+
+    function addMsg(kind, text, opts){
+      opts = opts || {};
+      var el = document.createElement('div');
+      el.className = 'msg ' + kind;
+      if(opts.jobId) el.dataset.jobId = opts.jobId;
+      var html = esc(text);
+      if(opts.frameUrl) html += '<img class="frame" alt="" src="' + esc(opts.frameUrl) + '">';
+      html += (opts.meta ? '<span class="meta">' + opts.meta + '</span>' : '');
+      el.innerHTML = html;
+      $('log').appendChild(el);
+      $('log').scrollTop = $('log').scrollHeight;
+      return el;
+    }
+
+    function statusMeta(job){
+      var map = { queued:'受付', submitting:'送信中', processing:'生成中', completed:'完成', failed:'失敗' };
+      var label = map[job.status] || job.status;
+      var extra = '';
+      if(job.inputMode === 'image') extra += ' ・ 画像+テキスト';
+      if(job.status === 'failed' && job.refunded) extra += ' ・ クレジット返還済み';
+      return '<span class="st ' + esc(job.status) + '">' + esc(label) + '</span>' + extra;
+    }
+
+    function upsertJobMsg(job){
+      if(!job) return;
+      var el = $('log').querySelector('[data-job-id="' + job.id + '"]');
+      if(!el){
+        el = addMsg('me', job.instruction, { jobId: job.id, meta: statusMeta(job) });
+      }else{
+        var meta = el.querySelector('.meta');
+        if(meta) meta.innerHTML = statusMeta(job);
+      }
+      return el;
+    }
+
+    // ---- polling ----
+    function stopStatusPoll(){ if(state.statusTimer){ clearTimeout(state.statusTimer); state.statusTimer = null; } }
+
+    function scheduleStatusPoll(ms){
+      stopStatusPoll();
+      state.statusTimer = setTimeout(pollStatus, Math.max(1200, ms || 2000));
+    }
+
+    async function pollStatus(){
+      if(!state.activeJobId) return;
+      var jobId = state.activeJobId;
+      try{
+        var out = await api('/api/h3-live/status?jobId=' + encodeURIComponent(jobId));
+        if(out.res.status === 404){ state.activeJobId = null; toStandby(); return; }
+        var job = out.data && out.data.job;
+        if(!job){ scheduleStatusPoll(2500); return; }
+
+        upsertJobMsg(job);
+
+        if(job.status === 'processing' || job.status === 'submitting' || job.status === 'queued'){
+          setGenerating(true, job.status === 'processing' ? '映像を生成しています…' : '送信しています…');
+          scheduleStatusPoll(out.data.nextPollAfterMs || 2000);
+          return;
+        }
+        if(job.status === 'completed'){
+          state.activeJobId = null;
+          state.pendingIdemKey = null;
+          if(job.videoUrl){ playVideo(job.videoUrl); showToast('映像が完成しました。'); }
+          else { toStandby(); }
+          refreshBalance();
+          resetImageInput();
+          setSendEnabled(true);
+          return;
+        }
+        if(job.status === 'failed'){
+          state.activeJobId = null;
+          state.pendingIdemKey = null;
+          toStandby();
+          showToast('生成に失敗しました。' + (job.refunded || (out.data && out.data.refunded) ? 'クレジットは返還されました。' : ''), true);
+          refreshBalance();
+          resetImageInput();
+          setSendEnabled(true);
+          return;
+        }
+        scheduleStatusPoll(2500);
+      }catch(_){
+        scheduleStatusPoll(3000);
+      }
+    }
+
+    function stopFeedPoll(){ if(state.feedTimer){ clearTimeout(state.feedTimer); state.feedTimer = null; } }
+    async function pollFeed(){
+      try{
+        var out = await api('/api/h3-live/feed');
+        var d = out.data || {};
+        // Keep the balance chip + send-button gate fresh (plan / credits can
+        // change while the page is open).
+        applyEligibility(d.eligibility);
+        // Only drive the stage from the feed when we are not actively tracking
+        // a job this tab started (pollStatus owns that case).
+        if(!state.activeJobId){
+          if(d.activeJob && ['queued','submitting','processing'].indexOf(d.activeJob.status) >= 0){
+            state.activeJobId = d.activeJob.id;
+            upsertJobMsg(d.activeJob);
+            setGenerating(true, '映像を生成しています…');
+            setSendEnabled(false);
+            scheduleStatusPoll(1500);
+          }else if(d.onAir && d.onAir.videoUrl && $('video').src !== d.onAir.videoUrl){
+            playVideo(d.onAir.videoUrl);
+          }
+        }
+      }catch(_){}
+      stopFeedPoll();
+      state.feedTimer = setTimeout(pollFeed, 4000);
+    }
+
+    // ---- history ----
+    async function loadHistory(){
+      try{
+        var out = await api('/api/h3-live/jobs?limit=10');
+        var jobs = (out.data && out.data.jobs) || [];
+        jobs.slice().reverse().forEach(function(job){
+          upsertJobMsg(job);
+          if(job.status === 'completed' && job.videoUrl && !$('video').src){ playVideo(job.videoUrl); }
+        });
+      }catch(_){}
+    }
+
+    // ---- send ----
+    // `on` toggles the in-flight/composer-busy flag. The final disabled state
+    // also honours the plan / credit / one-active-job gate via refreshSendState.
+    function setSendEnabled(on){
+      state.sending = !on;
+      refreshSendState();
+    }
+
+    function resetImageInput(){
+      clearImage();
+      if(state.mode === 'image') setMode('image');
+    }
+
+    async function send(){
+      if(state.sending) return;
+
+      // Client-side pre-checks mirror the gate shown on the button. These are a
+      // UX guard only — /api/h3-live/start.js still runs the authoritative plan
+      // eligibility, balance, reserve and deduct checks server-side.
+      if(!state.gate.planAllowed){
+        $('gate').classList.add('show');
+        showToast('H3 Live は Premium 以上のプラン（有効期間内）でご利用いただけます。', true);
+        return;
+      }
+      if(state.activeJobId){ showToast('生成中の動画があります。完了後にもう一度お試しください。', true); return; }
+      if(state.gate.hasEnough === false){
+        showToast('クレジットが不足しています（残高 ' + (state.gate.balance == null ? '—' : state.gate.balance) + ' ／ 必要 ' + state.gate.creditCost + '）。', true);
+        return;
+      }
+
+      var text = $('input').value.trim();
+      if(!text){ $('input').focus(); return; }
+      if(text.length > 2000){ showToast('指示は2000文字までです。', true); return; }
+
+      var isImage = state.mode === 'image';
+      if(isImage && state.uploadBusy){ showToast('画像をアップロード中です。少しお待ちください。', true); return; }
+      if(isImage && !state.uploadId){ showToast('先に画像を選択してください。', true); return; }
+
+      setSendEnabled(false);
+      if(!state.pendingIdemKey){
+        state.pendingIdemKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+      }
+
+      var frameUrl = isImage ? state.thumbUrl : null;
+      var sendUploadId = isImage ? state.uploadId : null;
+      addMsg('me', text, { meta: '<span class="st submitting">送信中</span>', frameUrl: frameUrl });
+      $('input').value = '';
+      setGenerating(true, '送信しています…');
+
+      try{
+        var reqBody = isImage
+          ? { instruction: text, mode: 'image', uploadId: sendUploadId }
+          : { instruction: text };
+        var out = await api('/api/h3-live/start', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': state.pendingIdemKey },
+          body: JSON.stringify(reqBody)
+        });
+        var d = out.data || {};
+
+        if(out.res.status === 403){
+          $('gate').classList.add('show');
+          setGenerating(false); toStandby();
+          showToast(d.message || 'このプランではご利用いただけません。', true);
+          state.pendingIdemKey = null; resetImageInput(); setSendEnabled(true);
+          return;
+        }
+        if(out.res.status === 402){
+          setGenerating(false); toStandby();
+          showToast(d.message || 'クレジットが不足しています。', true);
+          state.pendingIdemKey = null; resetImageInput(); setSendEnabled(true);
+          return;
+        }
+        if(out.res.status === 429){
+          setGenerating(false); toStandby();
+          showToast(d.message || 'しばらくお待ちください。', true);
+          state.pendingIdemKey = null; resetImageInput(); setSendEnabled(true);
+          return;
+        }
+        if(!out.res.ok && !(d && d.job)){
+          setGenerating(false); toStandby();
+          showToast((d && (d.message || d.error)) || ('開始に失敗しました（' + out.res.status + '）'), true);
+          // keep the idem key only for genuine network retries; a definite
+          // server rejection gets a fresh attempt next time.
+          state.pendingIdemKey = null; resetImageInput(); setSendEnabled(true);
+          return;
+        }
+
+        var job = d.job;
+        if(job){
+          upsertJobMsg(job);
+          if(['queued','submitting','processing'].indexOf(job.status) >= 0){
+            state.activeJobId = job.id;
+            // The frame is now bound to the job server-side; the next send needs
+            // a fresh upload.
+            clearImage();
+            setGenerating(true, '映像を生成しています…');
+            scheduleStatusPoll(d.nextPollAfterMs || 2000);
+          }else if(job.status === 'completed' && job.videoUrl){
+            state.pendingIdemKey = null;
+            playVideo(job.videoUrl);
+            resetImageInput(); setSendEnabled(true);
+          }else if(job.status === 'failed'){
+            state.pendingIdemKey = null;
+            toStandby();
+            showToast('生成に失敗しました。' + (job.refunded ? 'クレジットは返還されました。' : ''), true);
+            resetImageInput(); setSendEnabled(true);
+          }
+        }
+        if(d.submissionStateUnknown){
+          showToast(d.message || '送信結果を確認中です。', false);
+        }
+        refreshBalance();
+      }catch(e){
+        // network error — keep the idem key so a retry does not double-charge
+        setGenerating(false); toStandby();
+        showToast('通信エラーが発生しました。もう一度お試しください。', true);
+        setSendEnabled(true);
+      }
+    }
+
+    // ---- init ----
+    async function init(){
+      if(!client){
+        showToast('接続情報が未設定です。', true);
+        return;
+      }
+      var user = null;
+      try{
+        user = await window.FlowVidAuthGuard.requireConfirmedUser(client);
+      }catch(_){ user = null; }
+      if(!user) return; // guard already redirected
+      state.user = user;
+
+      $('send').addEventListener('click', send);
+      $('input').addEventListener('keydown', function(e){
+        if((e.metaKey || e.ctrlKey) && e.key === 'Enter'){ e.preventDefault(); send(); }
+      });
+
+      // mode switch
+      $('modeSeg').addEventListener('click', function(e){
+        var btn = e.target.closest('button[data-mode]');
+        if(btn) setMode(btn.dataset.mode);
+      });
+
+      // image picker + drag & drop
+      var dz = $('dropzone');
+      dz.addEventListener('click', function(){ if(!state.uploadBusy) $('fileInput').click(); });
+      $('fileInput').addEventListener('change', function(e){
+        var f = e.target.files && e.target.files[0];
+        if(f) uploadImage(f);
+      });
+      ['dragenter','dragover'].forEach(function(ev){
+        dz.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.add('dragover'); });
+      });
+      ['dragleave','dragend','drop'].forEach(function(ev){
+        dz.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.remove('dragover'); });
+      });
+      dz.addEventListener('drop', function(e){
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if(f) uploadImage(f);
+      });
+      $('thumbRemove').addEventListener('click', function(){ clearImage(); setMode('image'); });
+
+      setMode('text');
+      // Pull plan + effective balance before enabling the button, so an
+      // ineligible plan / short balance is reflected from the first paint.
+      await refreshBalance();
+      setSendEnabled(true);
+      await loadHistory();
+      pollFeed();
+    }
+
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+  })();
+  </script>
+</body>
+</html>
