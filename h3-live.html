@@ -14,7 +14,7 @@
   <title>H3 Live | Pina Studio</title>
   <link rel="icon" type="image/png" href="/assets/brand/pina-icon-v2-favicon.png">
   <link rel="apple-touch-icon" href="/assets/brand/pina-icon-v2-favicon.png">
-  <meta name="description" content="チャットで指示して数秒で動画を生成し、配信画面に映す H3 Live。" />
+  <meta name="description" content="チャットで指示して数秒で動画を生成し、プレビュー画面に映す H3 Live。" />
   <meta name="theme-color" content="#050505" />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
   <style>
@@ -49,7 +49,7 @@
     main{flex:1;display:grid;grid-template-columns:1fr 360px;gap:0;min-height:0}
     @media(max-width:920px){main{grid-template-columns:1fr}}
 
-    /* ---- Broadcast stage ---- */
+    /* ---- Preview stage ---- */
     .stage-wrap{position:relative;display:flex;align-items:center;justify-content:center;
       padding:22px;min-width:0;background:rgba(255,255,255,.03)}
     .stage{position:relative;width:100%;max-width:960px;aspect-ratio:16/9;border-radius:18px;overflow:hidden;
@@ -113,7 +113,7 @@
       border-radius:14px;font-size:13px;line-height:1.7;color:var(--text)}
     .gate.show{display:block}
 
-    /* "AI generated" marker — always on the stage, part of the broadcast HUD */
+    /* "AI generated" marker — always on the stage, part of the preview HUD */
     .ai-badge{position:absolute;bottom:14px;right:14px;z-index:3;display:inline-flex;align-items:center;gap:6px;
       font-size:10px;font-weight:900;letter-spacing:.18em;color:rgba(255,255,255,.72);
       border:1px solid var(--line);background:rgba(0,0,0,.5);padding:5px 9px;border-radius:999px;backdrop-filter:blur(2px)}
@@ -144,7 +144,7 @@
 </head>
 <body>
   <header class="bar">
-    <span class="live"><span class="dot"></span>LIVE</span>
+    <span class="live"><span class="dot"></span><span id="statusBadgeText">READY</span></span>
     <span class="wordmark">H3&nbsp;<b>LIVE</b></span>
     <span class="spacer"></span>
     <span class="chip" id="balanceChip">残高 <b>–</b> クレジット</span>
@@ -154,11 +154,11 @@
   <main>
     <section class="stage-wrap">
       <div class="stage" id="stage">
-        <div class="tag"><span class="live"><span class="dot"></span>ON AIR</span></div>
-        <div class="rec" id="recClock">STANDBY</div>
+        <div class="tag"><span class="live"><span class="dot"></span>PREVIEW</span></div>
+        <div class="rec" id="recClock">READY</div>
         <div class="placeholder" id="placeholder">
-          <div class="big">STANDBY</div>
-          <div>チャットで指示を送ると、ここに映像が流れます。</div>
+          <div class="big">READY</div>
+          <div>チャットで指示を送ると、ここに生成した映像が表示されます。</div>
         </div>
         <video id="video" playsinline muted loop hidden></video>
         <div class="scan" id="scan"></div>
@@ -173,7 +173,7 @@
     </section>
 
     <section class="chat">
-      <h2>DIRECTOR CHAT</h2>
+      <h2>生成チャット</h2>
       <div class="gate" id="gate">
         H3 Live は Premium 以上のプラン（有効期間内）でご利用いただけます。
         <div style="margin-top:8px"><a href="/pricing.html#monthly">プランを見る →</a></div>
@@ -195,11 +195,11 @@
           <span class="st" id="thumbSt"></span>
           <button type="button" id="thumbRemove" title="画像を外す">×</button>
         </div>
-        <textarea id="input" maxlength="2000" placeholder="配信する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション"></textarea>
+        <textarea id="input" maxlength="2000" placeholder="生成する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション"></textarea>
         <div class="row">
           <div class="hint" id="hint">15秒 / 768p 固定。1本 110 クレジット消費します。</div>
           <button class="send" id="send" disabled>
-            配信する <span class="cost"><i>✦</i>110</span>
+            生成する <span class="cost"><i>✦</i>110</span>
           </button>
         </div>
         <div class="rights" id="rights" style="display:none">
@@ -324,10 +324,18 @@
       t._h = setTimeout(function(){ t.className = 'toast'; }, bad ? 8000 : 4500);
     }
 
+    // Header status pill — mirrors the stage's generating / idle state.
+    // Text only; the .live class / colour / animation are left untouched.
+    function setStatusBadge(on){
+      var el = $('statusBadgeText');
+      if(el) el.textContent = on ? 'GENERATING' : 'READY';
+    }
+
     function setGenerating(on, subText){
       $('stage').classList.toggle('generating', !!on);
       $('gen').classList.toggle('show', !!on);
       $('scan').classList.toggle('show', !!on);
+      setStatusBadge(!!on);
       if(subText) $('genSub').textContent = subText;
       if(on){
         $('placeholder').style.display = 'none';
@@ -350,7 +358,7 @@
     function playVideo(url){
       setGenerating(false);
       stopClock();
-      $('recClock').textContent = 'ON AIR';
+      $('recClock').textContent = '再生中';
       var v = $('video');
       v.src = url;
       v.hidden = false;
@@ -361,7 +369,7 @@
     function toStandby(){
       setGenerating(false);
       stopClock();
-      $('recClock').textContent = 'STANDBY';
+      $('recClock').textContent = 'READY';
       var v = $('video');
       if(!v.src){ $('placeholder').style.display = 'flex'; }
     }
@@ -395,7 +403,7 @@
       $('rights').style.display = isImg ? 'block' : 'none';
       $('input').placeholder = isImg
         ? 'この画像をどう動かすか指示… 例：カメラをゆっくり引く、風で髪がなびく'
-        : '配信する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション';
+        : '生成する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション';
       if(!isImg) clearImage();
     }
 
