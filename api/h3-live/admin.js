@@ -17,7 +17,7 @@
 //   getControl  -> { ok, enabled, note, updatedAt, missing? }
 //   setControl  { enabled: boolean, note?: string }
 //               -> { ok, enabled, note, updatedAt }
-//   listAlerts  -> { ok, staleMinutes, stuck: [...], unrefunded: [...] }
+//   listAlerts  -> { ok, staleMinutes, trackableStaleMinutes, stuck: [...], unrefunded: [...] }
 //
 // No schema change. supabase/migrations/20260831090000_create_h3_live_slice.sql
 // already grants service_role SELECT+UPDATE on public.h3_live_controls and ALL
@@ -34,6 +34,14 @@ const ADMIN_EMAIL = String(
 // provably-dead originating /start request (a Vercel function cannot outlive
 // this). Kept in step with api/h3-live/reconcile.js STALE_MINUTES.
 const STALE_MINUTES = 20;
+// A trackable job (has provider_poll_url) whose polls keep failing in a way
+// api/_lib/h3-live-fal.js treats as transient (e.g. a revoked FAL_KEY) never
+// shows up via updated_at staleness — api/h3-live/status.js's poll-claim step
+// bumps updated_at on every attempt even when nothing progresses. submitted_at
+// is written once and never touched again, so it is the staleness basis for
+// this bucket instead. Kept in step with api/h3-live/reconcile.js
+// TRACKABLE_STALE_MINUTES.
+const TRACKABLE_STALE_MINUTES = 30;
 const LIST_LIMIT = 100;
 const ACTIVE = ['queued', 'submitting', 'processing'];
 
@@ -144,7 +152,10 @@ async function setControl(db, adminId, body) {
   };
 }
 
-function sanitizeAlertJob(r) {
+function sanitizeAlertJob(r, reason) {
+  // trackable_stalled measures age from submitted_at, not updated_at — see
+  // the TRACKABLE_STALE_MINUTES comment above for why.
+  const ageBasisIso = reason === 'trackable_stalled' ? r.submitted_at : r.updated_at;
   return {
     id: r.id,
     userId: r.user_id || null,
@@ -154,8 +165,9 @@ function sanitizeAlertJob(r) {
     refunded: Boolean(r.refunded_at),
     providerRequestId: r.provider_request_id || null,
     errorCode: r.error_code || null,
-    ageMinutes: r.updated_at
-      ? Math.max(0, Math.floor((Date.now() - Date.parse(r.updated_at)) / 60000))
+    reason: reason || null,
+    ageMinutes: ageBasisIso
+      ? Math.max(0, Math.floor((Date.now() - Date.parse(ageBasisIso)) / 60000))
       : null,
     createdAt: r.created_at || null,
     updatedAt: r.updated_at || null
@@ -164,10 +176,11 @@ function sanitizeAlertJob(r) {
 
 async function listAlerts(db) {
   const staleCutoffIso = new Date(Date.now() - STALE_MINUTES * 60 * 1000).toISOString();
+  const trackableCutoffIso = new Date(Date.now() - TRACKABLE_STALE_MINUTES * 60 * 1000).toISOString();
   const cols =
-    'id,user_id,status,input_mode,charged_at,refunded_at,provider_request_id,provider_poll_url,error_code,created_at,updated_at';
+    'id,user_id,status,input_mode,charged_at,refunded_at,provider_request_id,provider_poll_url,submitted_at,error_code,created_at,updated_at';
 
-  const [stuckRes, unrefundedRes] = await Promise.all([
+  const [untrackableRes, trackableRes, unrefundedRes] = await Promise.all([
     // Active but untrackable and stale -> /api/h3-live/status can never advance
     // or terminate these. Covers tracking_persist_failed and the
     // charged-but-unsubmittable ("送信不明") case.
@@ -177,6 +190,19 @@ async function listAlerts(db) {
       .is('provider_poll_url', null)
       .lt('updated_at', staleCutoffIso)
       .order('updated_at', { ascending: true })
+      .limit(LIST_LIMIT),
+    // Active, DOES have a provider_poll_url, but has sat active long past
+    // submitted_at -> the poll itself keeps failing without progress (e.g. an
+    // auth-like error from a revoked FAL_KEY; see api/_lib/h3-live-fal.js).
+    // Without this bucket such a job never surfaces here (found in review,
+    // PR #224) and permanently occupies the user's credits + active-job slot.
+    db.from('h3_live_jobs')
+      .select(cols)
+      .in('status', ACTIVE)
+      .not('provider_poll_url', 'is', null)
+      .not('submitted_at', 'is', null)
+      .lt('submitted_at', trackableCutoffIso)
+      .order('submitted_at', { ascending: true })
       .limit(LIST_LIMIT),
     // Charged, ended failed, but no refund recorded -> credits owed back. Covers
     // the refund_state_uncertain outcomes that left the job terminal-failed.
@@ -189,10 +215,10 @@ async function listAlerts(db) {
       .limit(LIST_LIMIT)
   ]);
 
-  if (stuckRes.error || unrefundedRes.error) {
+  if (untrackableRes.error || trackableRes.error || unrefundedRes.error) {
     console.error(
       '[h3-live/admin] alerts lookup error:',
-      stuckRes.error?.message || unrefundedRes.error?.message
+      untrackableRes.error?.message || trackableRes.error?.message || unrefundedRes.error?.message
     );
     return {
       status: 503,
@@ -200,13 +226,19 @@ async function listAlerts(db) {
     };
   }
 
+  const stuck = [
+    ...(untrackableRes.data || []).map((r) => sanitizeAlertJob(r, 'untrackable')),
+    ...(trackableRes.data || []).map((r) => sanitizeAlertJob(r, 'trackable_stalled'))
+  ];
+
   return {
     status: 200,
     body: {
       ok: true,
       staleMinutes: STALE_MINUTES,
-      stuck: (stuckRes.data || []).map(sanitizeAlertJob),
-      unrefunded: (unrefundedRes.data || []).map(sanitizeAlertJob)
+      trackableStaleMinutes: TRACKABLE_STALE_MINUTES,
+      stuck,
+      unrefunded: (unrefundedRes.data || []).map((r) => sanitizeAlertJob(r))
     }
   };
 }
@@ -247,4 +279,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { authorizeAdmin, noteText, sanitizeAlertJob, STALE_MINUTES };
+module.exports._test = { authorizeAdmin, noteText, sanitizeAlertJob, STALE_MINUTES, TRACKABLE_STALE_MINUTES };

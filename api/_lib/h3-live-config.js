@@ -50,6 +50,22 @@ const IMAGE_FAL_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;    // 24 h
 const IMAGE_UPLOAD_RETENTION_MS = 48 * 60 * 60 * 1000;    // 48 h
 const IMAGE_CLEANUP_MAX_PER_RUN = 20;
 
+// Supabase Storage's createSignedUploadUrl() issues a token with a FIXED,
+// non-configurable ~2h expiry that cannot be shortened or revoked from the
+// SDK (confirmed via Supabase's own docs/community discussion, 2026-09-05:
+// https://supabase.com/docs/reference/javascript/storage-from-createsigneduploadurl,
+// https://github.com/orgs/supabase/discussions/15394). So a caller that
+// retained a previously issued upload slot's signed URL can still upload to
+// that exact object_path any time before this window elapses, even after
+// api/_lib/h3-live-image-store.js's createImageUploadSlot has replaced that
+// slot for the same user. This is why replacing a pending upload defers its
+// final deleted_at stamp by this long (see expirePendingUpload there) instead
+// of stamping it immediately: a later opportunistic sweep re-checks the path
+// once any retained token is guaranteed expired, catching an object
+// resurrected via a stale token rather than losing track of it forever
+// (found in review, PR #224 follow-up).
+const IMAGE_SIGNED_UPLOAD_URL_TTL_MS = 2 * 60 * 60 * 1000; // 2 h
+
 const INPUT_MODES = Object.freeze(['text', 'image']);
 
 // Client poll cadence hints returned to h3-live.html.
@@ -145,6 +161,7 @@ module.exports = {
   IMAGE_FAL_SIGNED_URL_TTL_SECONDS,
   IMAGE_UPLOAD_RETENTION_MS,
   IMAGE_CLEANUP_MAX_PER_RUN,
+  IMAGE_SIGNED_UPLOAD_URL_TTL_MS,
   INPUT_MODES,
   FEED_POLL_MS,
   STATUS_POLL_MS,

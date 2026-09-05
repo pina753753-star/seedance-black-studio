@@ -196,6 +196,23 @@ async function submitImageJob({ instruction, imageUrl }) {
 // accepted or right after it flips to COMPLETED.
 const TERMINAL_HTTP_STATUSES = [400, 410, 422];
 
+// A poll returning one of these means OUR request was rejected (bad/revoked
+// FAL_KEY), not that the job itself failed — the job may still be running on
+// fal's side. Unlike TERMINAL_HTTP_STATUSES this is NOT treated as a job
+// failure here (that would risk refunding a job that later completes): it is
+// still reported as ok:false/transient so the caller keeps polling, exactly
+// like any other transient error. What it DOES do is log clearly so an
+// operator sees "check FAL_KEY", not "the network is flaky", and it is the
+// reason a job can be genuinely stuck forever if this persists: see
+// api/h3-live/reconcile.js's "trackable but stalled" bucket, which is the
+// bounded, operator-visible backstop for exactly this case (a job whose
+// provider_poll_url exists but whose polls never make progress).
+const AUTH_LIKE_HTTP_STATUSES = [401, 403];
+
+function isAuthLikeFailure(httpStatus) {
+  return AUTH_LIKE_HTTP_STATUSES.includes(Number(httpStatus));
+}
+
 // Poll one job.
 //   -> { ok:true, state:'processing' }
 //   -> { ok:true, state:'completed', outputUrl }
@@ -239,7 +256,13 @@ async function getJobStatus({ statusUrl, responseUrl }) {
         errorMessage: String(sText || '').slice(0, 500)
       };
     }
-    // 404 / 5xx / everything else -> transient; caller keeps polling.
+    if (isAuthLikeFailure(sRes.status)) {
+      console.error(
+        '[h3-live-fal] status poll rejected with an auth-like HTTP status — this will not' +
+        ' resolve by retrying; check FAL_KEY. httpStatus:', sRes.status
+      );
+    }
+    // 404 / 5xx / auth-like / everything else -> transient; caller keeps polling.
     return { ok: false, detail: `status HTTP ${sRes.status}` };
   }
 
@@ -266,7 +289,13 @@ async function getJobStatus({ statusUrl, responseUrl }) {
         errorMessage: String(rText || '').slice(0, 500)
       };
     }
-    // 404 / 5xx right after COMPLETED -> result data still propagating; keep polling.
+    if (isAuthLikeFailure(rRes.status)) {
+      console.error(
+        '[h3-live-fal] result fetch rejected with an auth-like HTTP status — this will not' +
+        ' resolve by retrying; check FAL_KEY. httpStatus:', rRes.status
+      );
+    }
+    // 404 / 5xx / auth-like right after COMPLETED -> result data still propagating; keep polling.
     return { ok: false, detail: `result HTTP ${rRes.status}` };
   }
 
@@ -287,5 +316,5 @@ module.exports = {
   submitImageJob,
   getJobStatus,
   // exported for tests
-  _internals: { buildH3MaxInput, buildH3MaxImageInput, classifyProviderError, extractVideoUrl }
+  _internals: { buildH3MaxInput, buildH3MaxImageInput, classifyProviderError, extractVideoUrl, isAuthLikeFailure }
 };

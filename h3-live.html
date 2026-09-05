@@ -243,6 +243,30 @@
     function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 
+    // RFC4122 v4-shaped fallback for browsers that support Web Crypto's
+    // getRandomValues but not crypto.randomUUID (e.g. older Safari). The
+    // server validates the Idempotency-Key header with a strict UUID regex
+    // (isUuid in api/_lib/h3-live-store.js), so a non-UUID-shaped fallback
+    // (found in review, PR #224 — the previous fallback was a timestamp +
+    // Math.random string) made every send() on such a browser fail with
+    // invalid_idempotency_key. Idempotency here is a UX/retry-dedup key, not a
+    // security boundary, so the Math.random-only last resort below (for the
+    // vanishingly rare browser with no Web Crypto at all) is an acceptable
+    // fallback of a fallback — it still needs to be UUID-shaped, not random.
+    function uuidV4Fallback(){
+      if(window.crypto && crypto.getRandomValues){
+        var bytes = crypto.getRandomValues(new Uint8Array(16));
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        var hex = Array.prototype.map.call(bytes, function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+        return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c){
+        var r = Math.random()*16|0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
     async function getToken(){
       try{
         if(!client) return '';
@@ -482,9 +506,20 @@
       return '<span class="st ' + esc(job.status) + '">' + esc(label) + '</span>' + extra;
     }
 
-    function upsertJobMsg(job){
+    // claimEl (optional): an already-rendered bubble — typically send()'s own
+    // optimistic "送信中" message — that should be tagged with this job's id
+    // instead of a fresh duplicate being created. Without this, the
+    // optimistic bubble (created before the server response exists, so it
+    // never gets a data-job-id) is never found by the lookup below: a second,
+    // real bubble gets created here every time, leaving the original stuck at
+    // "送信中" forever (found in review, PR #224).
+    function upsertJobMsg(job, claimEl){
       if(!job) return;
       var el = $('log').querySelector('[data-job-id="' + job.id + '"]');
+      if(!el && claimEl && claimEl.isConnected && !claimEl.dataset.jobId){
+        el = claimEl;
+        el.dataset.jobId = job.id;
+      }
       if(!el){
         el = addMsg('me', job.instruction, { jobId: job.id, meta: statusMeta(job) });
       }else{
@@ -622,12 +657,12 @@
 
       setSendEnabled(false);
       if(!state.pendingIdemKey){
-        state.pendingIdemKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        state.pendingIdemKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : uuidV4Fallback();
       }
 
       var frameUrl = isImage ? state.thumbUrl : null;
       var sendUploadId = isImage ? state.uploadId : null;
-      addMsg('me', text, { meta: '<span class="st submitting">送信中</span>', frameUrl: frameUrl });
+      var optimisticEl = addMsg('me', text, { meta: '<span class="st submitting">送信中</span>', frameUrl: frameUrl });
       $('input').value = '';
       setGenerating(true, '送信しています…');
 
@@ -672,7 +707,7 @@
 
         var job = d.job;
         if(job){
-          upsertJobMsg(job);
+          upsertJobMsg(job, optimisticEl);
           if(['queued','submitting','processing'].indexOf(job.status) >= 0){
             state.activeJobId = job.id;
             // The frame is now bound to the job server-side; the next send needs

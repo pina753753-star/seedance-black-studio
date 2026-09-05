@@ -2,17 +2,32 @@
 
 // GET/POST /api/h3-live/reconcile — operator reconciler for stuck H3 Live jobs.
 //
-// A job is "stuck" when it is still active (queued / submitting / processing)
-// but has no provider_poll_url, so /api/h3-live/status can never advance or
-// terminate it. This happens when /api/h3-live/start was interrupted after the
-// credit charge but before (or during) the fal.ai submit, or when the tracking
-// info could not be persisted. api/h3-live/start.js deliberately does NOT auto
-// resend or auto-refund those cases (double-generation / double-charge risk),
-// so an operator resolves them here.
+// A job is "stuck" in one of two ways:
+//   - untrackable: still active (queued / submitting / processing) but has no
+//     provider_poll_url, so /api/h3-live/status can never advance or
+//     terminate it. This happens when /api/h3-live/start was interrupted after
+//     the credit charge but before (or during) the fal.ai submit, or when the
+//     tracking info could not be persisted.
+//   - trackable_stalled: DOES have a provider_poll_url (so start.js reached
+//     fal.ai), but has stayed active long after submitted_at. This covers a
+//     poll that keeps failing in a way api/_lib/h3-live-fal.js classifies as
+//     transient (e.g. a revoked FAL_KEY returning 401/403 on every call,
+//     see AUTH_LIKE_HTTP_STATUSES there) — without this bucket such a job is
+//     invisible here and status.js reports it as "processing" forever,
+//     permanently occupying the user's 110 credits and one-active-job slot
+//     (found in review, PR #224). updated_at cannot be used to detect this:
+//     api/h3-live/status.js's poll-claim step bumps updated_at on every
+//     attempt even when the upstream call itself fails, so a permanently
+//     failing poll still looks "recently touched". submitted_at is written
+//     once at initial submission and never touched again, so it is immune to
+//     that churn and is what TRACKABLE_STALE_MINUTES below measures against.
+// api/h3-live/start.js deliberately does NOT auto resend or auto-refund
+// either case (double-generation / double-charge risk), so an operator
+// resolves them here.
 //
 //   GET  /api/h3-live/reconcile                       -> list stuck jobs (read-only).
 //        Each row includes providerRequestId + charged so an operator can check
-//        fal.ai before deciding.
+//        fal.ai before deciding. `reason` distinguishes the two buckets above.
 //   POST /api/h3-live/reconcile { jobId }             -> release an uncharged,
 //        fully-unsubmitted job. A single guarded UPDATE atomically flips it to
 //        'failed' only if it is still active, untracked, uncharged and stale —
@@ -48,10 +63,22 @@ const CRON_SECRET = process.env.CRON_SECRET || '';
 // provably-dead originating request. (An idempotent *replay* can still arrive
 // later; the guarded status flip in releaseJob handles that separately.)
 const STALE_MINUTES = 20;
+// 30 minutes is a generous multiple of the expected single-digit-minute
+// queue+generation time for a 15s H3 Max video (that exact figure is
+// unverified — see api/_lib/h3-live-fal.js's header comment; tune this if
+// real-world data says otherwise). Kept separate from STALE_MINUTES because a
+// trackable job genuinely may still be running past 20 minutes in a slow
+// queue, whereas an untrackable job past 20 minutes is provably dead (a
+// Vercel function cannot outlive that).
+const TRACKABLE_STALE_MINUTES = 30;
 const LIST_LIMIT = 100;
 
 function staleCutoffIso() {
   return new Date(Date.now() - STALE_MINUTES * 60 * 1000).toISOString();
+}
+
+function trackableStaleCutoffIso() {
+  return new Date(Date.now() - TRACKABLE_STALE_MINUTES * 60 * 1000).toISOString();
 }
 
 const ACTIVE = ['queued', 'submitting', 'processing'];
@@ -75,30 +102,59 @@ function jsonBody(req) {
   return req?.body || {};
 }
 
-async function listStuck(db) {
-  const cutoffIso = staleCutoffIso();
-  const { data, error } = await db
-    .from('h3_live_jobs')
-    .select('id, user_id, status, input_mode, image_upload_id, charged_at, provider_request_id, provider_poll_url, created_at, updated_at')
-    .in('status', ACTIVE)
-    .is('provider_poll_url', null)
-    .lt('updated_at', cutoffIso)
-    .order('updated_at', { ascending: true })
-    .limit(LIST_LIMIT);
+const LIST_COLUMNS =
+  'id, user_id, status, input_mode, image_upload_id, charged_at, provider_request_id, provider_poll_url, submitted_at, created_at, updated_at';
 
-  if (error) return { ok: false, error: error.message };
-
-  const jobs = (data || []).map((r) => ({
+function toStuckJob(r, reason) {
+  // trackable_stalled measures age from submitted_at (see the header comment
+  // and TRACKABLE_STALE_MINUTES above for why updated_at cannot be used here).
+  const ageBasisIso = reason === 'trackable_stalled' ? r.submitted_at : r.updated_at;
+  return {
     id: r.id,
     userId: r.user_id,
     status: r.status,
     inputMode: r.input_mode === 'image' ? 'image' : 'text',
     charged: Boolean(r.charged_at),
     providerRequestId: r.provider_request_id || null,
-    ageMinutes: Math.floor((Date.now() - Date.parse(r.updated_at)) / 60000),
+    reason,
+    ageMinutes: ageBasisIso ? Math.floor((Date.now() - Date.parse(ageBasisIso)) / 60000) : null,
     createdAt: r.created_at || null,
     updatedAt: r.updated_at || null
-  }));
+  };
+}
+
+async function listStuck(db) {
+  const cutoffIso = staleCutoffIso();
+  const trackableCutoffIso = trackableStaleCutoffIso();
+
+  const [untrackableRes, trackableRes] = await Promise.all([
+    // Bucket 1: /start never got a usable provider poll URL.
+    db.from('h3_live_jobs')
+      .select(LIST_COLUMNS)
+      .in('status', ACTIVE)
+      .is('provider_poll_url', null)
+      .lt('updated_at', cutoffIso)
+      .order('updated_at', { ascending: true })
+      .limit(LIST_LIMIT),
+    // Bucket 2: has a provider poll URL but has sat active long past
+    // submitted_at — status.js's own polling is not making progress.
+    db.from('h3_live_jobs')
+      .select(LIST_COLUMNS)
+      .in('status', ACTIVE)
+      .not('provider_poll_url', 'is', null)
+      .not('submitted_at', 'is', null)
+      .lt('submitted_at', trackableCutoffIso)
+      .order('submitted_at', { ascending: true })
+      .limit(LIST_LIMIT)
+  ]);
+
+  if (untrackableRes.error) return { ok: false, error: untrackableRes.error.message };
+  if (trackableRes.error) return { ok: false, error: trackableRes.error.message };
+
+  const jobs = [
+    ...(untrackableRes.data || []).map((r) => toStuckJob(r, 'untrackable')),
+    ...(trackableRes.data || []).map((r) => toStuckJob(r, 'trackable_stalled'))
+  ];
   return { ok: true, jobs };
 }
 
@@ -189,42 +245,46 @@ async function releaseJob(db, jobId, { force = false } = {}) {
       body: { ok: false, error: 'job_not_active', message: `job is already ${job.status}`, job: sanitizeJob(job) }
     };
   }
-  if (job.provider_poll_url || job.provider_response_url) {
-    // Still status-pollable — never release a possibly-live generation. Let
-    // /api/h3-live/status drive it.
-    return {
-      status: 409,
-      body: { ok: false, error: 'job_is_trackable', message: 'job has provider tracking; use the status endpoint', job: sanitizeJob(job) }
-    };
-  }
 
-  const cutoffIso = staleCutoffIso();
-  if (!job.updated_at || Date.parse(job.updated_at) >= Date.parse(cutoffIso)) {
-    // Touched within STALE_MINUTES — its originating /start request may still be
-    // in flight. Refuse until it has been quiet long enough that no concurrent
-    // writer from the original invocation can exist.
+  // A trackable job (has a poll/response URL) is only released once it has
+  // been stalled long past submission — see toStuckJob's "trackable_stalled"
+  // bucket and the header comment for why submitted_at, not updated_at, is
+  // the staleness basis. An untrackable job keeps the original updated_at
+  // cutoff. Either way this guards against releasing a job that could still
+  // be genuinely in flight.
+  const isTrackable = Boolean(job.provider_poll_url || job.provider_response_url);
+  const cutoffIso = isTrackable ? trackableStaleCutoffIso() : staleCutoffIso();
+  const staleBasisIso = isTrackable ? job.submitted_at : job.updated_at;
+
+  if (!staleBasisIso || Date.parse(staleBasisIso) >= Date.parse(cutoffIso)) {
     return {
       status: 409,
       body: {
         ok: false,
         error: 'job_not_stale',
-        message: `job was active within the last ${STALE_MINUTES} min; re-check before releasing`,
+        message: isTrackable
+          ? `job has provider tracking and was submitted within the last ${TRACKABLE_STALE_MINUTES} min; re-check before releasing`
+          : `job was active within the last ${STALE_MINUTES} min; re-check before releasing`,
         job: sanitizeJob(job)
       }
     };
   }
 
-  // A charged job, or one that already carries a fal.ai request id (ambiguous
-  // submit), needs explicit force=true: the operator must first verify on
-  // fal.ai that nothing is actually running. providerRequestId is returned so
-  // that check is possible from the API alone.
-  if (!force && (job.charged_at || job.provider_request_id)) {
+  // A trackable job always needs force=true — it has a fal.ai request id by
+  // definition, so the operator must first verify on fal.ai that nothing is
+  // actually running before we release it. An untrackable job needs
+  // force=true only once it turns out to already be charged and/or carries a
+  // request id (ambiguous submit). providerRequestId is returned either way
+  // so that fal.ai check is possible from the API alone.
+  if (!force && (isTrackable || job.charged_at || job.provider_request_id)) {
     return {
       status: 409,
       body: {
         ok: false,
         error: 'force_required',
-        message: 'charged and/or ambiguous-submit job — verify on fal.ai, then POST again with { "force": true }',
+        message: isTrackable
+          ? 'job has provider tracking — verify on fal.ai, then POST again with { "force": true }'
+          : 'charged and/or ambiguous-submit job — verify on fal.ai, then POST again with { "force": true }',
         providerRequestId: job.provider_request_id || null,
         charged: Boolean(job.charged_at),
         job: sanitizeJob(job)
@@ -236,8 +296,11 @@ async function releaseJob(db, jobId, { force = false } = {}) {
   // and every guard in ONE statement is what makes this race-free without a
   // DB-side change:
   //   - a concurrent /api/h3-live/start that has since charged the job sets
-  //     charged_at + bumps updated_at, so (non-force) this UPDATE matches 0
-  //     rows and we abort — the charge/submit proceeds normally elsewhere;
+  //     charged_at + bumps updated_at, so (non-force, untrackable path) this
+  //     UPDATE matches 0 rows and we abort — the charge/submit proceeds
+  //     normally elsewhere;
+  //   - if a concurrent /api/h3-live/status completes or fails the job first,
+  //     status is no longer ACTIVE, so this UPDATE matches 0 rows too;
   //   - if this UPDATE wins, the row is 'failed', so a concurrent deduct RPC
   //     sees a non-queued status and returns job_not_chargeable instead of
   //     charging;
@@ -255,14 +318,26 @@ async function releaseJob(db, jobId, { force = false } = {}) {
       updated_at: nowIso
     })
     .eq('id', jobId)
-    .in('status', ACTIVE)
-    .is('provider_poll_url', null)
-    .is('provider_response_url', null)
-    .lt('updated_at', cutoffIso);
+    .in('status', ACTIVE);
 
-  if (!force) {
-    // Non-force path only ever releases a fully-unsubmitted, uncharged job.
-    claimQ = claimQ.is('provider_request_id', null).is('charged_at', null);
+  if (isTrackable) {
+    // Re-check tracking + submitted_at staleness at claim time (not
+    // updated_at, which api/h3-live/status.js's poll-claim step may have
+    // bumped since we read `job` above). force is already guaranteed true
+    // here (checked above), so no provider_request_id/charged_at condition.
+    claimQ = claimQ
+      .not('provider_poll_url', 'is', null)
+      .not('submitted_at', 'is', null)
+      .lt('submitted_at', cutoffIso);
+  } else {
+    claimQ = claimQ
+      .is('provider_poll_url', null)
+      .is('provider_response_url', null)
+      .lt('updated_at', cutoffIso);
+    if (!force) {
+      // Non-force path only ever releases a fully-unsubmitted, uncharged job.
+      claimQ = claimQ.is('provider_request_id', null).is('charged_at', null);
+    }
   }
 
   const { data: flipped, error: flipError } = await claimQ.select('*');
@@ -330,4 +405,4 @@ module.exports = async function handler(req, res) {
   return res.status(405).json({ ok: false, error: 'method_not_allowed', message: 'GET or POST.' });
 };
 
-module.exports._test = { authenticate, STALE_MINUTES };
+module.exports._test = { authenticate, STALE_MINUTES, TRACKABLE_STALE_MINUTES };
