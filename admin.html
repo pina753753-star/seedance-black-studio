@@ -41,13 +41,14 @@
 <header class="top"><button class="iconBtn" id="menuBtn">☰</button><a class="brand" href="./index.html"><div class="logo">▶</div><div><small>AI VIDEO STUDIO</small><b>Pina Studio</b></div></a><div class="topActions"><button class="iconBtn notificationBtn" id="notificationBtn" aria-label="未確認エラーはありません" title="運用監視を開く">🔔<span class="notificationCount" id="notificationCount" hidden>0</span></button><button class="logoutBtn" id="logoutBtn">ログアウト</button></div></header>
 <main class="wrap"><div class="warnBox" id="warn"></div><section id="app" style="display:none">
 <section class="hero"><p id="heroLabel">ADMIN DASHBOARD</p><h1 id="heroTitle">管理者ダッシュボード</h1><div class="lead" id="heroLead">ログイン後すぐに、ユーザー・クレジット・生成状況の全体像を確認できます。</div></section>
-<div class="readOnly">この管理画面の表示・更新は閲覧専用です。クレジット付与は、下の専用画面で対象と金額を確認してから行います。</div>
+<div class="readOnly">この管理画面は、下部の「H3 Live 生成スイッチ」を除き閲覧専用です。クレジット付与は、下の専用画面で対象と金額を確認してから行います。</div>
 <section class="view active" id="dashboard"><div class="grid">
 <article class="card wide"><h2>運用状況</h2><div class="opsSummary"><div class="box opsErr"><b id="dashOpsErrorCount">-</b><span>対応が必要</span></div><div class="box opsWarn"><b id="dashOpsWarningCount">-</b><span>自動復旧中</span></div><div class="box opsOk"><b id="dashOpsHealthyCount">-</b><span>自動対応済み</span></div><div class="box opsTotal"><b id="dashOpsIssueCount">-</b><span>正常</span></div></div><div class="mini" id="dashOpsUpdated">未読み込み</div><button class="btn" id="openOpsBtn">運用監視を見る</button></article>
 <article class="card"><h2>ユーザー</h2><div class="stat"><div class="box"><b id="userCount">-</b><span>登録ユーザー</span></div><div class="box"><b id="adminCount">-</b><span>管理者</span></div></div></article>
 <article class="card"><h2>クレジット残高</h2><div class="stat"><div class="box"><b id="creditTotal">0</b><span>総クレジット</span></div><div class="box"><b id="paidTotal">0</b><span>購入分</span></div></div><div class="mini" id="creditBreakdown">無料0 / サブスク0 / 購入0</div></article>
 <article class="card wide"><h2>生成タスク</h2><div class="mini">最新100件の範囲</div><div class="row"><span>作成済み</span><strong id="draftCount">0</strong></div><div class="row"><span>処理待ち</span><strong id="queuedCount">0</strong></div><div class="row"><span>処理中</span><strong id="processingCount">0</strong></div><div class="row"><span>完了</span><strong id="completedCount">0</strong></div><div class="row"><span>失敗</span><strong id="failedCount">0</strong></div></article>
 <article class="card wide"><h2>データ更新</h2><div class="row"><span>Supabase DB</span><strong id="dbStatus">接続確認中</strong></div><button class="btn" id="refreshBtn">最新データに更新</button><div class="mini" id="lastLoaded">未読み込み</div><div class="mini">外部API、決済、Vercel、Railwayの状態は各サービスの管理画面で確認してください。</div></article>
+<article class="card wide" id="h3ControlCard"><h2>H3 Live 生成スイッチ</h2><div class="mini">この項目だけは閲覧専用ではなく操作できます。停止すると新規のH3 Live生成を止めます（進行中のジョブ・確定済みの課金には影響しません）。有効化は本番マイグレーション適用・環境変数設定・動作確認が済んでから行ってください。</div><div class="row"><span>現在の状態</span><strong id="h3ControlState">確認中…</strong></div><div class="row"><span>最終更新</span><strong id="h3ControlUpdated">-</strong></div><button class="btn" id="h3ControlToggle" disabled>読み込み中…</button><div class="mini" id="h3ControlStatus"></div></article>
 </div></section>
 <section class="view" id="ops">
 <div class="sectionBlock" id="opsSummarySection"><h2 class="sectionTitle">運用監視</h2><div class="mini">生成タスクは最新100件、クレジット履歴もその最新100件の生成タスクに紐づく取引をすべて表示します（件数の上限は設けていません）。安全に自動処理できるものは「自動対応済み」「自動復旧中」へ分け、らんの判断が必要な例外だけを🔔で知らせます。画面を開いている間は60秒ごとに自動更新します。</div><div class="opsSummary"><div class="box opsErr"><b id="opsErrorCount">-</b><span>対応が必要</span></div><div class="box opsWarn"><b id="opsWarningCount">-</b><span>自動復旧中</span></div><div class="box opsOk"><b id="opsHealthyCount">-</b><span>自動対応済み</span></div><div class="box opsTotal"><b id="opsTotalCount">-</b><span>正常</span></div></div>
@@ -60,6 +61,7 @@
 </div><div class="reasonNote">同じタスクが複数の理由に該当する場合があるため、内訳の合計は要対応ジョブ件数と一致しないことがあります。</div></div>
 <div class="row"><span>らんの対応が必要</span><strong id="opsIssueCount">-</strong></div><button class="btn" id="recheckAllBtn">最新状態に更新</button><div class="mini" id="opsStatus">未読み込み</div></div>
 <div class="sectionBlock" id="opsActionSection"><h2 class="sectionTitle">🔴 らんの対応が必要</h2><div class="mini">ここに項目がある時だけ「対応依頼をコピー」してChatGPTへ送ってください。手動返金・再生成・DB変更はしないでください。</div><div class="mini" id="opsActionCountNote">読み込み中</div><div class="taskList" id="opsActionList"><div class="empty">読み込み中</div></div><button class="btn loadMore" id="moreOpsBtn" style="display:none">さらに20件表示</button></div>
+<div class="sectionBlock" id="h3AlertSection"><h2 class="sectionTitle">🟣 H3 Live 要対応ジョブ</h2><div class="mini">H3 Live（api/h3-live/*）で人手対応が必要なジョブです。「詰まり」は送信情報が保存されず自動で進められないもの、「返金未確定」は課金済みで失敗したまま返金記録がないものです。対応は api/h3-live/reconcile.js を使い、手動でのDB変更・二重返金はしないでください。</div><div class="mini" id="h3AlertCountNote">読み込み中</div><div class="taskList" id="h3AlertList"><div class="empty">読み込み中</div></div></div>
 <div class="sectionBlock" id="modBlockSection"><h2 class="sectionTitle">🛡 コンテンツフィルタでブロックされた件数</h2><div class="mini">生成開始前にプロンプト内容フィルタ（コンテンツポリシー）で拒否されたリクエストです。generation_tasksには記録が残らないため、この画面で別に確認します。🔔の通知件数には、対応が必要な生成エラーとこのブロック件数の両方を合算しています。</div><div class="opsSummary" style="grid-template-columns:1fr"><div class="box opsErr"><b id="modBlockCount">-</b><span>ブロック件数</span></div></div><div class="reasonBlock"><h3 class="reasonTitle">カテゴリ内訳</h3><div class="reasonGrid" id="modBlockCategoryGrid"><div class="reasonBox"><b>-</b><span>読み込み中</span></div></div><div class="reasonNote">1件のブロックが複数カテゴリに該当する場合があるため、内訳の合計はブロック件数と一致しないことがあります。同一カテゴリが30分以内に2件以上発生した場合は、各カードに「過剰ブロックの疑い」を表示します。</div></div><div class="filterBar" id="modReasonFilterBar"></div><div class="filterBar" id="modModeFilterBar"></div><input class="searchBox" id="modUserFilterInput" type="search" inputmode="email" autocomplete="off" placeholder="対象ユーザーのメールアドレスで絞り込み（任意）"><div class="mini" id="modBlockCountNote" style="margin-top:10px">読み込み中</div><div class="taskList" id="modBlockList"><div class="empty">読み込み中</div></div><button class="btn loadMore" id="moreModBlocksBtn" style="display:none">さらに20件表示</button></div>
 <div class="sectionBlock" id="opsMonitoringSection"><h2 class="sectionTitle">🟡 自動復旧中</h2><div class="mini">15分ごとの既存照合を待つ状態です。らんの操作は不要です。</div><div class="taskList" id="opsMonitoringList"><div class="empty">読み込み中</div></div></div>
 <div class="sectionBlock" id="opsResolvedSection"><h2 class="sectionTitle">🟢 自動対応済み</h2><div class="mini">全額返金済み、またはクレジット消費記録なし。らんは何もしなくて大丈夫です。</div><div class="taskList" id="opsResolvedList"><div class="empty">読み込み中</div></div></div>
@@ -74,11 +76,15 @@
 const cfg=window.FLOWVID_AUTH||{},ADMIN_EMAIL='hinaran53@gmail.com';
 const client=cfg.supabaseUrl&&cfg.supabaseAnonKey?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
 const $=id=>document.getElementById(id);let currentUser=null,profilesCache=[],balancesCache=[],tasksCache=[],opsRowsCache=[],opsActionCache=[],opsMonitoringCache=[],opsResolvedCache=[],creditsCache=[],modBlocksCache=[],modExcessiveRowIds=new Set(),taskVisible=20,opsVisible=20,creditsVisible=20,modBlocksVisible=20,taskFilter='all',modReasonFilter='all',modModeFilter='all',opsRefreshInFlight=false;
+let h3StuckCache=[],h3UnrefundedCache=[],h3ControlBusy=false,h3StaleMinutes=20;
+function h3AlertKey(j){return[String(j.id||''),String(j.status||''),String(j.updatedAt||'')].join('|')}
 const ALERT_STORAGE_KEY='pinaAdminAcknowledgedIssuesV1';
 // moderation_blocksの確認済みキーは、生成エラーとは別の保存先に分離する。
 // 初回基準化(既存ブロックを一律で確認済み扱いにする仕組み)自体を廃止した
 // ため、専用の初回基準化キーは不要になった。
 const MOD_ALERT_STORAGE_KEY='pinaAdminAcknowledgedModerationBlocksV1';
+// H3 Live 要対応ジョブの確認済みキー。生成エラー・moderation_blocksとは別保存先。
+const H3_ALERT_STORAGE_KEY='pinaAdminAcknowledgedH3AlertsV1';
 // 対応が必要な生成エラーの初回基準化キー。moderation_blocksとは独立して
 // 維持する(生成エラー側の既存の未確認状態を、ブロック関連の変更で
 // 一括で確認済みにしてしまわないため)。
@@ -108,6 +114,11 @@ function openNotificationTarget(){
   const ackModeration=new Set(readAcknowledgedIssueKeys(MOD_ALERT_STORAGE_KEY));
   if(modBlocksCache.some(r=>!ackModeration.has(issueKey(r)))){
     $('modBlockSection')?.scrollIntoView({behavior:'smooth',block:'start'});
+    return;
+  }
+  const ackH3=new Set(readAcknowledgedIssueKeys(H3_ALERT_STORAGE_KEY));
+  if([...h3StuckCache,...h3UnrefundedCache].some(j=>!ackH3.has(h3AlertKey(j)))){
+    $('h3AlertSection')?.scrollIntoView({behavior:'smooth',block:'start'});
     return;
   }
   $('opsSummarySection')?.scrollIntoView({behavior:'smooth',block:'start'});
@@ -141,7 +152,7 @@ function writeAcknowledgedIssueKeys(keys,storageKey){try{const key=storageKey||A
 function initializeAlertBaseline(){try{if(localStorage.getItem(ALERT_INITIALIZED_KEY)==='1')return;writeAcknowledgedIssueKeys([...readAcknowledgedIssueKeys(),...opsActionCache.map(issueKey)]);localStorage.setItem(ALERT_INITIALIZED_KEY,'1')}catch{}}
 // 通知バッジは、生成エラー(opsActionCache)とmoderation_blocks(modBlocksCache)
 // をそれぞれ別の確認済みキーセットと照合し、未確認件数を合算する。
-function updateNotificationBadge(){const ackGeneration=new Set(readAcknowledgedIssueKeys()),ackModeration=new Set(readAcknowledgedIssueKeys(MOD_ALERT_STORAGE_KEY)),genCount=opsActionCache.filter(t=>!ackGeneration.has(issueKey(t))).length,modCount=modBlocksCache.filter(t=>!ackModeration.has(issueKey(t))).length,count=genCount+modCount,badge=$('notificationCount'),button=$('notificationBtn');badge.textContent=count>99?'99+':String(count);badge.hidden=count===0;button.classList.toggle('hasAlert',count>0);button.setAttribute('aria-label',count?`未確認の対応が必要な項目が${count}件あります（生成エラー・コンテンツフィルタブロック）`:'未確認の対応が必要な項目はありません')}
+function updateNotificationBadge(){const ackGeneration=new Set(readAcknowledgedIssueKeys()),ackModeration=new Set(readAcknowledgedIssueKeys(MOD_ALERT_STORAGE_KEY)),genCount=opsActionCache.filter(t=>!ackGeneration.has(issueKey(t))).length,modCount=modBlocksCache.filter(t=>!ackModeration.has(issueKey(t))).length,ackH3=new Set(readAcknowledgedIssueKeys(H3_ALERT_STORAGE_KEY)),h3Count=[...h3StuckCache,...h3UnrefundedCache].filter(j=>!ackH3.has(h3AlertKey(j))).length,count=genCount+modCount+h3Count,badge=$('notificationCount'),button=$('notificationBtn');badge.textContent=count>99?'99+':String(count);badge.hidden=count===0;button.classList.toggle('hasAlert',count>0);button.setAttribute('aria-label',count?`未確認の対応が必要な項目が${count}件あります（生成エラー・コンテンツフィルタブロック・H3 Live要対応）`:'未確認の対応が必要な項目はありません')}
 // typeが'moderation'ならmoderation_blocks専用の保存先、それ以外(未指定含む)
 // は生成エラー用の保存先(デフォルト)に確認済みキーを書き込む。
 function acknowledgeIssue(key,type='generation'){const storageKey=type==='moderation'?MOD_ALERT_STORAGE_KEY:ALERT_STORAGE_KEY;writeAcknowledgedIssueKeys([...readAcknowledgedIssueKeys(storageKey),key],storageKey);updateNotificationBadge();renderOpsGroups();renderModBlocks();$('opsStatus').textContent='通知を確認済みにしました。問題が直ったことを示す操作ではありません。'}
@@ -201,6 +212,71 @@ function matchesModFilter(r){
 function modBlockCard(r){const categories=r.categories||[],excessive=modExcessiveRowIds.has(r.id),warning=excessive?'<div class="operatorAction" style="background:rgba(251,113,133,.14);color:#fecdd3">⚠ 過剰ブロックの疑い：同一カテゴリが30分以内に複数件発生しています。誤判定の連鎖や悪用の可能性を確認してください。</div>':'',key=issueKey(r),acknowledged=new Set(readAcknowledgedIssueKeys(MOD_ALERT_STORAGE_KEY)).has(key),ackButton=`<div class="issueButtons"><button class="issueBtn" data-issue-action="ack" data-issue-type="moderation" data-issue-key="${esc(key)}">${acknowledged?'確認済み':'通知を確認済みにする'}</button></div>`;return `<div class="taskItem${excessive?' actionRequired':''}"><div class="taskTop"><b>${esc(categories.join('、')||'-')}</b><span class="badge">${esc(r.reason||'-')}</span></div>${warning}<div class="taskMeta">${esc(r.mode||'-')}<br>発生: ${fmt(r.created_at)}<br>対象ユーザー: ${esc(taskUserLabel(r))}</div><details><summary>プロンプトを表示</summary>${esc(r.prompt||'記録なし')}</details><details><summary>classification詳細を表示（11項目）</summary>${classificationDetail(r.classification)}</details>${ackButton}</div>`}
 function renderModBlocks(){const filtered=modBlocksCache.filter(matchesModFilter),rows=filtered.slice(0,modBlocksVisible),el=$('modBlockList');renderModFilterBars();$('modBlockCountNote').textContent=`最新100件までを取得します。現在${modBlocksCache.length}件を取得（絞り込み後：${filtered.length}件中${rows.length}件を表示）`;el.innerHTML=rows.length?rows.map(modBlockCard).join(''):'<div class="empty">該当するブロックはありません</div>';$('moreModBlocksBtn').style.display=modBlocksVisible<filtered.length?'block':'none'}
 async function loadModerationBlocks(){const r=await client.from('moderation_blocks').select('id,user_id,mode,categories,reason,classification,prompt,created_at').order('created_at',{ascending:false}).limit(100);if(r.error){$('modBlockList').innerHTML='<div class="empty">読み取りエラー：'+esc(r.error.message)+'</div>';return false}modBlocksCache=r.data||[];modExcessiveRowIds=detectExcessiveRowIds(modBlocksCache);$('modBlockCount').textContent=modBlocksCache.length;renderModBlockCategoryGrid(modBlocksCache);modBlocksVisible=20;renderModBlocks();return true}
+// ---- H3 Live 管理（生成スイッチ + 要対応ジョブ）----
+// h3_live_controls / h3_live_jobs は service_role 専用テーブルのため、匿名
+// クライアントでは読めない。すべて /api/h3-live/admin（管理者認証つき）経由。
+async function callH3Admin(action,extra){
+  const {data:{session}}=await client.auth.getSession();
+  const res=await fetch('/api/h3-live/admin',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(session?.access_token||'')},body:JSON.stringify({action,...(extra||{})})});
+  const data=await res.json().catch(()=>null);
+  if(!res.ok||!data?.ok)throw new Error(data?.message||('処理に失敗しました（'+res.status+'）'));
+  return data;
+}
+function renderH3Control(d){
+  const on=d.enabled===true,btn=$('h3ControlToggle');
+  $('h3ControlState').textContent=d.missing?'未設定（マイグレーション未適用の可能性）':(on?'有効（生成できます）':'停止中');
+  $('h3ControlUpdated').textContent=d.updatedAt?new Date(d.updatedAt).toLocaleString('ja-JP'):'-';
+  btn.dataset.next=on?'off':'on';
+  btn.textContent=on?'H3 Liveを停止する':'H3 Liveを有効にする';
+  btn.disabled=Boolean(d.missing)||h3ControlBusy;
+}
+async function loadH3Control(){
+  try{renderH3Control(await callH3Admin('getControl'));}
+  catch(e){$('h3ControlState').textContent='取得できません';$('h3ControlStatus').textContent=String(e.message||e);$('h3ControlToggle').disabled=true;}
+}
+async function toggleH3Control(){
+  if(h3ControlBusy)return;
+  const btn=$('h3ControlToggle'),next=btn.dataset.next==='on';
+  if(!confirm(next?'H3 Liveを有効にします。対象プランのユーザーが1本110クレジットで生成を開始できるようになります。よろしいですか？':'H3 Liveを停止します。新規のH3 Live生成ができなくなります。よろしいですか？'))return;
+  h3ControlBusy=true;btn.disabled=true;$('h3ControlStatus').textContent='更新中…';
+  try{renderH3Control(await callH3Admin('setControl',{enabled:next}));$('h3ControlStatus').textContent='更新しました：'+new Date().toLocaleString('ja-JP');}
+  catch(e){$('h3ControlStatus').textContent='更新できません：'+String(e.message||e);}
+  finally{h3ControlBusy=false;$('h3ControlToggle').disabled=false;}
+}
+function h3AlertUserLabel(j){return profilesCache.find(p=>p.id===j.userId)?.email||j.userId||'不明'}
+function buildH3SupportRequest(kind,j){
+  const label=kind==='stuck'?'H3 Live 詰まりジョブ（自動で進行不可）':'H3 Live 返金未確定ジョブ（課金済み・失敗・返金記録なし）';
+  return `Pina Studio 管理画面からの対応依頼です（H3 Live）。\n原因と二重処理の有無を調査し、対応は api/h3-live/reconcile.js で行ってください。手動でのDB変更・二重返金・再送信は、私の承認前に実行しないでください。\n\n分類: ${label}\nジョブ状態: ${j.status}\n入力モード: ${j.inputMode}\n課金済み: ${j.charged?'はい':'いいえ'}\n返金記録: ${j.refunded?'あり':'なし'}\n提供元リクエストID: ${j.providerRequestId||'-'}\nエラーコード: ${j.errorCode||'-'}\n最終更新からの経過: ${j.ageMinutes==null?'-':j.ageMinutes+'分'}\n作成: ${fmt(j.createdAt)}\n更新: ${fmt(j.updatedAt)}\n対象ユーザー: ${h3AlertUserLabel(j)}\nジョブID: ${j.id||'-'}`;
+}
+function h3AlertCard(kind,j){
+  const title=kind==='stuck'?'詰まり（自動で進行不可）':'返金未確定（課金済み・失敗）';
+  const key=h3AlertKey(j),acked=new Set(readAcknowledgedIssueKeys(H3_ALERT_STORAGE_KEY)).has(key);
+  return `<div class="taskItem${acked?'':' actionRequired'}"><div class="taskTop"><b>${esc(title)}</b><span class="badge">${esc(j.status)}</span></div><div class="issueAction">対応：api/h3-live/reconcile.js の GET で確認し、必要に応じて POST（force判断は fal.ai 側の実行有無を確認してから）。手動DB変更・二重返金はしないでください。</div><div class="taskMeta">入力: ${esc(j.inputMode)} ｜ 課金: ${j.charged?'済':'なし'} ｜ 返金記録: ${j.refunded?'あり':'なし'} ｜ 経過: ${j.ageMinutes==null?'-':esc(String(j.ageMinutes))+'分'}<br>作成: ${fmt(j.createdAt)} ／ 更新: ${fmt(j.updatedAt)}<br>対象ユーザー: ${esc(h3AlertUserLabel(j))}</div><details><summary>技術情報を表示</summary>ジョブID: ${esc(j.id||'-')}<br>提供元リクエストID: ${esc(j.providerRequestId||'-')}<br>エラーコード: ${esc(j.errorCode||'-')}</details><div class="issueButtons"><button class="issueBtn primary" data-h3-action="copy" data-h3-kind="${esc(kind)}" data-h3-id="${esc(j.id||'')}">対応依頼をコピー</button><button class="issueBtn" data-h3-action="ack" data-h3-key="${esc(key)}">${acked?'確認済み':'通知を確認済みにする'}</button></div></div>`;
+}
+function renderH3Alerts(staleMin){
+  h3StaleMinutes=staleMin||h3StaleMinutes||20;
+  const rows=[...h3StuckCache.map(j=>['stuck',j]),...h3UnrefundedCache.map(j=>['unrefunded',j])];
+  $('h3AlertCountNote').textContent=`詰まり ${h3StuckCache.length}件（${h3StaleMinutes}分以上停止）／ 返金未確定 ${h3UnrefundedCache.length}件`;
+  $('h3AlertList').innerHTML=rows.length?rows.map(([k,j])=>h3AlertCard(k,j)).join(''):'<div class="empty">要対応のH3 Liveジョブはありません</div>';
+}
+async function loadH3Alerts(){
+  try{
+    const d=await callH3Admin('listAlerts');
+    h3StuckCache=d.stuck||[];h3UnrefundedCache=d.unrefunded||[];
+    renderH3Alerts(d.staleMinutes);
+  }catch(e){
+    h3StuckCache=[];h3UnrefundedCache=[];
+    $('h3AlertList').innerHTML='<div class="empty">読み取りエラー：'+esc(String(e.message||e))+'</div>';
+    $('h3AlertCountNote').textContent='';
+  }
+  updateNotificationBadge();
+}
+async function copyH3SupportRequest(kind,id){
+  const j=(kind==='stuck'?h3StuckCache:h3UnrefundedCache).find(x=>String(x.id)===String(id));
+  if(!j)return;
+  try{await copyText(buildH3SupportRequest(kind,j));$('opsStatus').textContent='H3 Liveの対応依頼をコピーしました。ChatGPTへ貼り付けてください。';}
+  catch{$('opsStatus').textContent='コピーできませんでした。技術情報を開いて画面をスクリーンショットしてください。';}
+}
 async function loadOps(){const tr=await client.from('generation_tasks').select('id,user_id,api_task_id,api_provider,status,mode,model,credit_cost,output_url,error_message,created_at,updated_at').order('updated_at',{ascending:false}).limit(100);if(tr.error){$('opsStatus').textContent='読み取りエラー：'+tr.error.message;return false}opsRowsCache=tr.data||[];const cr=await fetchTaskCreditRows(opsRowsCache.map(t=>t.id).filter(Boolean));if(cr.error){$('opsStatus').textContent='クレジット照合エラー：'+cr.error.message;return false}creditsCache=cr.data||[];const states=opsRowsCache.map(handlingState),facts=opsRowsCache.map(taskFacts);opsActionCache=opsRowsCache.filter(t=>handlingState(t).kind==='action');opsMonitoringCache=opsRowsCache.filter(t=>handlingState(t).kind==='monitoring');opsResolvedCache=opsRowsCache.filter(t=>handlingState(t).kind==='resolved');const action=opsActionCache.length,monitoring=opsMonitoringCache.length,resolved=opsResolvedCache.length,healthy=states.filter(x=>x.kind==='healthy').length,past=facts.filter(x=>x.statusFailed).length;$('opsErrorCount').textContent=action;$('opsWarningCount').textContent=monitoring;$('opsHealthyCount').textContent=resolved;$('opsTotalCount').textContent=healthy;$('opsIssueCount').textContent=action;$('dashOpsErrorCount').textContent=action;$('dashOpsWarningCount').textContent=monitoring;$('dashOpsHealthyCount').textContent=resolved;$('dashOpsIssueCount').textContent=healthy;$('reasonFailedCount').textContent=past;$('reasonErrorMessageCount').textContent=facts.filter(x=>x.hasError).length;$('reasonMissingUrlCount').textContent=facts.filter(x=>x.missingUrl).length;$('reasonQueuedStaleCount').textContent=facts.filter(x=>x.queuedStale).length;$('reasonProcessingStaleCount').textContent=facts.filter(x=>x.processingStale).length;$('opsActionCountNote').textContent=`最新100件までを取得します。現在${opsRowsCache.length}件を取得（対応が必要：${action}件）`;const now='最終更新：'+new Date().toLocaleString('ja-JP');$('opsStatus').textContent=now;$('dashOpsUpdated').textContent=now;opsVisible=20;creditsVisible=20;renderOpsGroups();renderCredits();
   // 生成エラー側の初回基準化は、moderation_blocksの読み込み成否に関わらず
   // ここで確定させる(このタスク取得自体は成功しているため)。
@@ -212,6 +288,7 @@ async function loadOps(){const tr=await client.from('generation_tasks').select('
   // それぞれの確認済みキーセットと直接照合するため、alertRowsCacheの
   // ような合算キャッシュも不要になった。
   await loadModerationBlocks();
+  await loadH3Alerts();
   updateNotificationBadge();
   return true}
 async function autoRefreshOps(){if(!currentUser||document.visibilityState==='hidden'||opsRefreshInFlight)return;opsRefreshInFlight=true;try{await loadOps()}finally{opsRefreshInFlight=false}}
@@ -219,6 +296,7 @@ async function fetchAllRows(table,columns){const pageSize=1000,allRows=[];const 
 async function loadData(){if(!client||!currentUser)return;$('dbStatus').textContent='読み込み中';const [p,b,t]=await Promise.all([fetchAllRows('profiles','id,email,role,plan,created_at'),fetchAllRows('credit_balances','user_id,free_credits,subscription_credits,purchased_credits'),client.from('generation_tasks').select('id,user_id,status,mode,prompt,resolution,duration_seconds,aspect_ratio,credit_cost,created_at').order('created_at',{ascending:false}).limit(100)]);const errors=[p.error,b.error,t.error].filter(Boolean);if(errors.length){$('dbStatus').textContent='読み取りエラー';$('lastLoaded').textContent=errors.map(e=>e.message).join(' / ');return}profilesCache=p.data||[];balancesCache=b.data||[];tasksCache=t.data||[];const balances=balancesCache,sum=balances.reduce((a,x)=>({free:a.free+Number(x.free_credits||0),sub:a.sub+Number(x.subscription_credits||0),paid:a.paid+Number(x.purchased_credits||0)}),{free:0,sub:0,paid:0}),counts=tasksCache.reduce((a,x)=>(a[x.status]=(a[x.status]||0)+1,a),{});$('userCount').textContent=profilesCache.length;$('adminCount').textContent=profilesCache.filter(x=>x.role==='admin').length;$('creditTotal').textContent=sum.free+sum.sub+sum.paid;$('paidTotal').textContent=sum.paid;$('creditBreakdown').textContent=`無料${sum.free} / サブスク${sum.sub} / 購入${sum.paid}`;$('draftCount').textContent=counts.draft||0;$('queuedCount').textContent=(counts.queued||0)+(counts.pending||0);$('processingCount').textContent=(counts.processing||0)+(counts.running||0);$('completedCount').textContent=(counts.completed||0)+(counts.succeeded||0);$('failedCount').textContent=(counts.failed||0)+(counts.error||0);renderTasks();$('dbStatus').textContent='接続済み';$('lastLoaded').textContent='最終更新：'+new Date().toLocaleString('ja-JP');await loadOps()}
 async function logout(){if(client)await client.auth.signOut();location.href='./index.html'}
 $('menuBtn').onclick=openMenu;$('closeMenuBtn').onclick=closeMenu;$('overlay').onclick=closeMenu;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>showView(b.dataset.view));$('userSearchInput').oninput=renderUserSearch;document.querySelectorAll('[data-task-filter]').forEach(b=>b.onclick=()=>{taskFilter=b.dataset.taskFilter;taskVisible=20;document.querySelectorAll('[data-task-filter]').forEach(x=>x.classList.toggle('active',x===b));renderTasks()});$('notificationBtn').onclick=openNotificationTarget;$('logoutBtn').onclick=logout;$('drawerLogoutBtn').onclick=logout;$('refreshBtn').onclick=loadData;$('refreshTasksBtn').onclick=()=>{taskVisible=20;loadData()};$('openOpsBtn').onclick=()=>showView('ops');$('recheckAllBtn').onclick=e=>recheckOpsNow(e.currentTarget);$('moreTasksBtn').onclick=()=>{taskVisible+=20;renderTasks()};$('moreOpsBtn').onclick=()=>{opsVisible+=20;renderOpsGroups()};$('moreCreditsBtn').onclick=()=>{creditsVisible+=20;renderCredits()};$('moreModBlocksBtn').onclick=()=>{modBlocksVisible+=20;renderModBlocks()};$('modUserFilterInput').oninput=()=>{modBlocksVisible=20;renderModBlocks()};$('ops').addEventListener('click',e=>{const issueButton=e.target.closest('[data-issue-action]');if(issueButton){const action=issueButton.dataset.issueAction,key=issueButton.dataset.issueKey;if(action==='copy')copySupportRequest(key);if(action==='ack')acknowledgeIssue(key,issueButton.dataset.issueType);return}const reasonButton=e.target.closest('[data-mod-reason-filter]');if(reasonButton){modReasonFilter=reasonButton.dataset.modReasonFilter;modBlocksVisible=20;renderModBlocks();return}const modeButton=e.target.closest('[data-mod-mode-filter]');if(modeButton){modModeFilter=modeButton.dataset.modModeFilter;modBlocksVisible=20;renderModBlocks();return}});
-(async()=>{if(!client){$('warn').textContent='Supabase設定を確認できません。';$('warn').classList.add('show');return}const {data:{session},error}=await client.auth.getSession();if(error||!session?.user){location.href='./admin-login.html';return}const email=String(session.user.email||'').toLowerCase();if(email!==ADMIN_EMAIL){location.href='./admin-login.html';return}const {data:profile,error:profileError}=await client.from('profiles').select('role').eq('id',session.user.id).maybeSingle();if(profileError||profile?.role!=='admin'){location.href='./admin-login.html';return}currentUser=session.user;$('app').style.display='block';await loadData();setInterval(autoRefreshOps,OPS_REFRESH_MS)})();
+$('h3ControlToggle').onclick=toggleH3Control;$('h3AlertList').addEventListener('click',e=>{const b=e.target.closest('[data-h3-action]');if(!b)return;if(b.dataset.h3Action==='copy'){copyH3SupportRequest(b.dataset.h3Kind,b.dataset.h3Id);return}if(b.dataset.h3Action==='ack'){writeAcknowledgedIssueKeys([...readAcknowledgedIssueKeys(H3_ALERT_STORAGE_KEY),b.dataset.h3Key],H3_ALERT_STORAGE_KEY);updateNotificationBadge();renderH3Alerts();$('opsStatus').textContent='通知を確認済みにしました。問題が直ったことを示す操作ではありません。';}});
+(async()=>{if(!client){$('warn').textContent='Supabase設定を確認できません。';$('warn').classList.add('show');return}const {data:{session},error}=await client.auth.getSession();if(error||!session?.user){location.href='./admin-login.html';return}const email=String(session.user.email||'').toLowerCase();if(email!==ADMIN_EMAIL){location.href='./admin-login.html';return}const {data:profile,error:profileError}=await client.from('profiles').select('role').eq('id',session.user.id).maybeSingle();if(profileError||profile?.role!=='admin'){location.href='./admin-login.html';return}currentUser=session.user;$('app').style.display='block';await loadData();loadH3Control();setInterval(autoRefreshOps,OPS_REFRESH_MS)})();
 </script>
 </body></html>

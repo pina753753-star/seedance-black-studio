@@ -38,6 +38,10 @@
     {
       "path": "/api/reference-audio-cleanup",
       "schedule": "37 * * * *"
+    },
+    {
+      "path": "/api/h3-live/image-cleanup",
+      "schedule": "47 * * * *"
     }
   ]
 }
