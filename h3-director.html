@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <script>
+    (function(){
+      if(location.hostname === 'pina753753-star.github.io'){
+        var path = location.pathname.replace('/seedance-black-studio','') || '/h3-director.html';
+        location.replace('https://flowvid-studio.vercel.app' + path + location.search + location.hash);
+      }
+    })();
+  </script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>H3 Director Live | Pina Studio</title>
+  <meta name="theme-color" content="#030303">
+  <link rel="icon" type="image/png" href="/assets/brand/pina-icon-v2-favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#030303;--panel:#0a0a0b;--line:rgba(255,255,255,.12);--text:#f7f7f7;--muted:#8b8b90;--live:#ff315e;--blue:#6d8dff}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:'Noto Sans JP',system-ui,sans-serif}
+    body{min-height:100dvh;display:flex;flex-direction:column}button,textarea{font:inherit}button{cursor:pointer}
+    header{height:64px;display:flex;align-items:center;gap:13px;padding:0 18px;border-bottom:1px solid var(--line);background:rgba(5,5,5,.92)}
+    .brand{font-size:13px;font-weight:900;letter-spacing:.19em}.brand b{color:#aebcff}.spacer{flex:1}
+    .model-switch{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}.model-switch a{padding:7px 10px;color:var(--muted);text-decoration:none;font-size:11px;white-space:nowrap}.model-switch a.on{background:#fff;color:#080808;font-weight:900}
+    .pill{border:1px solid var(--line);border-radius:999px;padding:7px 11px;font-size:11px;color:var(--muted);white-space:nowrap}.pill strong{color:#fff}
+    .close{color:#fff;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:12px}
+    main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}@media(max-width:900px){main{grid-template-columns:1fr}}
+    .screen-wrap{display:grid;place-items:center;padding:22px;background:radial-gradient(circle at 50% 45%,#18181b 0,#080808 54%,#030303 100%)}
+    .screen{position:relative;width:100%;max-width:1080px;aspect-ratio:16/9;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#000;box-shadow:0 34px 100px #000;transition:width .2s ease,aspect-ratio .2s ease}.screen.portrait{width:min(100%,calc((100dvh - 110px)*9/16));aspect-ratio:9/16}
+    video{width:100%;height:100%;display:block;object-fit:contain;background:#000}.empty{position:absolute;inset:0;display:grid;place-content:center;text-align:center;gap:10px;color:var(--muted);padding:20px}
+    .empty b{font-size:17px;letter-spacing:.22em;color:#ddd}
+    .live{display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(255,49,94,.45);background:rgba(255,49,94,.13);border-radius:999px;padding:6px 10px;font-size:10px;font-weight:900;letter-spacing:.14em}
+    .dot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live)}.timer{font:700 12px ui-monospace,monospace}
+    .notice{position:absolute;left:50%;bottom:15px;transform:translateX(-50%);max-width:88%;background:rgba(0,0,0,.82);border:1px solid var(--line);border-radius:11px;padding:8px 12px;font-size:12px;text-align:center;display:none}.notice.show{display:block}
+    aside{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}@media(max-width:900px){aside{border-left:0;border-top:1px solid var(--line)}}
+    .side-head{padding:17px;border-bottom:1px solid var(--line)}.side-head h1{font-size:15px;margin:0 0 5px}.side-head p{margin:0;color:var(--muted);font-size:11px;line-height:1.6}
+    .log{flex:1;min-height:150px;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:9px}.msg{font-size:12.5px;line-height:1.65;border:1px solid var(--line);border-radius:13px;padding:9px 11px;max-width:92%}.msg.user{align-self:flex-end;background:#151519}.msg.system{align-self:flex-start;color:#aaa;background:#080809}
+    .history{border-bottom:1px solid var(--line);padding:12px 14px;display:grid;gap:8px;max-height:210px;overflow:auto}.history-title{font-size:10px;letter-spacing:.18em;color:#777;font-weight:900}.history-item{border:1px solid var(--line);border-radius:11px;padding:9px;background:#070708;font-size:11px}.history-item p{margin:0 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.history-item small{color:#777}.history-item button{margin:7px 6px 0 0;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:#151519;color:#fff;font-size:10px}
+    .gate{margin:14px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#111;font-size:12px;line-height:1.7;display:none}.gate.show{display:block}.gate a{color:#c9d2ff}
+    .composer{padding:13px;border-top:1px solid var(--line);display:grid;gap:9px}textarea{width:100%;min-height:76px;max-height:150px;resize:vertical;background:#020202;color:#fff;border:1px solid var(--line);border-radius:13px;padding:11px 12px;outline:none}textarea:focus{border-color:#6976a6}
+    .meta{display:flex;gap:8px;align-items:center;font-size:10.5px;line-height:1.5;color:var(--muted)}.meta span{flex:1}.format{display:flex;align-items:center;gap:7px;white-space:nowrap}.format select{border:1px solid var(--line);border-radius:8px;background:#111;color:#fff;padding:6px 8px;font:inherit}.format select:disabled{opacity:.45}.primary,.stop,.retry{border:0;border-radius:11px;padding:11px 14px;font-weight:900}.primary{background:#f3f3f3;color:#080808}.primary:disabled{opacity:.4;cursor:not-allowed}.stop{background:#281017;color:#ff7895;display:none}.stop.show{display:block}.retry{display:none;background:#17223d;color:#b9c8ff}.retry.show{display:block}
+    .footnote{font-size:10.5px;color:#666;line-height:1.6}.connecting:after{content:'';display:inline-block;width:12px;height:12px;margin-left:8px;border:2px solid #555;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:650px){header{gap:7px;padding:0 10px}header>.live,.brand{display:none}.model-switch a{padding:6px 8px;font-size:10px}.pill.balance-pill{display:none}}
+  </style>
+</head>
+<body>
+  <header>
+    <span class="live"><span class="dot"></span><span id="topState">OFFLINE</span></span>
+    <span class="brand">H3 <b>DIRECTOR</b></span>
+    <nav class="model-switch" aria-label="H3モデル選択"><a href="./h3-live.html">H3 Max</a><a class="on" href="./h3-director.html">Director Live</a></nav><span class="spacer"></span>
+    <span class="pill timer" id="timer">01:00</span>
+    <span class="pill balance-pill">残高 <strong id="balance">–</strong></span>
+    <a class="close" href="./index.html">閉じる</a>
+  </header>
+  <main>
+    <section class="screen-wrap">
+      <div class="screen" id="screen">
+        <video id="video" autoplay playsinline controls></video>
+        <div class="empty" id="empty"><b>REAL-TIME AI VIDEO</b><span>開始すると、生成中の映像がここへ直接届きます。</span></div>
+        <div class="notice" id="notice"></div>
+      </div>
+    </section>
+    <aside>
+      <div class="side-head"><h1>ライブ指示</h1><p>最初の指示でライブを開始。配信中は追加指示で映像を変化させられます。</p></div>
+      <div class="gate" id="gate"></div>
+      <div class="history"><div class="history-title">DIRECTOR HISTORY</div><div id="history">履歴を確認中…</div></div>
+      <div class="log" id="log"></div>
+      <div class="composer">
+        <textarea id="prompt" maxlength="2000" placeholder="例：雨の東京、ネオンが反射する路地をカメラがゆっくり前進"></textarea>
+        <div class="meta"><span>60秒 / 768p / 440クレジット</span><label class="format">比率<select id="aspectRatio"><option value="16:9">16:9 横</option><option value="9:16">9:16 縦</option></select></label></div>
+        <button class="primary" id="action" disabled>ライブ生成を開始</button>
+        <button class="stop" id="stop">ライブを終了</button>
+        <button class="retry" id="retrySave">録画保存を再試行</button>
+        <div class="footnote">開始ごとに440クレジット。falの最低課金が60秒のため、途中終了でも返還されません。終了した録画は非公開で自動保存します。強制終了や通信切断時は保存できない場合があります。</div>
+      </div>
+    </aside>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-config.js?v=4a1f0c1"></script>
+  <script src="./auth-guard.js?v=1"></script>
+  <script>
+  (function(){
+    'use strict';
+    var $=function(id){return document.getElementById(id)};
+    var supabaseClient=typeof window.flowvidSupabaseClient==='function'?window.flowvidSupabaseClient():null;
+    var pc=null,control=null,remoteStream=null,sessionId=null,heartbeatTimer=null,countdownTimer=null;
+    var recorder=null,recordChunks=[],recordMime='',recordStartTimer=null,pendingRecording=null;
+    var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='';
+
+    function log(text,kind){var el=document.createElement('div');el.className='msg '+(kind||'system');el.textContent=text;$('log').appendChild(el);$('log').scrollTop=$('log').scrollHeight}
+    function esc(text){return String(text==null?'':text).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+    function notice(text){$('notice').textContent=text;$('notice').classList.add('show');setTimeout(function(){$('notice').classList.remove('show')},5000)}
+    function state(text){$('topState').textContent=text}
+    function updateScreenRatio(){var ratio=$('aspectRatio').value;$('screen').classList.toggle('portrait',ratio==='9:16')}
+    async function token(){if(!supabaseClient)return'';var r=await supabaseClient.auth.getSession();authToken=(r&&r.data&&r.data.session&&r.data.session.access_token)||'';return authToken}
+    async function api(path,options){var t=await token();if(!t)throw new Error('ログインが必要です。');var opts=options||{};var headers=Object.assign({'Authorization':'Bearer '+t},opts.headers||{});if(opts.body)headers['Content-Type']='application/json';var r=await fetch(path,Object.assign({},opts,{headers:headers}));var data={};try{data=await r.json()}catch(e){}if(!r.ok){var err=new Error(data.message||data.error||'通信に失敗しました。');err.code=data.error;err.data=data;throw err}return data}
+    function uuid(){return crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&3|8);return v.toString(16)})}
+    function waitIce(peer){return new Promise(function(resolve,reject){if(peer.iceGatheringState==='complete')return resolve();var timeout=setTimeout(function(){cleanup();reject(new Error('接続情報を準備できませんでした。'))},12000);function done(){if(peer.iceGatheringState==='complete'){cleanup();resolve()}}function cleanup(){clearTimeout(timeout);peer.removeEventListener('icegatheringstatechange',done)}peer.addEventListener('icegatheringstatechange',done)})}
+    function sendControl(message){if(!control||control.readyState!=='open')throw new Error('ライブ接続がまだ準備中です。');control.send(JSON.stringify(message))}
+    function recordingMime(){var choices=['video/mp4;codecs=h264,aac','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];for(var i=0;i<choices.length;i++){if(MediaRecorder.isTypeSupported(choices[i]))return choices[i]}return''}
+    function maybeStartRecording(){clearTimeout(recordStartTimer);recordStartTimer=setTimeout(function(){if(!live||recorder||!remoteStream||!remoteStream.getVideoTracks().length)return;try{recordMime=recordingMime();var options={videoBitsPerSecond:3500000,audioBitsPerSecond:128000};if(recordMime)options.mimeType=recordMime;try{recorder=new MediaRecorder(remoteStream,options)}catch(_){recorder=recordMime?new MediaRecorder(remoteStream,{mimeType:recordMime}):new MediaRecorder(remoteStream)}recordChunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)recordChunks.push(e.data)};recorder.onerror=function(){log('録画処理でエラーが発生しました。')};recorder.start(1000);log('ライブ映像の録画を開始しました。')}catch(e){log('この端末ではライブ録画を開始できませんでした。')}},700)}
+    function stopRecording(){clearTimeout(recordStartTimer);return new Promise(function(resolve){if(!recorder||recorder.state==='inactive'){resolve(null);return}var current=recorder;current.addEventListener('stop',function(){var mime=String(current.mimeType||recordMime||'video/webm').split(';')[0];var blob=recordChunks.length?new Blob(recordChunks,{type:mime}):null;recorder=null;recordChunks=[];resolve(blob)},{once:true});try{current.stop()}catch(e){resolve(null)}})}
+    function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。')}
+    function cleanup(){live=false;starting=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
+
+    async function saveRecording(blob,targetSession){if(!blob||!blob.size||!targetSession)return;pendingRecording={blob:blob,sessionId:targetSession};$('retrySave').classList.remove('show');state('SAVING');log('録画を保存しています…');try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:targetSession})});var slot=await api('/api/h3-director/recording-upload-url',{method:'POST',body:JSON.stringify({sessionId:targetSession,contentType:blob.type||'video/webm',byteSize:blob.size})});var up=await supabaseClient.storage.from(slot.bucket).uploadToSignedUrl(slot.path,slot.token,blob,{contentType:blob.type||'video/webm',upsert:true});if(up&&up.error)throw new Error('録画ファイルを保存できませんでした。');await api('/api/h3-director/recording-complete',{method:'POST',body:JSON.stringify({sessionId:targetSession})});pendingRecording=null;state('SAVED');log('録画を履歴へ保存しました。');notice('録画を保存しました。');await loadHistory();setTimeout(function(){if(!live)state('OFFLINE')},1800)}catch(e){state('SAVE ERROR');$('retrySave').classList.add('show');log('録画の保存に失敗しました。再試行してください。');notice(e.message)}}
+
+    async function finish(message){if(!live&&!starting)return;var endingSession=sessionId;live=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}var recording=await stopRecording();if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}cleanup();sessionId=null;if(message){log(message);notice(message)}if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()}
+
+    async function heartbeat(){if(!live||!sessionId)return;try{var data=await api('/api/h3-director/heartbeat',{method:'POST',body:JSON.stringify({sessionId:sessionId})});heartbeatFailures=0;if(!data.alive){await finish('ライブセッションが終了しました。')}}catch(e){heartbeatFailures++;if(e.code==='account_restricted'){await finish('アカウント状態の変更によりライブを終了しました。');return}if(heartbeatFailures>=3){await finish('接続を維持できなかったためライブを終了しました。自動再生成は行いません。')}}}
+
+    async function start(){
+      var prompt=$('prompt').value.trim();if(!prompt||starting||live)return;
+      var aspectRatio=$('aspectRatio').value;if(!['16:9','9:16'].includes(aspectRatio)){notice('画面比率を選択してください。');return}
+      if(!window.RTCPeerConnection||!window.MediaRecorder){notice('このブラウザはライブ生成・録画に対応していません。');return}
+      starting=true;$('aspectRatio').disabled=true;$('action').disabled=true;$('action').textContent='接続を準備中…';$('action').classList.add('connecting');state('CONNECTING');log(prompt,'user');
+      var idem=uuid();
+      try{
+        pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});remoteStream=new MediaStream();$('video').srcObject=remoteStream;
+        pc.addTransceiver('video',{direction:'recvonly'});pc.addTransceiver('audio',{direction:'recvonly'});
+        pc.ontrack=function(event){remoteStream.addTrack(event.track);$('empty').style.display='none';$('video').play().catch(function(){notice('映像をタップすると音声付きで再生できます。')});maybeStartRecording()};
+        pc.onconnectionstatechange=function(){if(!pc)return;if(['failed','closed'].includes(pc.connectionState)&&live)finish('WebRTC接続が終了しました。自動再生成は行いません。')};
+        control=pc.createDataChannel('fal',{ordered:true});
+        control.onopen=function(){try{sendControl({type:'configure',protocol_version:1,prompt_version:1,prompt:prompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12});log('Directorへ初期指示を送信しました。')}catch(e){notice(e.message)}};
+        control.onmessage=function(event){try{var msg=JSON.parse(event.data);if(msg.type==='error')notice('Director: '+(msg.error||'エラー'));if(msg.type==='prompt_applied')log('追加指示を映像へ反映しました。');if(msg.type==='stream_exhausted')finish('ライブ生成が完了しました。')}catch(e){}};
+        var offer=await pc.createOffer();await pc.setLocalDescription(offer);await waitIce(pc);
+        var result=await api('/api/h3-director/start-session',{method:'POST',headers:{'Idempotency-Key':idem},body:JSON.stringify({prompt:prompt,sdp:pc.localDescription.sdp,type:'offer',aspectRatio:aspectRatio})});
+        sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
+        live=true;starting=false;heartbeatFailures=0;$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
+        log('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。');updateTimer();countdownTimer=setInterval(updateTimer,250);await heartbeat();heartbeatTimer=setInterval(heartbeat,5000);
+      }catch(e){if(['provider_start_ambiguous','session_state_requires_review','refund_unconfirmed'].includes(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
+    }
+
+    async function sendPrompt(){var prompt=$('prompt').value.trim();if(!prompt||!live||!sessionId)return;$('action').disabled=true;try{var approved=await api('/api/h3-director/approve-prompt',{method:'POST',body:JSON.stringify({sessionId:sessionId,prompt:prompt})});sendControl({type:'prompt',prompt_version:approved.promptVersion,prompt:approved.prompt});log(prompt,'user');$('prompt').value=''}catch(e){notice(e.message);log('指示を送信できませんでした。')}finally{$('action').disabled=!$('prompt').value.trim();$('action').textContent=live?'追加指示を送る':'ライブ生成を開始'}}
+
+    async function openRecording(id,download,ratio){try{var d=await api('/api/h3-director/recording-url?sessionId='+encodeURIComponent(id),{method:'GET'});if(download){var a=document.createElement('a');a.href=d.url;a.download=d.filename||('h3-director-'+id);a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();return}if(live){notice('ライブ終了後に履歴を再生できます。');return}if(['16:9','9:16'].includes(ratio)){$('aspectRatio').value=ratio;updateScreenRatio()}$('video').srcObject=null;$('video').src=d.url;$('empty').style.display='none';$('video').play().catch(function(){notice('再生ボタンを押してください。')})}catch(e){notice(e.message)}}
+    async function loadHistory(){try{var d=await api('/api/h3-director/history?limit=10',{method:'GET'});var rows=d.sessions||[];$('history').innerHTML=rows.length?rows.map(function(s){var date=s.createdAt?new Date(s.createdAt).toLocaleString('ja-JP'):'';var ratio=['16:9','9:16'].includes(s.aspectRatio)?s.aspectRatio:'16:9';var buttons=s.recordingReady?'<button data-play="'+s.id+'" data-ratio="'+ratio+'">再生</button><button data-save="'+s.id+'">保存</button>':'';var status=s.recordingReady?'保存済み':s.recordingStatus==='uploading'?'保存処理中':'録画なし';return'<div class="history-item"><p>'+esc(s.prompt)+'</p><small>'+esc(date)+' ・ '+esc(ratio)+' ・ Director ・ '+esc(status)+'</small><div>'+buttons+'</div></div>'}).join(''):'履歴はまだありません。';Array.prototype.forEach.call($('history').querySelectorAll('[data-play]'),function(b){b.onclick=function(){openRecording(b.dataset.play,false,b.dataset.ratio)}});Array.prototype.forEach.call($('history').querySelectorAll('[data-save]'),function(b){b.onclick=function(){openRecording(b.dataset.save,true)}})}catch(e){$('history').textContent='履歴を確認できませんでした。'}}
+
+    $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||!this.value.trim()});
+    $('aspectRatio').addEventListener('change',updateScreenRatio);updateScreenRatio();
+    $('action').addEventListener('click',function(){live?sendPrompt():start()});$('stop').addEventListener('click',function(){finish('ライブを終了しました。')});
+    $('retrySave').addEventListener('click',function(){if(pendingRecording)saveRecording(pendingRecording.blob,pendingRecording.sessionId)});
+    window.addEventListener('pagehide',function(){clearInterval(heartbeatTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}if(sessionId&&authToken){try{fetch('/api/h3-director/end-session',{method:'POST',headers:{'Authorization':'Bearer '+authToken,'Content-Type':'application/json'},body:JSON.stringify({sessionId:sessionId}),keepalive:true})}catch(e){}}if(pc)pc.close()});
+
+    (async function init(){
+      try{await loadHistory();var info=await api('/api/h3-director/info',{method:'GET'});$('balance').textContent=info.balance+' credits';
+        if(!info.enabled){$('gate').className='gate show';$('gate').textContent='H3 Director は現在テスト停止中です。';return}
+        if(!info.eligible){$('gate').className='gate show';$('gate').innerHTML='H3 Director は Premium 以上の有効なプランで利用できます。<br><a href="/pricing.html#monthly">プランを見る →</a>';return}
+        if(info.accountStatus!=='active'){$('gate').className='gate show';$('gate').textContent='現在このアカウントでは生成機能を利用できません。';return}
+        if(info.balance<440){$('gate').className='gate show';$('gate').textContent='ライブ開始には440クレジット必要です。';return}
+        $('action').disabled=!$('prompt').value.trim();log('準備完了。最初の指示を入力してライブを開始してください。');
+      }catch(e){$('gate').className='gate show';$('gate').textContent=e.message||'利用状態を確認できませんでした。'}
+    })();
+  })();
+  </script>
+</body>
+</html>

@@ -45,6 +45,10 @@
     .chip b{color:var(--text)}
     .bar a.back{border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px;
       padding:7px 12px;font-size:12px;color:var(--text)}
+    .model-switch{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+    .model-switch a{padding:7px 10px;font-size:11px;color:var(--muted);white-space:nowrap}
+    .model-switch a.on{background:#fff;color:#080808;font-weight:900}
+    @media(max-width:620px){.bar>.live,.wordmark{display:none}.model-switch a{padding:6px 8px;font-size:10px}.chip{display:none}}
 
     main{flex:1;display:grid;grid-template-columns:1fr 360px;gap:0;min-height:0}
     @media(max-width:920px){main{grid-template-columns:1fr}}
@@ -118,6 +122,9 @@
       font-size:10px;font-weight:900;letter-spacing:.18em;color:rgba(255,255,255,.72);
       border:1px solid var(--line);background:rgba(0,0,0,.5);padding:5px 9px;border-radius:999px;backdrop-filter:blur(2px)}
     .ai-badge b{color:var(--accent)}
+    /* Keep generated video unobstructed. Header state carries these labels. */
+    .stage .tag,.stage .rec,.ai-badge{display:none!important}
+    .save-link{display:none}.save-link.show{display:inline-flex}
 
     /* mode switch + image drop zone — same tokens as the rest of the composer */
     .modeseg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;align-self:flex-start}
@@ -146,8 +153,10 @@
   <header class="bar">
     <span class="live"><span class="dot"></span><span id="statusBadgeText">READY</span></span>
     <span class="wordmark">H3&nbsp;<b>LIVE</b></span>
+    <nav class="model-switch" aria-label="H3モデル選択"><a class="on" href="./h3-live.html">H3 Max</a><a href="./h3-director.html">Director Live</a></nav>
     <span class="spacer"></span>
     <span class="chip" id="balanceChip">残高 <b>–</b> クレジット</span>
+    <a class="back save-link" id="saveLink" href="#" target="_blank" rel="noopener" download>動画を保存</a>
     <a class="back" href="./index.html">閉じる</a>
   </header>
 
@@ -385,6 +394,9 @@
       $('recClock').textContent = '再生中';
       var v = $('video');
       v.src = url;
+      var save = $('saveLink');
+      save.href = url;
+      save.classList.add('show');
       v.hidden = false;
       $('placeholder').style.display = 'none';
       v.play().catch(function(){});
@@ -503,6 +515,7 @@
       var extra = '';
       if(job.inputMode === 'image') extra += ' ・ 画像+テキスト';
       if(job.status === 'failed' && job.refunded) extra += ' ・ クレジット返還済み';
+      if(job.status === 'completed' && job.videoUrl) extra += ' ・ <a href="' + esc(job.videoUrl) + '" target="_blank" rel="noopener" download>動画を保存</a>';
       return '<span class="st ' + esc(job.status) + '">' + esc(label) + '</span>' + extra;
     }
 
