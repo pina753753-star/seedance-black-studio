@@ -1,7 +1,8 @@
 'use strict';
 
 const { requireConfirmedAuth } = require('../_lib/confirmed-auth.js');
-const { jsonBody } = require('../_lib/h3-director-store.js');
+const { jsonBody, isUuid } = require('../_lib/h3-director-store.js');
+const { STALE_MINUTES, listStuck, releaseSession } = require('../_lib/h3-director-reconcile.js');
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || 'hinaran53@gmail.com').trim().toLowerCase();
 
@@ -43,13 +44,16 @@ module.exports = async function handler(req, res) {
   }
 
   if (action === 'listAlerts') {
-    const staleIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    const { data, error } = await db.from('h3_director_sessions')
-      .select('id,user_id,status,provider_session_id,charged_at,refunded_at,error_code,created_at,updated_at,expires_at')
-      .or(`status.eq.needs_review,and(status.eq.connecting,provider_session_id.is.null,updated_at.lt.${staleIso}),and(status.eq.failed,charged_at.not.is.null,refunded_at.is.null)`)
-      .order('updated_at', { ascending: false }).limit(100);
-    if (error) return res.status(503).json({ ok: false, error: 'alerts_read_failed' });
-    return res.status(200).json({ ok: true, alerts: data || [] });
+    const result = await listStuck(db);
+    if (!result.ok) return res.status(503).json({ ok: false, error: 'alerts_read_failed' });
+    return res.status(200).json({ ok: true, staleMinutes: STALE_MINUTES, alerts: result.alerts });
+  }
+
+  if (action === 'reconcileRelease') {
+    const sessionId = String(body.sessionId || '').trim();
+    if (!isUuid(sessionId)) return res.status(400).json({ ok: false, error: 'invalid_session_id' });
+    const result = await releaseSession(db, sessionId, { force: body.force === true });
+    return res.status(result.status).json(result.body);
   }
 
   return res.status(400).json({ ok: false, error: 'invalid_action' });

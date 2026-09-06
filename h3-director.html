@@ -87,6 +87,7 @@
     var pc=null,control=null,remoteStream=null,sessionId=null,heartbeatTimer=null,countdownTimer=null;
     var recorder=null,recordChunks=[],recordMime='',recordStartTimer=null,pendingRecording=null;
     var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='';
+    var pendingStartKey='h3_director_pending_start_v1';
 
     function log(text,kind){var el=document.createElement('div');el.className='msg '+(kind||'system');el.textContent=text;$('log').appendChild(el);$('log').scrollTop=$('log').scrollHeight}
     function esc(text){return String(text==null?'':text).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -96,6 +97,10 @@
     async function token(){if(!supabaseClient)return'';var r=await supabaseClient.auth.getSession();authToken=(r&&r.data&&r.data.session&&r.data.session.access_token)||'';return authToken}
     async function api(path,options){var t=await token();if(!t)throw new Error('ログインが必要です。');var opts=options||{};var headers=Object.assign({'Authorization':'Bearer '+t},opts.headers||{});if(opts.body)headers['Content-Type']='application/json';var r=await fetch(path,Object.assign({},opts,{headers:headers}));var data={};try{data=await r.json()}catch(e){}if(!r.ok){var err=new Error(data.message||data.error||'通信に失敗しました。');err.code=data.error;err.data=data;throw err}return data}
     function uuid(){return crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&3|8);return v.toString(16)})}
+    function savePendingStart(value){try{sessionStorage.setItem(pendingStartKey,JSON.stringify(value))}catch(e){}}
+    function readPendingStart(){try{var value=JSON.parse(sessionStorage.getItem(pendingStartKey)||'null');return value&&value.idempotencyKey?value:null}catch(e){return null}}
+    function clearPendingStart(){try{sessionStorage.removeItem(pendingStartKey)}catch(e){}}
+    function unknownStartError(code){return !code||['provider_start_ambiguous','session_state_requires_review','review_state_unconfirmed','refund_unconfirmed','session_start_in_progress'].includes(code)}
     function waitIce(peer){return new Promise(function(resolve,reject){if(peer.iceGatheringState==='complete')return resolve();var timeout=setTimeout(function(){cleanup();reject(new Error('接続情報を準備できませんでした。'))},12000);function done(){if(peer.iceGatheringState==='complete'){cleanup();resolve()}}function cleanup(){clearTimeout(timeout);peer.removeEventListener('icegatheringstatechange',done)}peer.addEventListener('icegatheringstatechange',done)})}
     function sendControl(message){if(!control||control.readyState!=='open')throw new Error('ライブ接続がまだ準備中です。');control.send(JSON.stringify(message))}
     function recordingMime(){var choices=['video/mp4;codecs=h264,aac','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];for(var i=0;i<choices.length;i++){if(MediaRecorder.isTypeSupported(choices[i]))return choices[i]}return''}
@@ -125,17 +130,27 @@
         control.onopen=function(){try{sendControl({type:'configure',protocol_version:1,prompt_version:1,prompt:prompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12});log('Directorへ初期指示を送信しました。')}catch(e){notice(e.message)}};
         control.onmessage=function(event){try{var msg=JSON.parse(event.data);if(msg.type==='error')notice('Director: '+(msg.error||'エラー'));if(msg.type==='prompt_applied')log('追加指示を映像へ反映しました。');if(msg.type==='stream_exhausted')finish('ライブ生成が完了しました。')}catch(e){}};
         var offer=await pc.createOffer();await pc.setLocalDescription(offer);await waitIce(pc);
-        var result=await api('/api/h3-director/start-session',{method:'POST',headers:{'Idempotency-Key':idem},body:JSON.stringify({prompt:prompt,sdp:pc.localDescription.sdp,type:'offer',aspectRatio:aspectRatio})});
+        var startBody={prompt:prompt,sdp:pc.localDescription.sdp,type:'offer',aspectRatio:aspectRatio};
+        savePendingStart({idempotencyKey:idem,prompt:prompt,aspectRatio:aspectRatio,createdAt:new Date().toISOString()});
+        var startOptions={method:'POST',headers:{'Idempotency-Key':idem},body:JSON.stringify(startBody)};
+        var result;
+        try{result=await api('/api/h3-director/start-session',startOptions)}catch(firstError){
+          if(firstError.code)throw firstError;
+          await new Promise(function(resolve){setTimeout(resolve,1000)});
+          result=await api('/api/h3-director/start-session',startOptions);
+        }
         sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
+        clearPendingStart();
         live=true;starting=false;heartbeatFailures=0;$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
         log('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。');updateTimer();countdownTimer=setInterval(updateTimer,250);await heartbeat();heartbeatTimer=setInterval(heartbeat,5000);
-      }catch(e){if(['provider_start_ambiguous','session_state_requires_review','refund_unconfirmed'].includes(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
+      }catch(e){if(unknownStartError(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}else{clearPendingStart()}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
     }
 
     async function sendPrompt(){var prompt=$('prompt').value.trim();if(!prompt||!live||!sessionId)return;$('action').disabled=true;try{var approved=await api('/api/h3-director/approve-prompt',{method:'POST',body:JSON.stringify({sessionId:sessionId,prompt:prompt})});sendControl({type:'prompt',prompt_version:approved.promptVersion,prompt:approved.prompt});log(prompt,'user');$('prompt').value=''}catch(e){notice(e.message);log('指示を送信できませんでした。')}finally{$('action').disabled=!$('prompt').value.trim();$('action').textContent=live?'追加指示を送る':'ライブ生成を開始'}}
 
     async function openRecording(id,download,ratio){try{var d=await api('/api/h3-director/recording-url?sessionId='+encodeURIComponent(id),{method:'GET'});if(download){var a=document.createElement('a');a.href=d.url;a.download=d.filename||('h3-director-'+id);a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();return}if(live){notice('ライブ終了後に履歴を再生できます。');return}if(['16:9','9:16'].includes(ratio)){$('aspectRatio').value=ratio;updateScreenRatio()}$('video').srcObject=null;$('video').src=d.url;$('empty').style.display='none';$('video').play().catch(function(){notice('再生ボタンを押してください。')})}catch(e){notice(e.message)}}
     async function loadHistory(){try{var d=await api('/api/h3-director/history?limit=10',{method:'GET'});var rows=d.sessions||[];$('history').innerHTML=rows.length?rows.map(function(s){var date=s.createdAt?new Date(s.createdAt).toLocaleString('ja-JP'):'';var ratio=['16:9','9:16'].includes(s.aspectRatio)?s.aspectRatio:'16:9';var buttons=s.recordingReady?'<button data-play="'+s.id+'" data-ratio="'+ratio+'">再生</button><button data-save="'+s.id+'">保存</button>':'';var status=s.recordingReady?'保存済み':s.recordingStatus==='uploading'?'保存処理中':'録画なし';return'<div class="history-item"><p>'+esc(s.prompt)+'</p><small>'+esc(date)+' ・ '+esc(ratio)+' ・ Director ・ '+esc(status)+'</small><div>'+buttons+'</div></div>'}).join(''):'履歴はまだありません。';Array.prototype.forEach.call($('history').querySelectorAll('[data-play]'),function(b){b.onclick=function(){openRecording(b.dataset.play,false,b.dataset.ratio)}});Array.prototype.forEach.call($('history').querySelectorAll('[data-save]'),function(b){b.onclick=function(){openRecording(b.dataset.save,true)}})}catch(e){$('history').textContent='履歴を確認できませんでした。'}}
+    async function restorePendingStart(){var pending=readPendingStart();if(!pending)return false;try{var status=await api('/api/h3-director/start-status?idempotencyKey='+encodeURIComponent(pending.idempotencyKey),{method:'GET'});if(status.resolved){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始結果を確認中です。新しい生成は停止しています。管理画面で確認してください。';return true}catch(e){if(e.code==='session_not_found'){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始状態を確認できません。新しい生成は停止しています。';return true}}
 
     $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||!this.value.trim()});
     $('aspectRatio').addEventListener('change',updateScreenRatio);updateScreenRatio();
@@ -144,7 +159,8 @@
     window.addEventListener('pagehide',function(){clearInterval(heartbeatTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}if(sessionId&&authToken){try{fetch('/api/h3-director/end-session',{method:'POST',headers:{'Authorization':'Bearer '+authToken,'Content-Type':'application/json'},body:JSON.stringify({sessionId:sessionId}),keepalive:true})}catch(e){}}if(pc)pc.close()});
 
     (async function init(){
-      try{await loadHistory();var info=await api('/api/h3-director/info',{method:'GET'});$('balance').textContent=info.balance+' credits';
+      try{await loadHistory();var hasPending=await restorePendingStart();var info=await api('/api/h3-director/info',{method:'GET'});$('balance').textContent=info.balance+' credits';
+        if(hasPending)return;
         if(!info.enabled){$('gate').className='gate show';$('gate').textContent='H3 Director は現在テスト停止中です。';return}
         if(!info.eligible){$('gate').className='gate show';$('gate').innerHTML='H3 Director は Premium 以上の有効なプランで利用できます。<br><a href="/pricing.html#monthly">プランを見る →</a>';return}
         if(info.accountStatus!=='active'){$('gate').className='gate show';$('gate').textContent='現在このアカウントでは生成機能を利用できません。';return}

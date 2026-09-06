@@ -14,6 +14,8 @@ const migration = fs.readFileSync(
   path.join(root, 'supabase/migrations/20260906000000_create_h3_director_slice.sql'),
   'utf8'
 );
+const reconcile = fs.readFileSync(path.join(root, 'api/_lib/h3-director-reconcile.js'), 'utf8');
+const directorAdmin = fs.readFileSync(path.join(root, 'h3-director-admin.html'), 'utf8');
 
 test('Director product settings stay fixed and isolated', () => {
   assert.equal(config.DURATION_SECONDS, 60);
@@ -56,6 +58,29 @@ test('Director migration enforces one active session and idempotent charge/refun
   assert.match(migration, /credit_transactions_h3_director_charge_unique/i);
   assert.match(migration, /credit_transactions_h3_director_refund_unique/i);
   assert.match(migration, /pg_advisory_xact_lock/i);
+  assert.match(migration, /operator_reconcile_release/i);
+  const refundFunction = migration.slice(migration.indexOf('create or replace function public.refund_h3_director_session_atomic'));
+  assert.ok(
+    refundFunction.indexOf("reason='h3_director_session'") < refundFunction.indexOf('if not v_has_charge then'),
+    'refund must reconstruct the ledger before declaring that no charge exists'
+  );
+});
+
+test('browser retains an unresolved start key and retries the exact request once', () => {
+  assert.match(page, /sessionStorage\.setItem\(pendingStartKey/);
+  assert.match(page, /start-status\?idempotencyKey=/);
+  assert.match(page, /result=await api\('\/api\/h3-director\/start-session',startOptions\)[\s\S]*?setTimeout\(resolve,1000\)[\s\S]*?result=await api\('\/api\/h3-director\/start-session',startOptions\)/);
+  assert.match(page, /unknownStartError\(e\.code\)/);
+});
+
+test('Director reconciler mirrors guarded flip, force release and settle retry', () => {
+  assert.match(reconcile, /session\.status === 'failed' && session\.error_code === 'operator_reconcile_release'/);
+  assert.match(reconcile, /forceRequired[\s\S]*?force_required/);
+  assert.match(reconcile, /status: 'failed'[\s\S]*?error_code: 'operator_reconcile_release'/);
+  assert.match(reconcile, /session_no_longer_stuck/);
+  assert.match(reconcile, /settle_state_uncertain/);
+  assert.match(reconcile, /refund_h3_director_session_atomic/);
+  assert.match(directorAdmin, /fal\.aiで、このセッションが実行中ではないこと・利用額を確認しましたか/);
 });
 
 test('fal session response is validated before it is accepted', async (t) => {

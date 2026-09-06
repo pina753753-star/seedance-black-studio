@@ -431,17 +431,23 @@ begin
   select * into v_session from public.h3_director_sessions
    where id=p_session_id for update;
   if not found then return jsonb_build_object('ok',false,'code','session_not_found'); end if;
-  if v_session.status in ('live','completed') or v_session.provider_session_id is not null then
+  -- A provider-visible session is never auto-refunded. The only exception is
+  -- an operator reconciler that has already won the guarded status flip and
+  -- stamped operator_reconcile_release after verifying fal.ai state.
+  if v_session.status in ('live','completed')
+     or (
+       v_session.provider_session_id is not null
+       and not (
+         v_session.status = 'failed'
+         and v_session.error_code = 'operator_reconcile_release'
+       )
+     )
+  then
     return jsonb_build_object('ok',true,'code','provider_session_exists','refunded',false);
   end if;
-  if v_session.charged_at is null then
-    update public.h3_director_sessions
-       set status='failed', error_code=left(coalesce(nullif(btrim(p_error_code),''),'start_failed'),100),
-           error_message=left(coalesce(p_error_message,''),1000), failed_at=now(), finished_at=now(), updated_at=now()
-     where id=p_session_id;
-    return jsonb_build_object('ok',true,'code','no_charge_found','refunded',false);
-  end if;
-
+  -- Reconstruct charge state from the immutable ledger before deciding that
+  -- no charge exists. This mirrors refund_h3_live_job_atomic and prevents a
+  -- damaged charged_at field from hiding a real debit.
   select count(*) > 0,
          coalesce(sum(case when credit_type='subscription' then abs(amount) else 0 end),0),
          coalesce(sum(case when credit_type='free' then abs(amount) else 0 end),0),
@@ -449,7 +455,21 @@ begin
     into v_has_charge, v_charge_subscription, v_charge_free, v_charge_purchased
     from public.credit_transactions
    where related_task_id=p_session_id and reason='h3_director_session' and amount<0;
-  if not v_has_charge
+
+  if not v_has_charge then
+    if v_session.charged_at is not null
+       or v_session.deducted_subscription + v_session.deducted_free + v_session.deducted_purchased <> 0
+    then
+      raise exception 'h3_director_charge_state_inconsistent' using errcode='data_exception';
+    end if;
+    update public.h3_director_sessions
+       set status='failed', error_code=left(coalesce(nullif(btrim(p_error_code),''),'start_failed'),100),
+           error_message=left(coalesce(p_error_message,''),1000), failed_at=now(), finished_at=now(), updated_at=now()
+     where id=p_session_id;
+    return jsonb_build_object('ok',true,'code','no_charge_found','refunded',false);
+  end if;
+
+  if v_session.charged_at is null
      or v_charge_subscription<>v_session.deducted_subscription
      or v_charge_free<>v_session.deducted_free
      or v_charge_purchased<>v_session.deducted_purchased
