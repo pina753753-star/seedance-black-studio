@@ -31,6 +31,21 @@ test('browser uses the official WMA channel and a STUN server', () => {
   assert.doesNotMatch(page, /createDataChannel\('control'/);
 });
 
+test('countdown is labelled only after start and resets to the 60-second duration', () => {
+  assert.match(page, /id="timer">60秒<\/span>/);
+  assert.match(page, /\$\('timer'\)\.textContent='残り '\+String\(Math\.floor\(left\/60\)\)/);
+  assert.match(page, /function cleanup\(\)[\s\S]*?\$\('timer'\)\.textContent='60秒'/);
+});
+
+test('OFF and ineligible plan notices can be shown together', () => {
+  const accessGate = page.slice(page.indexOf('function renderAccessGate'), page.indexOf('async function saveRecording'));
+  assert.match(accessGate, /if\(!info\.enabled\)messages\.push\('H3 Director は現在テスト停止中です。'\)/);
+  assert.match(accessGate, /if\(!info\.eligible\)messages\.push\('H3 Director は Premium 以上/);
+  assert.match(accessGate, /messages\.join\('<br>'\)/);
+  assert.match(page, /if\(renderAccessGate\(info\)\)return/);
+  assert.doesNotMatch(page, /if\(!info\.enabled\)\{[^}]+return\}/);
+});
+
 test('recording upload failure is handled before completion is requested', () => {
   const upload = page.indexOf('uploadToSignedUrl');
   const uploadFailure = page.indexOf("if(up&&up.error)throw new Error", upload);

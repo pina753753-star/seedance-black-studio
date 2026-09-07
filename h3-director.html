@@ -49,7 +49,7 @@
     <span class="live"><span class="dot"></span><span id="topState">OFFLINE</span></span>
     <span class="brand">H3 <b>DIRECTOR</b></span>
     <nav class="model-switch" aria-label="H3モデル選択"><a href="./h3-live.html">H3 Max</a><a class="on" href="./h3-director.html">Director Live</a></nav><span class="spacer"></span>
-    <span class="pill timer" id="timer">01:00</span>
+    <span class="pill timer" id="timer">60秒</span>
     <span class="pill balance-pill">残高 <strong id="balance">–</strong></span>
     <a class="close" href="./index.html">閉じる</a>
   </header>
@@ -106,8 +106,20 @@
     function recordingMime(){var choices=['video/mp4;codecs=h264,aac','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];for(var i=0;i<choices.length;i++){if(MediaRecorder.isTypeSupported(choices[i]))return choices[i]}return''}
     function maybeStartRecording(){clearTimeout(recordStartTimer);recordStartTimer=setTimeout(function(){if(!live||recorder||!remoteStream||!remoteStream.getVideoTracks().length)return;try{recordMime=recordingMime();var options={videoBitsPerSecond:3500000,audioBitsPerSecond:128000};if(recordMime)options.mimeType=recordMime;try{recorder=new MediaRecorder(remoteStream,options)}catch(_){recorder=recordMime?new MediaRecorder(remoteStream,{mimeType:recordMime}):new MediaRecorder(remoteStream)}recordChunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)recordChunks.push(e.data)};recorder.onerror=function(){log('録画処理でエラーが発生しました。')};recorder.start(1000);log('ライブ映像の録画を開始しました。')}catch(e){log('この端末ではライブ録画を開始できませんでした。')}},700)}
     function stopRecording(){clearTimeout(recordStartTimer);return new Promise(function(resolve){if(!recorder||recorder.state==='inactive'){resolve(null);return}var current=recorder;current.addEventListener('stop',function(){var mime=String(current.mimeType||recordMime||'video/webm').split(';')[0];var blob=recordChunks.length?new Blob(recordChunks,{type:mime}):null;recorder=null;recordChunks=[];resolve(blob)},{once:true});try{current.stop()}catch(e){resolve(null)}})}
-    function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。')}
-    function cleanup(){live=false;starting=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
+    function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent='残り '+String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。')}
+    function cleanup(){live=false;starting=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
+
+    function renderAccessGate(info){
+      var messages=[];
+      if(!info.enabled)messages.push('H3 Director は現在テスト停止中です。');
+      if(!info.eligible)messages.push('H3 Director は Premium 以上の有効なプランで利用できます。<br><a href="/pricing.html#monthly">プランを見る →</a>');
+      if(info.eligible&&info.accountStatus!=='active')messages.push('現在このアカウントでは生成機能を利用できません。');
+      if(info.eligible&&info.accountStatus==='active'&&info.balance<440)messages.push('ライブ開始には440クレジット必要です。');
+      if(!messages.length)return false;
+      $('gate').className='gate show';
+      $('gate').innerHTML=messages.join('<br>');
+      return true;
+    }
 
     async function saveRecording(blob,targetSession){if(!blob||!blob.size||!targetSession)return;pendingRecording={blob:blob,sessionId:targetSession};$('retrySave').classList.remove('show');state('SAVING');log('録画を保存しています…');try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:targetSession})});var slot=await api('/api/h3-director/recording-upload-url',{method:'POST',body:JSON.stringify({sessionId:targetSession,contentType:blob.type||'video/webm',byteSize:blob.size})});var up=await supabaseClient.storage.from(slot.bucket).uploadToSignedUrl(slot.path,slot.token,blob,{contentType:blob.type||'video/webm',upsert:true});if(up&&up.error)throw new Error('録画ファイルを保存できませんでした。');await api('/api/h3-director/recording-complete',{method:'POST',body:JSON.stringify({sessionId:targetSession})});pendingRecording=null;state('SAVED');log('録画を履歴へ保存しました。');notice('録画を保存しました。');await loadHistory();setTimeout(function(){if(!live)state('OFFLINE')},1800)}catch(e){state('SAVE ERROR');$('retrySave').classList.add('show');log('録画の保存に失敗しました。再試行してください。');notice(e.message)}}
 
@@ -161,10 +173,7 @@
     (async function init(){
       try{await loadHistory();var hasPending=await restorePendingStart();var info=await api('/api/h3-director/info',{method:'GET'});$('balance').textContent=info.balance+' credits';
         if(hasPending)return;
-        if(!info.enabled){$('gate').className='gate show';$('gate').textContent='H3 Director は現在テスト停止中です。';return}
-        if(!info.eligible){$('gate').className='gate show';$('gate').innerHTML='H3 Director は Premium 以上の有効なプランで利用できます。<br><a href="/pricing.html#monthly">プランを見る →</a>';return}
-        if(info.accountStatus!=='active'){$('gate').className='gate show';$('gate').textContent='現在このアカウントでは生成機能を利用できません。';return}
-        if(info.balance<440){$('gate').className='gate show';$('gate').textContent='ライブ開始には440クレジット必要です。';return}
+        if(renderAccessGate(info))return;
         $('action').disabled=!$('prompt').value.trim();log('準備完了。最初の指示を入力してライブを開始してください。');
       }catch(e){$('gate').className='gate show';$('gate').textContent=e.message||'利用状態を確認できませんでした。'}
     })();
