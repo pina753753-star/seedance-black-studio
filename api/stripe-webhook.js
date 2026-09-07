@@ -102,6 +102,81 @@ function ledgerAmount(value) {
   return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 }
 
+// Stripe fields are sometimes an expanded object, sometimes a bare id string.
+function stripeObjectId(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  return value.id ? String(value.id) : null;
+}
+
+// Resolves an invoice's payment_intent_id / charge_id, covering both the
+// classic Invoice shape (invoice.payment_intent / invoice.charge) and the
+// newer Invoice Payments API shape (invoice.payments.data[], where the
+// payment_intent lives one level deeper under each payment's `.payment`).
+async function resolveInvoicePaymentIds(stripe, invoiceOrId) {
+  let invoice = invoiceOrId;
+
+  if (typeof invoiceOrId === 'string') {
+    invoice = await stripe.invoices.retrieve(invoiceOrId);
+  }
+
+  let paymentIntentId = stripeObjectId(invoice && invoice.payment_intent);
+  let chargeId = stripeObjectId(invoice && invoice.charge);
+
+  // New Invoice Payments API fallback (no top-level payment_intent field).
+  if (!paymentIntentId) {
+    const payments = (invoice && invoice.payments && invoice.payments.data) || [];
+    const invoicePayment =
+      payments.find((p) => p.status === 'paid' && p.is_default) ||
+      payments.find((p) => p.status === 'paid') ||
+      payments[0];
+
+    if (invoicePayment && invoicePayment.payment && invoicePayment.payment.type === 'payment_intent') {
+      paymentIntentId = stripeObjectId(invoicePayment.payment.payment_intent);
+    }
+  }
+
+  if (paymentIntentId && !chargeId) {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    chargeId = stripeObjectId(paymentIntent.latest_charge);
+  }
+
+  return { paymentIntentId, chargeId };
+}
+
+// Fields that must not silently change value between two writes of "the same"
+// ledger row (matched by checkout_session_id / invoice_id). A mismatch here
+// means the incoming Stripe payload disagrees with what we already recorded
+// for this id, which should never happen for a genuine redelivery.
+function validateExistingLedger(existing, incoming) {
+  const immutableFields = [
+    'user_id',
+    'purchase_type',
+    'amount',
+    'currency',
+    'customer_id',
+    'subscription_id'
+  ];
+
+  for (const field of immutableFields) {
+    const oldValue = existing[field];
+    const newValue = incoming[field];
+
+    if (
+      oldValue != null &&
+      newValue != null &&
+      String(oldValue) !== String(newValue)
+    ) {
+      return {
+        ok: false,
+        error: `ledger_${field}_mismatch`
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
 async function ensurePaymentLedgerPending(db, { lookupColumn, lookupValue, row }) {
   if (!lookupValue) return { ok: false, error: 'ledger_missing_lookup_value' };
 
@@ -114,13 +189,8 @@ async function ensurePaymentLedgerPending(db, { lookupColumn, lookupValue, row }
   if (findErr) return { ok: false, error: `ledger_lookup_failed: ${findErr.message}` };
 
   if (existing) {
-    // Guard against a mismatched reuse of the same Stripe id.
-    if (row.user_id && existing.user_id && existing.user_id !== row.user_id) {
-      return { ok: false, error: 'ledger_user_mismatch' };
-    }
-    if (existing.purchase_type && row.purchase_type && existing.purchase_type !== row.purchase_type) {
-      return { ok: false, error: 'ledger_purchase_type_mismatch' };
-    }
+    const check = validateExistingLedger(existing, row);
+    if (!check.ok) return check;
     return { ok: true, ledger: existing, created: false };
   }
 
@@ -137,12 +207,17 @@ async function ensurePaymentLedgerPending(db, { lookupColumn, lookupValue, row }
     // A concurrent delivery may have inserted the row between our SELECT and
     // INSERT; the UNIQUE partial index rejects ours. Re-fetch and use theirs.
     if (insErr.code === '23505') {
-      const { data: raced } = await db
+      const { data: raced, error: raceReadErr } = await db
         .from('stripe_payment_ledger')
         .select('*')
         .eq(lookupColumn, lookupValue)
         .maybeSingle();
-      if (raced) return { ok: true, ledger: raced, created: false };
+      if (raceReadErr) return { ok: false, error: `ledger_race_lookup_failed: ${raceReadErr.message}` };
+      if (raced) {
+        const check = validateExistingLedger(raced, row);
+        if (!check.ok) return check;
+        return { ok: true, ledger: raced, created: false };
+      }
     }
     return { ok: false, error: `ledger_insert_failed: ${insErr.message}` };
   }
@@ -150,6 +225,11 @@ async function ensurePaymentLedgerPending(db, { lookupColumn, lookupValue, row }
   return { ok: true, ledger: inserted, created: true };
 }
 
+// Confirms a ledger row WITHOUT granting credits (e.g. an annual renewal
+// invoice, where credits are granted separately by the Cron job). Credit-
+// granting confirmations go through grantCreditsWithLedger() /
+// grant_stripe_credits_with_ledger_atomic instead, which transitions the
+// ledger row atomically with the grant itself.
 async function markPaymentLedgerGranted(db, ledgerId, { creditsGranted } = {}) {
   if (!ledgerId) return { ok: false, error: 'ledger_missing_id' };
   const patch = { grant_status: 'granted', updated_at: new Date().toISOString() };
@@ -158,13 +238,34 @@ async function markPaymentLedgerGranted(db, ledgerId, { creditsGranted } = {}) {
   }
   // Only advance from 'pending' — never pull a row back out of 'held'/'reversed'
   // set by a dispute/fraud handler that raced ahead of this grant.
-  const { error } = await db
+  const { data: updated, error } = await db
     .from('stripe_payment_ledger')
     .update(patch)
     .eq('id', ledgerId)
-    .eq('grant_status', 'pending');
+    .eq('grant_status', 'pending')
+    .select('id,grant_status')
+    .maybeSingle();
   if (error) return { ok: false, error: `ledger_mark_granted_failed: ${error.message}` };
-  return { ok: true };
+
+  if (updated) return { ok: true, transitioned: true };
+
+  // No row transitioned — find out why so a genuinely broken state (neither
+  // already-granted nor risk-held) is surfaced as an error, not swallowed.
+  const { data: current, error: readErr } = await db
+    .from('stripe_payment_ledger')
+    .select('grant_status')
+    .eq('id', ledgerId)
+    .maybeSingle();
+  if (readErr || !current) {
+    return { ok: false, error: `ledger_state_transition_failed: ${readErr ? readErr.message : 'row_missing'}` };
+  }
+  if (current.grant_status === 'granted') {
+    return { ok: true, transitioned: false, skipped: 'already-granted' };
+  }
+  if (current.grant_status === 'held' || current.grant_status === 'reversed') {
+    return { ok: true, transitioned: false, skipped: 'payment-risk-held', state: current.grant_status };
+  }
+  return { ok: false, error: `ledger_state_transition_failed:${current.grant_status}` };
 }
 
 // Best-effort back-fill of a ledger row's Stripe ids. Used for subscription
@@ -187,71 +288,128 @@ async function enrichPaymentLedgerIds(db, ledgerId, { paymentIntentId, chargeId 
   const patch = {};
   if (paymentIntentId && !current.payment_intent_id) patch.payment_intent_id = paymentIntentId;
   if (chargeId && !current.charge_id) patch.charge_id = chargeId;
+
+  if (paymentIntentId || chargeId) {
+    patch.id_enrichment_status = 'complete';
+    patch.id_enrichment_error = null;
+  }
+
   if (Object.keys(patch).length === 0) return { ok: true, skipped: 'already-set' };
 
   patch.updated_at = new Date().toISOString();
-  const { error: updErr } = await db
+  const { data: updated, error: updErr } = await db
     .from('stripe_payment_ledger')
     .update(patch)
-    .eq('id', ledgerId);
+    .eq('id', ledgerId)
+    .select('id,payment_intent_id,charge_id,id_enrichment_status')
+    .maybeSingle();
   if (updErr) return { ok: false, error: updErr.message };
-  return { ok: true, set: Object.keys(patch).filter((k) => k !== 'updated_at') };
+  if (!updated) return { ok: false, error: 'ledger_enrichment_updated_zero_rows' };
+  return {
+    ok: true,
+    set: Object.keys(patch).filter((k) => k !== 'updated_at' && k !== 'id_enrichment_error')
+  };
+}
+
+// Persists that a ledger row's Stripe id back-fill failed, so the gap is
+// visible in the table itself (id_enrichment_status='needs_review') instead
+// of only in a console.error line that no one is watching.
+async function markLedgerEnrichmentNeedsReview(db, ledgerId, error) {
+  const message = String((error && error.message) || error || 'unknown').slice(0, 1000);
+
+  const { data, error: updateErr } = await db
+    .from('stripe_payment_ledger')
+    .update({
+      id_enrichment_status: 'needs_review',
+      id_enrichment_error: message,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', ledgerId)
+    .select('id')
+    .maybeSingle();
+
+  if (updateErr || !data) {
+    console.error(
+      '[stripe-webhook] could not persist ledger enrichment failure:',
+      (updateErr && updateErr.message) || 'ledger row not updated'
+    );
+  }
+}
+
+// Grants credits and confirms the payment ledger row in a single database
+// transaction via grant_stripe_credits_with_ledger_atomic. This replaces the
+// separate grantCredits() + markPaymentLedgerGranted() sequence for every
+// call site that grants credits (checkout completion, monthly renewal),
+// closing the window where a crash between the two left the ledger row
+// 'pending' after credits were already granted. Ledger confirmations that do
+// NOT grant credits (annual renewal invoices) still use
+// markPaymentLedgerGranted() directly.
+async function grantCreditsWithLedger(db, { ledgerId, userId, credits, pool, creditType, reason, plan }) {
+  if (!ledgerId) return { ok: false, error: 'ledger_missing_id' };
+  if (!userId || !(credits > 0)) return { ok: false, skipped: 'no-credits' };
+
+  const expectedCreditType = pool === 'subscription_credits'
+    ? 'subscription'
+    : pool === 'purchased_credits'
+      ? 'purchased'
+      : '';
+  if (!expectedCreditType || creditType !== expectedCreditType) {
+    return { ok: false, error: 'invalid_credit_pool' };
+  }
+
+  const { data, error } = await db.rpc('grant_stripe_credits_with_ledger_atomic', {
+    p_ledger_id: ledgerId,
+    p_user_id: userId,
+    p_credits: Math.round(credits),
+    p_pool: pool,
+    p_reason: reason,
+    p_expires_at: calcExpiresAt(pool),
+    p_plan: plan || null
+  });
+
+  if (error) {
+    console.error('[stripe-webhook] atomic ledger credit grant failed:', error.message, 'reason:', reason);
+    return { ok: false, error: `atomic_ledger_credit_grant_failed: ${error.message}` };
+  }
+
+  if (!data || data.ok !== true) {
+    return { ok: false, error: 'atomic_ledger_credit_grant_invalid_response' };
+  }
+
+  return data;
 }
 
 // Record a Stripe fraud/dispute signal: write the Stripe-side fact into
-// payment_risk_events, and move any matching ledger row from 'granted' to
-// 'held'. 'held' means "a Stripe-side reversal is on record; the credit
-// balance has NOT been clawed back yet" — the actual balance decrement and the
-// 'held' -> 'reversed' transition are a later step. This never touches
-// credit_balances or the billing RPC.
+// payment_risk_events, and move any matching ledger row from 'pending'/
+// 'granted' to 'held'. 'held' means "a Stripe-side reversal is on record;
+// the credit balance has NOT been clawed back yet" — the actual balance
+// decrement and the 'held' -> 'reversed' transition are a later step. This
+// never touches credit_balances or the billing RPC. The insert-and-hold
+// sequence runs atomically in record_payment_risk_event_atomic so a grant
+// racing this event cannot slip through between the two writes.
 async function recordPaymentRiskEvent(db, {
   stripeEventId, stripeEventType, stripeObjectId, eventType, chargeId, paymentIntentId, reason
 }) {
-  // Resolve the user (and the ledger rows to hold) from whichever id we have.
-  let userId = null;
-  let ledgerRows = [];
-  const orParts = [];
-  if (chargeId) orParts.push(`charge_id.eq.${chargeId}`);
-  if (paymentIntentId) orParts.push(`payment_intent_id.eq.${paymentIntentId}`);
-  if (orParts.length) {
-    const { data, error } = await db
-      .from('stripe_payment_ledger')
-      .select('id,user_id,grant_status')
-      .or(orParts.join(','));
-    if (error) return { ok: false, error: `risk_ledger_lookup_failed: ${error.message}` };
-    ledgerRows = data || [];
-    if (ledgerRows.length && ledgerRows[0].user_id) userId = ledgerRows[0].user_id;
+  const { data, error } = await db.rpc('record_payment_risk_event_atomic', {
+    p_stripe_event_id: stripeEventId,
+    p_stripe_event_type: stripeEventType,
+    p_stripe_object_id: stripeObjectId,
+    p_event_type: eventType,
+    p_charge_id: chargeId || null,
+    p_payment_intent_id: paymentIntentId || null,
+    p_reason: reason || null
+  });
+
+  if (error) {
+    console.error('[stripe-webhook] atomic risk event record failed:', error.message, 'eventType:', eventType);
+    return { ok: false, error: `atomic_risk_event_record_failed: ${error.message}` };
   }
 
-  // stripe_event_id is UNIQUE, so a Stripe redelivery of the same event no-ops.
-  const { error: insErr } = await db
-    .from('payment_risk_events')
-    .insert({
-      stripe_event_id:   stripeEventId,
-      stripe_event_type: stripeEventType,
-      stripe_object_id:  stripeObjectId,
-      user_id:           userId,
-      event_type:        eventType,
-      charge_id:         chargeId || null,
-      reason:            reason || null
-    });
-  if (insErr && insErr.code !== '23505') {
-    return { ok: false, error: `risk_event_insert_failed: ${insErr.message}` };
+  if (!data || data.ok !== true) {
+    return { ok: false, error: 'atomic_risk_event_record_invalid_response' };
   }
 
-  let heldCount = 0;
-  for (const lr of ledgerRows) {
-    if (lr.grant_status !== 'granted') continue;
-    const { error: updErr } = await db
-      .from('stripe_payment_ledger')
-      .update({ grant_status: 'held', updated_at: new Date().toISOString() })
-      .eq('id', lr.id)
-      .eq('grant_status', 'granted');
-    if (updErr) return { ok: false, error: `ledger_hold_failed: ${updErr.message}` };
-    heldCount += 1;
-  }
-
-  return { ok: true, userId, held: heldCount };
+  return data;
 }
 
 // Upsert user_subscriptions row from a Stripe Subscription object.
@@ -382,28 +540,29 @@ async function handleCheckoutCompleted(db, stripe, session, event) {
 
       // Step 2 (Y): the initial subscription charge is on the generated invoice,
       // not on session.payment_intent, so back-fill the ledger row's ids from
-      // that invoice. Best-effort: any failure here is logged and swallowed so
-      // the credit grant below is never blocked by it.
+      // that invoice. Best-effort: any failure here is persisted as
+      // needs_review (and logged) so the credit grant below is never blocked
+      // by it, but the gap stays visible instead of only living in logs.
       try {
         const invoiceId = session.invoice || sub.latest_invoice || null;
         if (invoiceId && ledger.ledger && ledger.ledger.id) {
-          const inv = await stripe.invoices.retrieve(String(invoiceId), { expand: ['payment_intent'] });
-          const pi = inv && inv.payment_intent;
-          const paymentIntentId = pi ? String(typeof pi === 'string' ? pi : pi.id) : null;
-          const chargeId = inv && inv.charge
-            ? String(inv.charge)
-            : (pi && typeof pi === 'object' && pi.latest_charge ? String(pi.latest_charge) : null);
+          const { paymentIntentId, chargeId } = await resolveInvoicePaymentIds(stripe, String(invoiceId));
           const enrich = await enrichPaymentLedgerIds(db, ledger.ledger.id, { paymentIntentId, chargeId });
           if (!enrich.ok) {
             console.error('[stripe-webhook] initial-subscription ledger id back-fill error:', enrich.error);
+            await markLedgerEnrichmentNeedsReview(db, ledger.ledger.id, enrich.error);
           }
         }
       } catch (e) {
         console.error('[stripe-webhook] initial-subscription ledger id back-fill failed:', e && e.message);
+        if (ledger.ledger && ledger.ledger.id) {
+          await markLedgerEnrichmentNeedsReview(db, ledger.ledger.id, e);
+        }
       }
     }
 
-    result = await grantCredits(db, {
+    result = await grantCreditsWithLedger(db, {
+      ledgerId:   ledger.ledger.id,
       userId:     meta.userId,
       credits:    meta.credits,
       pool:       'subscription_credits',
@@ -412,7 +571,8 @@ async function handleCheckoutCompleted(db, stripe, session, event) {
       plan:       meta.plan || null
     });
   } else {
-    result = await grantCredits(db, {
+    result = await grantCreditsWithLedger(db, {
+      ledgerId:   ledger.ledger.id,
       userId:     meta.userId,
       credits:    meta.credits,
       pool:       'purchased_credits',
@@ -421,12 +581,6 @@ async function handleCheckoutCompleted(db, stripe, session, event) {
     });
   }
 
-  // Step 2: flip the ledger row to 'granted' once credits are in (grantCredits
-  // returns ok:true both on a fresh grant and on an idempotent 'duplicate').
-  if (result && result.ok) {
-    const marked = await markPaymentLedgerGranted(db, ledger.ledger.id, { creditsGranted: meta.credits });
-    if (!marked.ok) return { ok: false, error: marked.error };
-  }
   return result;
 }
 
@@ -436,50 +590,86 @@ async function handleInvoicePaid(db, stripe, invoice, event) {
     return { ok: true, skipped: 'initial-invoice-handled-by-checkout' };
   }
 
-  // Annual renewal invoice: update period in user_subscriptions only.
-  // Monthly credit grants for annual subs are handled by the Cron job.
   const lineMeta = invoice.lines?.data?.[0]?.metadata || {};
   const subMeta  = invoice.subscription_details?.metadata || {};
   const billingInterval = subMeta.billing_interval || lineMeta.billing_interval || 'month';
 
-  if (billingInterval === 'year') {
-    // Update subscription period dates; do NOT grant 12 months of credits here
-    if (invoice.subscription) {
-      const sub = await stripe.subscriptions.retrieve(invoice.subscription);
-      await upsertSubscription(db, sub, subMeta);
-    }
-    return { ok: true, skipped: 'annual-renewal-handled-by-cron' };
+  // Fetch the subscription (and merge its metadata) up front — both the
+  // annual-renewal branch below and the userId/plan/credits resolution need
+  // it, and the ledger row below is recorded for every renewal invoice
+  // regardless of billing interval.
+  let sub = null;
+  let mergedSubMeta = subMeta;
+  if (invoice.subscription) {
+    sub = await stripe.subscriptions.retrieve(invoice.subscription);
+    mergedSubMeta = { ...((sub && sub.metadata) || {}), ...subMeta };
   }
 
-  // Monthly renewal: grant one month of credits
   const meta = {
-    userId:  invoice.metadata?.user_id || subMeta.user_id || lineMeta.user_id || '',
-    plan:    invoice.metadata?.plan    || subMeta.plan    || lineMeta.plan    || '',
-    credits: Math.round(Number(invoice.metadata?.credits || subMeta.credits || lineMeta.credits || 0))
+    userId:  invoice.metadata?.user_id || mergedSubMeta.user_id || lineMeta.user_id || '',
+    plan:    invoice.metadata?.plan    || mergedSubMeta.plan    || lineMeta.plan    || '',
+    credits: Math.round(Number(invoice.metadata?.credits || mergedSubMeta.credits || lineMeta.credits || 0))
   };
-  if (!meta.userId || !(meta.credits > 0)) return { ok: true, skipped: 'no-metadata' };
 
-  // Step 2: record this renewal payment in stripe_payment_ledger BEFORE granting.
+  // Step 2: record every renewal payment (monthly or annual) in
+  // stripe_payment_ledger, resolving payment_intent_id/charge_id up front so
+  // the row is useful for dispute/risk lookups even when no credit grant
+  // happens on this invoice (annual renewals).
+  let paymentIntentId = null;
+  let chargeId = null;
+  let enrichmentError = null;
+  try {
+    const resolved = await resolveInvoicePaymentIds(stripe, invoice);
+    paymentIntentId = resolved.paymentIntentId;
+    chargeId = resolved.chargeId;
+  } catch (e) {
+    enrichmentError = e;
+  }
+
   const ledger = await ensurePaymentLedgerPending(db, {
     lookupColumn: 'invoice_id',
     lookupValue:  invoice.id,
     row: {
-      user_id:           meta.userId,
-      invoice_id:        invoice.id,
-      payment_intent_id: invoice.payment_intent ? String(invoice.payment_intent) : null,
-      charge_id:         invoice.charge ? String(invoice.charge) : null,
-      customer_id:       invoice.customer ? String(invoice.customer) : null,
-      subscription_id:   invoice.subscription ? String(invoice.subscription) : null,
-      purchase_type:     'subscription',
-      amount:            ledgerAmount(invoice.amount_paid),
-      currency:          ledgerCurrency(invoice.currency),
-      credits_granted:   0,
-      stripe_event_id:   event && event.id ? event.id : null
+      user_id:             meta.userId || null,
+      invoice_id:          invoice.id,
+      payment_intent_id:   paymentIntentId,
+      charge_id:           chargeId,
+      customer_id:         invoice.customer ? String(invoice.customer) : null,
+      subscription_id:     invoice.subscription ? String(invoice.subscription) : null,
+      purchase_type:       'subscription',
+      amount:              ledgerAmount(invoice.amount_paid),
+      currency:            ledgerCurrency(invoice.currency),
+      credits_granted:     0,
+      id_enrichment_status: (paymentIntentId || chargeId) ? 'complete' : 'pending',
+      stripe_event_id:     event && event.id ? event.id : null
     }
   });
   if (!ledger.ok) return { ok: false, error: ledger.error };
 
-  const result = await grantCredits(db, {
+  if (enrichmentError && ledger.ledger && ledger.ledger.id) {
+    console.error('[stripe-webhook] renewal-invoice ledger id resolution failed:', enrichmentError && enrichmentError.message);
+    await markLedgerEnrichmentNeedsReview(db, ledger.ledger.id, enrichmentError);
+  }
+
+  if (billingInterval === 'year') {
+    // Update subscription period dates; do NOT grant 12 months of credits
+    // here — monthly credit grants for annual subs are handled by the Cron
+    // job. Just confirm the ledger row so it does not sit 'pending' forever.
+    if (sub) {
+      await upsertSubscription(db, sub, subMeta);
+    }
+    const marked = await markPaymentLedgerGranted(db, ledger.ledger.id, { creditsGranted: 0 });
+    if (!marked.ok) return marked;
+    return { ok: true, skipped: marked.skipped || 'annual-renewal-handled-by-cron', ledgerId: ledger.ledger.id };
+  }
+
+  // Monthly renewal: grant one month of credits.
+  if (!meta.userId || !(meta.credits > 0)) {
+    return { ok: true, skipped: 'ledger-recorded-but-credit-metadata-missing', ledgerId: ledger.ledger.id };
+  }
+
+  return grantCreditsWithLedger(db, {
+    ledgerId:   ledger.ledger.id,
     userId:     meta.userId,
     credits:    meta.credits,
     pool:       'subscription_credits',
@@ -487,13 +677,6 @@ async function handleInvoicePaid(db, stripe, invoice, event) {
     reason:     reasonTag('invoice', invoice.id),
     plan:       meta.plan || null
   });
-
-  // Step 2: flip the ledger row to 'granted' once credits are in.
-  if (result && result.ok) {
-    const marked = await markPaymentLedgerGranted(db, ledger.ledger.id, { creditsGranted: meta.credits });
-    if (!marked.ok) return { ok: false, error: marked.error };
-  }
-  return result;
 }
 
 // Subscription statuses that mean the subscription is no longer entitling the

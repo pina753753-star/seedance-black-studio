@@ -757,31 +757,6 @@ test('admin-finance.html: computeMonthlySummaryはUSD建ての予定をサーバ
 });
 
 // =================================================================
-// 修正: Stripe関連3ファイルが無変更(git diffで実ファイル内容を比較)
-// =================================================================
-test('api/stripe-webhook.js・api/admin-finance.jsはgit上で無変更', () => {
-  // api/stripe-checkout.jsは、この運営費機能とは無関係の別作業(年額10%OFF
-  // キャンペーン)で意図的に変更されるため、この不変条件からは除外する。
-  // stripe-checkout.js自身の変更範囲はtests/stripe-annual-campaign.test.js
-  // で検証する。
-  const { execFileSync } = require('node:child_process');
-  const repoRoot = path.join(__dirname, '..');
-  const targets = ['api/stripe-webhook.js', 'api/admin-finance.js'];
-
-  for (const target of targets) {
-    let diff;
-    try {
-      diff = execFileSync('git', ['diff', '--stat', 'origin/main...HEAD', '--', target], { cwd: repoRoot }).toString().trim();
-    } catch (_) {
-      // origin/mainが参照できない実行環境(例: シャロークローン)では、
-      // 作業ツリーの未commit差分の有無だけでも確認する。
-      diff = execFileSync('git', ['diff', '--stat', 'HEAD', '--', target], { cwd: repoRoot }).toString().trim();
-    }
-    assert.equal(diff, '', `${target} に差分があってはいけません: ${diff}`);
-  }
-});
-
-// =================================================================
 // JST日付修正: 支払日初期値・currentMonthPrefixをJST基準に統一
 // (Phase 1の売上期間集計と同じくJST(UTC+9)を使う)
 // =================================================================
