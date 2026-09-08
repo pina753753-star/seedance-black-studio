@@ -69,7 +69,7 @@
       </div>
     </section>
     <aside>
-      <div class="side-head"><h1>ライブ指示</h1><p>最初の指示でライブを開始。配信中は追加指示で映像を変化させられます。</p></div>
+      <div class="side-head"><h1>ライブ指示</h1><p>最初の指示でライブを開始。Live中は追加指示で映像を変化させられます。</p></div>
       <div class="gate" id="gate"></div>
       <div class="history"><div class="history-title">H3 MAX LIVE HISTORY</div><div id="history">履歴を確認中…</div></div>
       <div class="log" id="log"></div>
@@ -142,6 +142,8 @@
       if(!file)return;
       if(!['image/jpeg','image/png','image/webp'].includes(file.type)){notice('JPEG / PNG / WebP の画像を選択してください。');return}
       if(file.size>20*1024*1024){notice('画像は20MB以下にしてください。');return}
+      var loginToken;try{loginToken=await token()}catch(e){loginToken=''}
+      if(!loginToken){notice('H3 Max Liveを利用するにはログインしてください。');clearImage();return}
       imageUploadId=null;imageUploading=true;
       $('imagePickBtn').hidden=true;$('imagePreview').hidden=false;
       if(imageObjectUrl){try{URL.revokeObjectURL(imageObjectUrl)}catch(e){}}
@@ -155,9 +157,8 @@
         imageUploadId=slot.uploadId;imageUploading=false;$('imageState').textContent='準備完了';
         $('action').disabled=blocked||starting||live||!$('prompt').value.trim();
       }catch(e){
-        imageUploading=false;imageUploadId=null;$('imageState').textContent='アップロード失敗';
         notice(e.message||'画像のアップロードに失敗しました。');
-        $('action').disabled=blocked||starting||live||!$('prompt').value.trim();
+        clearImage();
       }
     }
 
@@ -230,18 +231,26 @@
     $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||live||imageUploading||!this.value.trim()});
     $('imagePickBtn').addEventListener('click',function(){$('imageFileInput').click()});
     $('imageFileInput').addEventListener('change',function(){var file=this.files&&this.files[0];if(file)uploadImage(file)});
-    $('imageRemoveBtn').addEventListener('click',clearImage);
+    $('imageRemoveBtn').addEventListener('click',function(e){if(e){try{e.preventDefault();e.stopPropagation()}catch(_){}}clearImage()});
     $('aspectRatio').addEventListener('change',updateScreenRatio);updateScreenRatio();
     $('action').addEventListener('click',function(){live?sendPrompt():start()});$('stop').addEventListener('click',function(){finish('ライブを終了しました。')});
     $('retrySave').addEventListener('click',function(){if(pendingRecording)saveRecording(pendingRecording.blob,pendingRecording.sessionId)});
     window.addEventListener('pagehide',function(){clearInterval(heartbeatTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}if(sessionId&&authToken){try{fetch('/api/h3-director/end-session',{method:'POST',headers:{'Authorization':'Bearer '+authToken,'Content-Type':'application/json'},body:JSON.stringify({sessionId:sessionId}),keepalive:true})}catch(e){}}if(pc)pc.close()});
 
     (async function init(){
+      var loginToken;try{loginToken=await token()}catch(e){loginToken=''}
+      if(!loginToken){
+        $('imagePickBtn').disabled=true;
+        $('action').disabled=true;
+        $('gate').className='gate show';
+        $('gate').textContent='ログインが必要です。';
+        return;
+      }
       try{await loadHistory();var hasPending=await restorePendingStart();var info=await api('/api/h3-director/info',{method:'GET'});$('balance').textContent=info.balance+' credits';
         if(hasPending)return;
         if(renderAccessGate(info))return;
         $('action').disabled=!$('prompt').value.trim();log('準備完了。最初の指示を入力してライブを開始してください。');
-      }catch(e){$('gate').className='gate show';$('gate').textContent=e.message||'利用状態を確認できませんでした。'}
+      }catch(e){$('gate').className='gate show';$('gate').textContent=e.message||'利用状態を確認できませんでした。';$('imagePickBtn').disabled=true;$('action').disabled=true}
     })();
   })();
   </script>
