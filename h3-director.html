@@ -39,6 +39,13 @@
     .history{border-bottom:1px solid var(--line);padding:12px 14px;display:grid;gap:8px;max-height:210px;overflow:auto}.history-title{font-size:10px;letter-spacing:.18em;color:#777;font-weight:900}.history-item{border:1px solid var(--line);border-radius:11px;padding:9px;background:#070708;font-size:11px}.history-item p{margin:0 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.history-item small{color:#777}.history-item button{margin:7px 6px 0 0;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:#151519;color:#fff;font-size:10px}
     .gate{margin:14px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#111;font-size:12px;line-height:1.7;display:none}.gate.show{display:block}.gate a{color:#c9d2ff}
     .composer{padding:13px;border-top:1px solid var(--line);display:grid;gap:9px}textarea{width:100%;min-height:76px;max-height:150px;resize:vertical;background:#020202;color:#fff;border:1px solid var(--line);border-radius:13px;padding:11px 12px;outline:none}textarea:focus{border-color:#6976a6}
+    .imagepick{align-self:start;border:1px dashed var(--line);background:#0c0c0e;color:#cfd3ff;border-radius:11px;padding:9px 12px;font-size:11.5px}
+    .imagepreview{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:11px;padding:8px 10px;background:#0c0c0e}
+    .imagepreview img{width:44px;height:44px;object-fit:cover;border-radius:8px;background:#000;flex:none}
+    .imagepreview .imginfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+    .imagepreview .imgname{font-size:11px;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .imagepreview .imgstate{font-size:10px;color:var(--muted)}
+    .imagepreview button{border:1px solid var(--line);background:#151519;color:#fff;border-radius:8px;padding:6px 9px;font-size:10.5px;flex:none}
     .meta{display:flex;gap:8px;align-items:center;font-size:10.5px;line-height:1.5;color:var(--muted)}.meta span{flex:1}.format{display:flex;align-items:center;gap:7px;white-space:nowrap}.format select{border:1px solid var(--line);border-radius:8px;background:#111;color:#fff;padding:6px 8px;font:inherit}.format select:disabled{opacity:.45}.primary,.stop,.retry{border:0;border-radius:11px;padding:11px 14px;font-weight:900}.primary{background:#f3f3f3;color:#080808}.primary:disabled{opacity:.4;cursor:not-allowed}.stop{background:#281017;color:#ff7895;display:none}.stop.show{display:block}.retry{display:none;background:#17223d;color:#b9c8ff}.retry.show{display:block}
     .footnote{font-size:10.5px;color:#666;line-height:1.6}.connecting:after{content:'';display:inline-block;width:12px;height:12px;margin-left:8px;border:2px solid #555;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
     @media(max-width:650px){header{gap:7px;padding:0 10px}header>.live,.brand{display:none}.model-switch a{padding:6px 8px;font-size:10px}.pill.balance-pill{display:none}}
@@ -67,6 +74,13 @@
       <div class="history"><div class="history-title">H3 MAX LIVE HISTORY</div><div id="history">履歴を確認中…</div></div>
       <div class="log" id="log"></div>
       <div class="composer">
+        <button type="button" class="imagepick" id="imagePickBtn">＋ 開始画像を追加（任意・JPEG/PNG/WebP・20MBまで）</button>
+        <div class="imagepreview" id="imagePreview" hidden>
+          <img id="imageThumb" alt="">
+          <div class="imginfo"><span class="imgname" id="imageFileName"></span><span class="imgstate" id="imageState"></span></div>
+          <button type="button" id="imageRemoveBtn">削除</button>
+        </div>
+        <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/webp" hidden>
         <textarea id="prompt" maxlength="2000" placeholder="例：雨の東京、ネオンが反射する路地をカメラがゆっくり前進"></textarea>
         <div class="meta"><span>60秒 / 768p / 440クレジット</span><label class="format">比率<select id="aspectRatio"><option value="16:9">16:9 横</option><option value="9:16">9:16 縦</option></select></label></div>
         <button class="primary" id="action" disabled>ライブ生成を開始</button>
@@ -88,6 +102,7 @@
     var recorder=null,recordChunks=[],recordMime='',recordStartTimer=null,pendingRecording=null;
     var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='';
     var pendingStartKey='h3_director_pending_start_v1';
+    var imageUploadId=null,imageUploading=false,imageObjectUrl=null,sessionExpectsImage=false,initialImageUrlForConfigure=null;
 
     function log(text,kind){var el=document.createElement('div');el.className='msg '+(kind||'system');el.textContent=text;$('log').appendChild(el);$('log').scrollTop=$('log').scrollHeight}
     function esc(text){return String(text==null?'':text).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -121,6 +136,31 @@
       return true;
     }
 
+    function clearImage(){imageUploadId=null;imageUploading=false;if(imageObjectUrl){try{URL.revokeObjectURL(imageObjectUrl)}catch(e){}imageObjectUrl=null}$('imagePreview').hidden=true;$('imagePickBtn').hidden=false;$('imageFileInput').value='';$('action').disabled=blocked||starting||live||!$('prompt').value.trim()}
+
+    async function uploadImage(file){
+      if(!file)return;
+      if(!['image/jpeg','image/png','image/webp'].includes(file.type)){notice('JPEG / PNG / WebP の画像を選択してください。');return}
+      if(file.size>20*1024*1024){notice('画像は20MB以下にしてください。');return}
+      imageUploadId=null;imageUploading=true;
+      $('imagePickBtn').hidden=true;$('imagePreview').hidden=false;
+      if(imageObjectUrl){try{URL.revokeObjectURL(imageObjectUrl)}catch(e){}}
+      imageObjectUrl=URL.createObjectURL(file);$('imageThumb').src=imageObjectUrl;
+      $('imageFileName').textContent=file.name;$('imageState').textContent='アップロード中…';
+      $('action').disabled=true;
+      try{
+        var slot=await api('/api/h3-director/image-upload-url',{method:'POST',body:JSON.stringify({contentType:file.type,byteSize:file.size,filename:file.name})});
+        var up=await supabaseClient.storage.from(slot.bucket).uploadToSignedUrl(slot.path,slot.token,file,{contentType:file.type,upsert:true});
+        if(up&&up.error)throw new Error('画像のアップロードに失敗しました。');
+        imageUploadId=slot.uploadId;imageUploading=false;$('imageState').textContent='準備完了';
+        $('action').disabled=blocked||starting||live||!$('prompt').value.trim();
+      }catch(e){
+        imageUploading=false;imageUploadId=null;$('imageState').textContent='アップロード失敗';
+        notice(e.message||'画像のアップロードに失敗しました。');
+        $('action').disabled=blocked||starting||live||!$('prompt').value.trim();
+      }
+    }
+
     async function saveRecording(blob,targetSession){if(!blob||!blob.size||!targetSession)return;pendingRecording={blob:blob,sessionId:targetSession};$('retrySave').classList.remove('show');state('SAVING');log('録画を保存しています…');try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:targetSession})});var slot=await api('/api/h3-director/recording-upload-url',{method:'POST',body:JSON.stringify({sessionId:targetSession,contentType:blob.type||'video/webm',byteSize:blob.size})});var up=await supabaseClient.storage.from(slot.bucket).uploadToSignedUrl(slot.path,slot.token,blob,{contentType:blob.type||'video/webm',upsert:true});if(up&&up.error)throw new Error('録画ファイルを保存できませんでした。');await api('/api/h3-director/recording-complete',{method:'POST',body:JSON.stringify({sessionId:targetSession})});pendingRecording=null;state('SAVED');log('録画を履歴へ保存しました。');notice('録画を保存しました。');await loadHistory();setTimeout(function(){if(!live)state('OFFLINE')},1800)}catch(e){state('SAVE ERROR');$('retrySave').classList.add('show');log('録画の保存に失敗しました。再試行してください。');notice(e.message)}}
 
     async function finish(message){if(!live&&!starting)return;var endingSession=sessionId;live=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}var recording=await stopRecording();if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}cleanup();sessionId=null;if(message){log(message);notice(message)}if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()}
@@ -128,9 +168,11 @@
     async function heartbeat(){if(!live||!sessionId)return;try{var data=await api('/api/h3-director/heartbeat',{method:'POST',body:JSON.stringify({sessionId:sessionId})});heartbeatFailures=0;if(!data.alive){await finish('ライブセッションが終了しました。')}}catch(e){heartbeatFailures++;if(e.code==='account_restricted'){await finish('アカウント状態の変更によりライブを終了しました。');return}if(heartbeatFailures>=3){await finish('接続を維持できなかったためライブを終了しました。自動再生成は行いません。')}}}
 
     async function start(){
-      var prompt=$('prompt').value.trim();if(!prompt||starting||live)return;
+      var prompt=$('prompt').value.trim();if(!prompt||starting||live||imageUploading)return;
       var aspectRatio=$('aspectRatio').value;if(!['16:9','9:16'].includes(aspectRatio)){notice('画面比率を選択してください。');return}
       if(!window.RTCPeerConnection||!window.MediaRecorder){notice('このブラウザはライブ生成・録画に対応していません。');return}
+      var startImageUploadId=imageUploadId;
+      sessionExpectsImage=!!startImageUploadId;initialImageUrlForConfigure=null;
       starting=true;$('aspectRatio').disabled=true;$('action').disabled=true;$('action').textContent='接続を準備中…';$('action').classList.add('connecting');state('CONNECTING');log(prompt,'user');
       var idem=uuid();
       try{
@@ -139,10 +181,30 @@
         pc.ontrack=function(event){remoteStream.addTrack(event.track);$('empty').style.display='none';$('video').play().catch(function(){notice('映像をタップすると音声付きで再生できます。')});maybeStartRecording()};
         pc.onconnectionstatechange=function(){if(!pc)return;if(['failed','closed'].includes(pc.connectionState)&&live)finish('WebRTC接続が終了しました。自動再生成は行いません。')};
         control=pc.createDataChannel('fal',{ordered:true});
-        control.onopen=function(){try{sendControl({type:'configure',protocol_version:1,prompt_version:1,prompt:prompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12});log('H3 Max Liveへ初期指示を送信しました。')}catch(e){notice(e.message)}};
-        control.onmessage=function(event){try{var msg=JSON.parse(event.data);if(msg.type==='error')notice('H3 Max Live: '+(msg.error||'エラー'));if(msg.type==='prompt_applied')log('追加指示を映像へ反映しました。');if(msg.type==='stream_exhausted')finish('ライブ生成が完了しました。')}catch(e){}};
+        control.onopen=function(){try{
+          var configureMsg={type:'configure',protocol_version:1,prompt_version:1,prompt:prompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12};
+          if(initialImageUrlForConfigure)configureMsg.image_url=initialImageUrlForConfigure;
+          sendControl(configureMsg);
+          log('H3 Max Liveへ初期指示を送信しました。')
+        }catch(e){notice(e.message)}};
+        control.onmessage=function(event){try{
+          var msg=JSON.parse(event.data);
+          if(msg.type==='configured'){
+            if(sessionExpectsImage&&msg.has_initial_image!==true){finish('添付画像を開始フレームとして確認できなかったため停止しました。');return}
+          }
+          if(msg.type==='prompt_pending')log('次の映像へ反映準備中です。');
+          if(msg.type==='prompt_applied')log('追加指示を反映しました。');
+          if(msg.type==='prompt_rejected'){
+            var reasonText={content_policy:'内容がコンテンツポリシーに抵触しました。',preparation_failed:'映像の準備に失敗しました。',stale_prompt_version:'指示のバージョンが古くなっています。'}[msg.reason]||'';
+            log('この指示は反映できませんでした。'+(reasonText?'('+reasonText+')':''))
+          }
+          if(msg.type==='deadline_missed')log('生成が追いつくまで映像を調整しています。');
+          if(msg.type==='error')notice('H3 Max Live: '+(msg.error||'エラー'));
+          if(msg.type==='stream_exhausted')finish('ライブ生成が完了しました。')
+        }catch(e){}};
         var offer=await pc.createOffer();await pc.setLocalDescription(offer);await waitIce(pc);
         var startBody={prompt:prompt,sdp:pc.localDescription.sdp,type:'offer',aspectRatio:aspectRatio};
+        if(startImageUploadId)startBody.imageUploadId=startImageUploadId;
         savePendingStart({idempotencyKey:idem,prompt:prompt,aspectRatio:aspectRatio,createdAt:new Date().toISOString()});
         var startOptions={method:'POST',headers:{'Idempotency-Key':idem},body:JSON.stringify(startBody)};
         var result;
@@ -151,6 +213,7 @@
           await new Promise(function(resolve){setTimeout(resolve,1000)});
           result=await api('/api/h3-director/start-session',startOptions);
         }
+        initialImageUrlForConfigure=(result.media&&result.media.initialImageUrl)||null;
         sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
         clearPendingStart();
         live=true;starting=false;heartbeatFailures=0;$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
@@ -158,13 +221,16 @@
       }catch(e){if(unknownStartError(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}else{clearPendingStart()}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
     }
 
-    async function sendPrompt(){var prompt=$('prompt').value.trim();if(!prompt||!live||!sessionId)return;$('action').disabled=true;try{var approved=await api('/api/h3-director/approve-prompt',{method:'POST',body:JSON.stringify({sessionId:sessionId,prompt:prompt})});sendControl({type:'prompt',prompt_version:approved.promptVersion,prompt:approved.prompt});log(prompt,'user');$('prompt').value=''}catch(e){notice(e.message);log('指示を送信できませんでした。')}finally{$('action').disabled=!$('prompt').value.trim();$('action').textContent=live?'追加指示を送る':'ライブ生成を開始'}}
+    async function sendPrompt(){var prompt=$('prompt').value.trim();if(!prompt||!live||!sessionId)return;$('action').disabled=true;try{var approved=await api('/api/h3-director/approve-prompt',{method:'POST',body:JSON.stringify({sessionId:sessionId,prompt:prompt})});sendControl({type:'prompt',prompt_version:approved.promptVersion,prompt:approved.prompt,replan:true});log(prompt,'user');$('prompt').value=''}catch(e){notice(e.message);log('指示を送信できませんでした。')}finally{$('action').disabled=!$('prompt').value.trim();$('action').textContent=live?'追加指示を送る':'ライブ生成を開始'}}
 
     async function openRecording(id,download,ratio){try{var d=await api('/api/h3-director/recording-url?sessionId='+encodeURIComponent(id),{method:'GET'});if(download){var a=document.createElement('a');a.href=d.url;a.download=d.filename||('h3-director-'+id);a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();return}if(live){notice('ライブ終了後に履歴を再生できます。');return}if(['16:9','9:16'].includes(ratio)){$('aspectRatio').value=ratio;updateScreenRatio()}$('video').srcObject=null;$('video').src=d.url;$('empty').style.display='none';$('video').play().catch(function(){notice('再生ボタンを押してください。')})}catch(e){notice(e.message)}}
     async function loadHistory(){try{var d=await api('/api/h3-director/history?limit=10',{method:'GET'});var rows=d.sessions||[];$('history').innerHTML=rows.length?rows.map(function(s){var date=s.createdAt?new Date(s.createdAt).toLocaleString('ja-JP'):'';var ratio=['16:9','9:16'].includes(s.aspectRatio)?s.aspectRatio:'16:9';var buttons=s.recordingReady?'<button data-play="'+s.id+'" data-ratio="'+ratio+'">再生</button><button data-save="'+s.id+'">保存</button>':'';var status=s.recordingReady?'保存済み':s.recordingStatus==='uploading'?'保存処理中':'録画なし';return'<div class="history-item"><p>'+esc(s.prompt)+'</p><small>'+esc(date)+' ・ '+esc(ratio)+' ・ H3 Max Live ・ '+esc(status)+'</small><div>'+buttons+'</div></div>'}).join(''):'履歴はまだありません。';Array.prototype.forEach.call($('history').querySelectorAll('[data-play]'),function(b){b.onclick=function(){openRecording(b.dataset.play,false,b.dataset.ratio)}});Array.prototype.forEach.call($('history').querySelectorAll('[data-save]'),function(b){b.onclick=function(){openRecording(b.dataset.save,true)}})}catch(e){$('history').textContent='履歴を確認できませんでした。'}}
     async function restorePendingStart(){var pending=readPendingStart();if(!pending)return false;try{var status=await api('/api/h3-director/start-status?idempotencyKey='+encodeURIComponent(pending.idempotencyKey),{method:'GET'});if(status.resolved){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始結果を確認中です。新しい生成は停止しています。管理画面で確認してください。';return true}catch(e){if(e.code==='session_not_found'){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始状態を確認できません。新しい生成は停止しています。';return true}}
 
-    $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||!this.value.trim()});
+    $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||live||imageUploading||!this.value.trim()});
+    $('imagePickBtn').addEventListener('click',function(){$('imageFileInput').click()});
+    $('imageFileInput').addEventListener('change',function(){var file=this.files&&this.files[0];if(file)uploadImage(file)});
+    $('imageRemoveBtn').addEventListener('click',clearImage);
     $('aspectRatio').addEventListener('change',updateScreenRatio);updateScreenRatio();
     $('action').addEventListener('click',function(){live?sendPrompt():start()});$('stop').addEventListener('click',function(){finish('ライブを終了しました。')});
     $('retrySave').addEventListener('click',function(){if(pendingRecording)saveRecording(pendingRecording.blob,pendingRecording.sessionId)});

@@ -12,6 +12,16 @@ const {
   ALLOWED_ASPECT_RATIOS,
   PROMPT_MAX_CHARS, requireDirectorConfig, openaiApiKey
 } = require('../_lib/h3-director-config.js');
+// Reused as-is from H3 Max's own image isolation basis (private quarantine
+// bucket + moderation gate). See the note above image-upload-url.js: this
+// endpoint issues its own upload slots via that same store, but H3 Max
+// Live's start flow here does all validation/moderation itself rather than
+// depending on H3 Live's own start.js.
+const {
+  getUploadRow, downloadAndValidate, createModerationSignedUrl,
+  createFalSignedUrl, markModeration, deleteUploadObject
+} = require('../_lib/h3-live-image-store.js');
+const { moderateH3LiveImageInput } = require('../_lib/h3-live-image-moderation.js');
 
 function idempotencyKey(req) {
   return String(req?.headers?.['idempotency-key'] || req?.headers?.['Idempotency-Key'] || '').trim();
@@ -68,6 +78,13 @@ function createHandler(overrides = {}) {
     getDirectorEntitlement,
     moderateDirectorPrompt,
     createDirectorSession,
+    getUploadRow,
+    downloadAndValidate,
+    createModerationSignedUrl,
+    createFalSignedUrl,
+    markModeration,
+    deleteUploadObject,
+    moderateImageInput: moderateH3LiveImageInput,
     interruptionHook: async () => {},
     ...overrides
   };
@@ -93,6 +110,9 @@ function createHandler(overrides = {}) {
   const sdp = String(body.sdp || '');
   const type = String(body.type || '');
   const aspectRatio = String(body.aspectRatio || '').trim();
+  // Image attachment is entirely optional — an absent/empty imageUploadId
+  // must behave exactly like the pre-existing text-only start flow.
+  const imageUploadId = body.imageUploadId != null ? String(body.imageUploadId).trim() : '';
 
   if (!isUuid(idem)) return res.status(400).json({ ok: false, error: 'invalid_idempotency_key' });
   if (prompt.length < 1 || prompt.length > PROMPT_MAX_CHARS) {
@@ -103,6 +123,9 @@ function createHandler(overrides = {}) {
   }
   if (type !== 'offer' || sdp.length < 10 || sdp.length > 100000 || !sdp.startsWith('v=0')) {
     return res.status(400).json({ ok: false, error: 'invalid_webrtc_offer' });
+  }
+  if (imageUploadId && !isUuid(imageUploadId)) {
+    return res.status(400).json({ ok: false, error: 'invalid_image_upload_id' });
   }
 
   const entitlement = await deps.getDirectorEntitlement(db, auth.user.id, ALLOWED_PLANS);
@@ -116,9 +139,93 @@ function createHandler(overrides = {}) {
   const providerConfig = requireDirectorConfig();
   if (!providerConfig.ok) return res.status(503).json({ ok: false, error: 'provider_unavailable' });
 
-  const moderation = await deps.moderateDirectorPrompt(prompt);
-  if (!moderation.ok) return res.status(503).json({ ok: false, error: 'content_safety_unavailable' });
-  if (!moderation.allow) return res.status(422).json({ ok: false, error: 'content_not_allowed' });
+  // Everything in this block runs strictly BEFORE reserve_h3_director_session_atomic
+  // (i.e. before anything is charged): user-ownership, byte re-fetch, MIME/size
+  // re-validation, and image+prompt moderation. A block or any failure here
+  // returns without ever reserving a session or calling fal — credits stay at
+  // 0 and fal.ai is never invoked either way.
+  let initialImageFalUrl = null;
+  if (imageUploadId) {
+    const found = await deps.getUploadRow(db, imageUploadId, auth.user.id);
+    if (!found.ok) {
+      return res.status(found.error === 'upload_not_found' ? 404 : 500).json({
+        ok: false,
+        error: found.error,
+        message: '添付画像を確認できませんでした。画像を選び直してお試しください。'
+      });
+    }
+    const imageUploadRow = found.row;
+    if (imageUploadRow.deleted_at || imageUploadRow.moderation_status === 'blocked') {
+      return res.status(409).json({
+        ok: false,
+        error: 'image_not_usable',
+        message: 'この画像は使用できません。画像を選び直してお試しください。'
+      });
+    }
+
+    const validated = await deps.downloadAndValidate(db, imageUploadRow.object_path);
+    if (!validated.ok) {
+      const map = { image_too_large: 413, unsupported_image_type: 415, quarantine_object_not_found: 404, empty_object: 400 };
+      return res.status(map[validated.error] || 400).json({
+        ok: false,
+        error: validated.error,
+        message: '添付画像を読み込めませんでした。別の画像でお試しください。'
+      });
+    }
+
+    const signedForModeration = await deps.createModerationSignedUrl(db, imageUploadRow.object_path);
+    if (!signedForModeration.ok) {
+      console.error('[h3-director/start] image moderation signed URL failed:', signedForModeration.error);
+      return res.status(503).json({ ok: false, error: 'content_safety_unavailable' });
+    }
+
+    // Image AND the initial prompt are moderated together (any flagged
+    // category on either blocks) — same fail-closed contract as H3 Live's
+    // own image-mode start flow.
+    const imageModeration = await deps.moderateImageInput({ instruction: prompt, imageUrl: signedForModeration.signedUrl });
+    if (!imageModeration.ok) {
+      console.error('[h3-director/start] image moderation unavailable:', imageModeration.reason);
+      return res.status(503).json({ ok: false, error: 'content_safety_unavailable' });
+    }
+    if (!imageModeration.allow) {
+      console.warn(
+        '[h3-director/start] image input blocked; source:', imageModeration.source,
+        'categories:', imageModeration.categories || []
+      );
+      await deps.markModeration(db, imageUploadRow.id, 'blocked', {
+        categories: imageModeration.categories || [],
+        byteSize: validated.buffer.length,
+        contentType: validated.contentType
+      });
+      await deps.deleteUploadObject(db, imageUploadRow);
+      return res.status(422).json({
+        ok: false,
+        error: 'content_not_allowed',
+        message: imageModeration.source === 'image'
+          ? '添付画像が生成AIのコンテンツポリシーに抵触したため開始できませんでした。別の画像でお試しください。'
+          : '入力内容が生成AIのコンテンツポリシーに抵触したため開始できませんでした。内容を変更してお試しください。'
+      });
+    }
+
+    await deps.markModeration(db, imageUploadRow.id, 'passed', {
+      categories: [],
+      byteSize: validated.buffer.length,
+      contentType: validated.contentType
+    });
+
+    // Short-lived signed URL for fal.ai to fetch the initial frame from.
+    // Minted before any charge; a failure here must also cost 0 credits.
+    const falSigned = await deps.createFalSignedUrl(db, imageUploadRow.object_path);
+    if (!falSigned.ok) {
+      console.error('[h3-director/start] fal signed URL failed:', falSigned.error);
+      return res.status(503).json({ ok: false, error: 'content_safety_unavailable' });
+    }
+    initialImageFalUrl = falSigned.signedUrl;
+  } else {
+    const moderation = await deps.moderateDirectorPrompt(prompt);
+    if (!moderation.ok) return res.status(503).json({ ok: false, error: 'content_safety_unavailable' });
+    if (!moderation.allow) return res.status(422).json({ ok: false, error: 'content_not_allowed' });
+  }
 
   const offerFingerprint = crypto.createHash('sha256').update(sdp).digest('hex');
   const { data: reserveRows, error: reserveError } = await db.rpc('reserve_h3_director_session_atomic', {
@@ -149,6 +256,7 @@ function createHandler(overrides = {}) {
       ok: true,
       session: publicSession(session),
       answer: { sdp: session.provider_answer_sdp, type: 'answer' },
+      ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl } } : {}),
       replay: true
     });
   }
@@ -195,6 +303,7 @@ function createHandler(overrides = {}) {
         ok: true,
         session: publicSession(session),
         answer: { sdp: session.provider_answer_sdp, type: 'answer' },
+        ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl } } : {}),
         replay: true
       });
     }
@@ -292,6 +401,7 @@ function createHandler(overrides = {}) {
     ok: true,
     session: publicSession(session),
     answer: { sdp: upstream.sdp, type: upstream.type },
+    ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl } } : {}),
     fixed: { durationSeconds: DURATION_SECONDS, resolution: RESOLUTION, aspectRatio: session.aspect_ratio, creditCost: CREDIT_COST }
   });
   };
