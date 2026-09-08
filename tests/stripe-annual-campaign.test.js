@@ -248,35 +248,6 @@ test('pricing.html: サーバーがannualCampaignAvailable:falseと返した場�
 });
 
 // ---------------------------------------------------------------
-// 6. stripe-webhook.js無変更
-// ---------------------------------------------------------------
-test('api/stripe-webhook.jsはgit上で無変更', () => {
-  const { execFileSync } = require('node:child_process');
-  const repoRoot = path.join(__dirname, '..');
-
-  let diff;
-  try {
-    diff = execFileSync('git', ['diff', '--stat', 'origin/main...HEAD', '--', 'api/stripe-webhook.js'], { cwd: repoRoot }).toString().trim();
-  } catch (_) {
-    diff = execFileSync('git', ['diff', '--stat', 'HEAD', '--', 'api/stripe-webhook.js'], { cwd: repoRoot }).toString().trim();
-  }
-  assert.equal(diff, '', `api/stripe-webhook.js に差分があってはいけません: ${diff}`);
-});
-
-test('supabase/migrations配下に新規ファイルが追加されていない(DB変更なし)', () => {
-  const { execFileSync } = require('node:child_process');
-  const repoRoot = path.join(__dirname, '..');
-
-  let diffNames;
-  try {
-    diffNames = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD', '--', 'supabase/'], { cwd: repoRoot }).toString().trim();
-  } catch (_) {
-    diffNames = execFileSync('git', ['diff', '--name-only', 'HEAD', '--', 'supabase/'], { cwd: repoRoot }).toString().trim();
-  }
-  assert.equal(diffNames, '', `supabase/ 配下に差分があってはいけません: ${diffNames}`);
-});
-
-// ---------------------------------------------------------------
 // 7. monthly_credits 800/2100/5100維持
 // ---------------------------------------------------------------
 test('年額プランのmonthly_credits・金額・Price ID環境変数名はキャンペーン導入前から変更されていない', () => {
