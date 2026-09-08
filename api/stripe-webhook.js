@@ -585,6 +585,10 @@ async function handleInvoicePaid(db, stripe, invoice, event) {
     const resolved = await resolveInvoicePaymentIds(stripe, invoice);
     paymentIntentId = resolved.paymentIntentId;
     chargeId = resolved.chargeId;
+
+    if (!paymentIntentId && !chargeId) {
+      enrichmentError = new Error('invoice_payment_ids_unresolved');
+    }
   } catch (e) {
     enrichmentError = e;
   }
@@ -609,8 +613,17 @@ async function handleInvoicePaid(db, stripe, invoice, event) {
   });
   if (!ledger.ok) return { ok: false, error: ledger.error };
 
-  if (enrichmentError && ledger.ledger && ledger.ledger.id) {
-    console.error('[stripe-webhook] renewal-invoice ledger id resolution failed:', enrichmentError && enrichmentError.message);
+  if (
+    enrichmentError &&
+    ledger.ledger &&
+    ledger.ledger.id &&
+    !ledger.ledger.payment_intent_id &&
+    !ledger.ledger.charge_id
+  ) {
+    console.error(
+      '[stripe-webhook] renewal-invoice ledger id resolution failed:',
+      enrichmentError && enrichmentError.message
+    );
     await markLedgerEnrichmentNeedsReview(db, ledger.ledger.id, enrichmentError);
   }
 
