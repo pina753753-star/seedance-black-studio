@@ -100,11 +100,12 @@ begin
   select l.user_id
   into v_user_id
   from public.stripe_payment_ledger l
-  where
+  where (
     (p_charge_id is not null and l.charge_id = p_charge_id)
     or
     (p_payment_intent_id is not null
       and l.payment_intent_id = p_payment_intent_id)
+  )
   and l.user_id is not null
   limit 1;
 
@@ -280,5 +281,122 @@ revoke all on function public.grant_stripe_credits_with_ledger_atomic(
 grant execute on function public.grant_stripe_credits_with_ledger_atomic(
   uuid, uuid, integer, text, text, timestamptz, text
 ) to service_role;
+
+-- ────────────────────────────────────────────────────────────────
+-- confirm_payment_ledger_without_credit_atomic: confirm a ledger row to
+-- 'granted' WITHOUT granting any credits (annual renewal invoices, where
+-- the monthly credit grant is handled separately by the Cron job). This is
+-- grant_stripe_credits_with_ledger_atomic with the credit-grant step
+-- removed — same lock, same user-match check, same held/reversed early
+-- return, same open/reviewing risk re-check — so an annual renewal invoice
+-- is never confirmed 'granted' while a dispute/fraud signal is on record.
+-- ────────────────────────────────────────────────────────────────
+create or replace function public.confirm_payment_ledger_without_credit_atomic(
+  p_ledger_id uuid,
+  p_user_id uuid
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_ledger public.stripe_payment_ledger%rowtype;
+  v_has_risk boolean := false;
+  v_updated integer := 0;
+begin
+  select *
+  into v_ledger
+  from public.stripe_payment_ledger
+  where id = p_ledger_id
+  for update;
+
+  if not found then
+    raise exception 'Payment ledger row not found';
+  end if;
+
+  if v_ledger.user_id is distinct from p_user_id then
+    raise exception 'Payment ledger user mismatch';
+  end if;
+
+  if v_ledger.grant_status in ('held', 'reversed') then
+    return jsonb_build_object(
+      'ok', true,
+      'skipped', 'payment-risk-held',
+      'ledgerStatus', v_ledger.grant_status
+    );
+  end if;
+
+  select exists (
+    select 1
+    from public.payment_risk_events r
+    where r.status in ('open', 'reviewing')
+      and (
+        (v_ledger.charge_id is not null
+          and r.charge_id = v_ledger.charge_id)
+        or
+        (v_ledger.payment_intent_id is not null
+          and r.payment_intent_id = v_ledger.payment_intent_id)
+      )
+  )
+  into v_has_risk;
+
+  if v_has_risk then
+    update public.stripe_payment_ledger
+    set
+      grant_status = 'held',
+      updated_at = now()
+    where id = p_ledger_id
+      and grant_status in ('pending', 'granted');
+
+    return jsonb_build_object(
+      'ok', true,
+      'skipped', 'payment-risk-held',
+      'ledgerStatus', 'held'
+    );
+  end if;
+
+  update public.stripe_payment_ledger
+  set
+    grant_status = 'granted',
+    credits_granted = 0,
+    updated_at = now()
+  where id = p_ledger_id
+    and grant_status = 'pending';
+
+  get diagnostics v_updated = row_count;
+
+  if v_updated = 0 and v_ledger.grant_status <> 'granted' then
+    raise exception 'Payment ledger state transition failed';
+  end if;
+
+  return jsonb_build_object(
+    'ok', true,
+    'ledgerId', p_ledger_id,
+    'ledgerStatus', 'granted'
+  );
+end;
+$$;
+
+revoke all on function public.confirm_payment_ledger_without_credit_atomic(
+  uuid, uuid
+) from public, anon, authenticated;
+
+grant execute on function public.confirm_payment_ledger_without_credit_atomic(
+  uuid, uuid
+) to service_role;
+
+-- Back-fill: rows already known to carry a payment_intent_id or charge_id
+-- were inserted before id_enrichment_status existed on this row and are
+-- therefore stuck at the column's 'pending' default despite already having
+-- the ids that column exists to track.
+update public.stripe_payment_ledger
+set id_enrichment_status = 'complete',
+    id_enrichment_error = null
+where id_enrichment_status = 'pending'
+  and (
+    payment_intent_id is not null
+    or charge_id is not null
+  );
 
 commit;
