@@ -1,6 +1,64 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-08-30)
+# FlowVid Studio 完成までの全体像(最終更新: 2026-09-08)
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
+
+## 2026年9月8日 作業ログ(PR #225でmain反映済み)
+
+### チャージバック・不正利用対策 Step 2 完了
+
+- Stripe決済の台帳記録を `stripe_payment_ledger` に統合し、Checkout / Invoice の決済情報を記録する仕組みを追加。
+- `payment_risk_events` に以下のStripeリスクイベントを記録する処理を追加。
+  - `charge.dispute.created`
+  - `radar.early_fraud_warning.created`
+  - `review.opened`
+- クレジット付与と台帳確定を `grant_stripe_credits_with_ledger_atomic()` で1トランザクション化。
+- 年次更新Invoiceの台帳確定を `confirm_payment_ledger_without_credit_atomic()` へ移行。
+- リスクイベント記録とledgerの `held` 遷移を `record_payment_risk_event_atomic()` で原子的に処理。
+- Codexレビューで見つかったP1競合問題を修正。
+  - risk event INSERT前に、一致するledger行を `ORDER BY id FOR UPDATE` でロックする追加migrationを実装。
+  - クレジット付与RPCと同じledgerロックを直列化ポイントとして使用。
+- Invoiceの `payment_intent_id` / `charge_id` が両方取得できなかった場合、`id_enrichment_status='needs_review'` に上げるよう修正。
+- 既にStripe IDを持つ既存ledger行は `complete` → `needs_review` へ戻さない条件を追加。
+- 既存migrationのファイル名を、本番Supabaseのmigration履歴に合わせて
+  `20260908064319_stripe_payment_ledger_atomic_transitions.sql`
+  に整合。
+- P1競合修正用として
+  `20260908070000_fix_payment_risk_ledger_lock_order.sql`
+  を追加。
+
+### 本番反映状況
+
+- 本番Supabase migration:
+  - `20260908064319 / stripe_payment_ledger_atomic_transitions` 適用済み
+  - `20260908091637 / fix_payment_risk_ledger_lock_order` 適用済み
+- PR #225:
+  - merge済み
+  - merge commit:
+    `7b57955e7d202fb81040331be544a157f97235f5`
+- main:
+  - 上記merge commitを指していることを確認済み
+- Vercel:
+  - Production deployment success
+- Railway:
+  - deployment success
+- Codexレビュー:
+  - P1 / P2 の2スレッドとも修正確認後にresolve済み
+
+### 実施していないこと
+
+- Stripe実課金テスト
+- Stripe実APIを使った手動Webhook送信
+- creditsの手動付与・消費
+
+### 残タスク
+
+- Stripeダッシュボードで以下3イベントがWebhook購読対象になっているか確認
+  - `charge.dispute.created`
+  - `radar.early_fraud_warning.created`
+  - `review.opened`
+- チャージバック対策 Step 3
+  - reconcile処理
+  - `tests/stripe-payment-ledger.test.js` の実テスト実装
 
 ## 2026年8月29日〜30日 作業ログ（PR #221でmain反映済み）
 
