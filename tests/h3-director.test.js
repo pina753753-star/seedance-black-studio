@@ -39,8 +39,8 @@ test('countdown is labelled only after start and resets to the 60-second duratio
 
 test('OFF and ineligible plan notices can be shown together', () => {
   const accessGate = page.slice(page.indexOf('function renderAccessGate'), page.indexOf('async function saveRecording'));
-  assert.match(accessGate, /if\(!info\.enabled\)messages\.push\('H3 Director は現在テスト停止中です。'\)/);
-  assert.match(accessGate, /if\(!info\.eligible\)messages\.push\('H3 Director は Premium 以上/);
+  assert.match(accessGate, /if\(!info\.enabled\)messages\.push\('H3 Max Live は現在テスト停止中です。'\)/);
+  assert.match(accessGate, /if\(!info\.eligible\)messages\.push\('H3 Max Live は Premium 以上/);
   assert.match(accessGate, /messages\.join\('<br>'\)/);
   assert.match(page, /if\(renderAccessGate\(info\)\)return/);
   assert.doesNotMatch(page, /if\(!info\.enabled\)\{[^}]+return\}/);
