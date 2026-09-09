@@ -141,7 +141,7 @@
           <button type="button" id="imageRemoveBtn">削除</button>
         </div>
         <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/webp" hidden>
-        <textarea id="prompt" maxlength="2000" placeholder="例：雨の東京、ネオンが反射する路地をカメラがゆっくり前進"></textarea>
+        <textarea id="prompt" maxlength="2000" placeholder="例：子猫が右へ歩き出す。カメラは自然に追従"></textarea>
         <div class="meta"><span>60秒 / 768p / 440クレジット</span><label class="format">比率<select id="aspectRatio"><option value="16:9">16:9 横</option><option value="9:16">9:16 縦</option></select></label></div>
         <button class="primary" id="action" disabled>ライブ生成を開始</button>
         <button class="stop" id="stop">ライブを終了</button>
@@ -176,6 +176,15 @@
     async function token(){if(!supabaseClient)return'';var r=await supabaseClient.auth.getSession();authToken=(r&&r.data&&r.data.session&&r.data.session.access_token)||'';return authToken}
     async function api(path,options){var t=await token();if(!t)throw new Error('ログインが必要です。');var opts=options||{};var headers=Object.assign({'Authorization':'Bearer '+t},opts.headers||{});if(opts.body)headers['Content-Type']='application/json';var r=await fetch(path,Object.assign({},opts,{headers:headers}));var data={};try{data=await r.json()}catch(e){}if(!r.ok){var err=new Error(data.message||data.error||'通信に失敗しました。');err.code=data.error;err.data=data;throw err}return data}
     function uuid(){return crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&3|8);return v.toString(16)})}
+    function directorPrompt(text){
+      var prompt=String(text||'').trim();
+      if(
+        /ゆっくり|ゆるやか|スロー|slowly|slow[\s-]?motion|高速|倍速|fast[\s-]?motion|普通の速度|通常速度|実時間/i.test(prompt)
+      ){
+        return prompt;
+      }
+      return prompt+' 動きは自然な実時間の速度。スローモーションにしない。';
+    }
     function savePendingStart(value){try{sessionStorage.setItem(pendingStartKey,JSON.stringify(value))}catch(e){}}
     function readPendingStart(){try{var value=JSON.parse(sessionStorage.getItem(pendingStartKey)||'null');return value&&value.idempotencyKey?value:null}catch(e){return null}}
     function clearPendingStart(){try{sessionStorage.removeItem(pendingStartKey)}catch(e){}}
@@ -243,11 +252,11 @@
       try{
         pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});remoteStream=new MediaStream();$('video').srcObject=remoteStream;
         pc.addTransceiver('video',{direction:'recvonly'});pc.addTransceiver('audio',{direction:'recvonly'});
-        pc.ontrack=function(event){remoteStream.addTrack(event.track);$('empty').style.display='none';$('video').play().catch(function(){notice('映像をタップすると音声付きで再生できます。')});maybeStartRecording()};
+        pc.ontrack=function(event){remoteStream.addTrack(event.track);$('empty').style.display='none';$('video').play().catch(function(){notice('映像をタップすると音声付きで再生できます。')})};
         pc.onconnectionstatechange=function(){if(!pc)return;if(['failed','closed'].includes(pc.connectionState)&&live)finish('WebRTC接続が終了しました。自動再生成は行いません。')};
         control=pc.createDataChannel('fal',{ordered:true});
         control.onopen=function(){try{
-          var configureMsg={type:'configure',protocol_version:1,prompt_version:1,prompt:prompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12};
+          var configureMsg={type:'configure',protocol_version:1,prompt_version:1,prompt:directorPrompt(prompt),resolution:'768p',aspect_ratio:aspectRatio,memory:12};
           if(initialImageUrlForConfigure)configureMsg.image_url=initialImageUrlForConfigure;
           sendControl(configureMsg);
           log('H3 Max Liveへ初期指示を送信しました。')
@@ -264,6 +273,7 @@
             log('この指示は反映できませんでした。'+(reasonText?'('+reasonText+')':''))
           }
           if(msg.type==='deadline_missed')log('生成が追いつくまで映像を調整しています。');
+          if(msg.type==='chunk')maybeStartRecording();
           if(msg.type==='error')notice('H3 Max Live: '+(msg.error||'エラー'));
           if(msg.type==='stream_exhausted')finish('ライブ生成が完了しました。')
         }catch(e){}};
@@ -281,12 +291,12 @@
         initialImageUrlForConfigure=(result.media&&result.media.initialImageUrl)||null;
         sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
         clearPendingStart();
-        live=true;starting=false;heartbeatFailures=0;document.body.classList.add('live-mode');$('historyPanel').hidden=true;$('historyToggle').textContent='履歴を見る';$('historyToggle').setAttribute('aria-expanded','false');$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
+        live=true;starting=false;heartbeatFailures=0;document.body.classList.add('live-mode');$('historyPanel').hidden=true;$('historyToggle').textContent='履歴を見る';$('historyToggle').setAttribute('aria-expanded','false');$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');
         log('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。');updateTimer();countdownTimer=setInterval(updateTimer,250);await heartbeat();heartbeatTimer=setInterval(heartbeat,5000);
       }catch(e){if(unknownStartError(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}else{clearPendingStart()}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
     }
 
-    async function sendPrompt(){var prompt=$('prompt').value.trim();if(!prompt||!live||!sessionId)return;$('action').disabled=true;try{var approved=await api('/api/h3-director/approve-prompt',{method:'POST',body:JSON.stringify({sessionId:sessionId,prompt:prompt})});sendControl({type:'prompt',prompt_version:approved.promptVersion,prompt:approved.prompt,replan:true});log(prompt,'user');$('prompt').value=''}catch(e){notice(e.message);log('指示を送信できませんでした。')}finally{$('action').disabled=!$('prompt').value.trim();$('action').textContent=live?'追加指示を送る':'ライブ生成を開始'}}
+    async function sendPrompt(){var prompt=$('prompt').value.trim();if(!prompt||!live||!sessionId)return;$('action').disabled=true;try{var approved=await api('/api/h3-director/approve-prompt',{method:'POST',body:JSON.stringify({sessionId:sessionId,prompt:prompt})});sendControl({type:'prompt',prompt_version:approved.promptVersion,prompt:directorPrompt(approved.prompt),replan:true});log(prompt,'user');$('prompt').value=''}catch(e){notice(e.message);log('指示を送信できませんでした。')}finally{$('action').disabled=!$('prompt').value.trim();$('action').textContent=live?'追加指示を送る':'ライブ生成を開始'}}
 
     async function openRecording(id,download,ratio){try{var d=await api('/api/h3-director/recording-url?sessionId='+encodeURIComponent(id),{method:'GET'});if(download){var a=document.createElement('a');a.href=d.url;a.download=d.filename||('h3-director-'+id);a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();return}if(live){notice('ライブ終了後に履歴を再生できます。');return}if(['16:9','9:16'].includes(ratio)){$('aspectRatio').value=ratio;updateScreenRatio()}$('video').srcObject=null;$('video').src=d.url;$('empty').style.display='none';$('video').play().catch(function(){notice('再生ボタンを押してください。')})}catch(e){notice(e.message)}}
     async function loadHistory(){try{var d=await api('/api/h3-director/history?limit=10',{method:'GET'});var rows=d.sessions||[];$('history').innerHTML=rows.length?rows.map(function(s){var date=s.createdAt?new Date(s.createdAt).toLocaleString('ja-JP'):'';var ratio=['16:9','9:16'].includes(s.aspectRatio)?s.aspectRatio:'16:9';var buttons=s.recordingReady?'<button data-play="'+s.id+'" data-ratio="'+ratio+'">再生</button><button data-save="'+s.id+'">保存</button>':'';var status=s.recordingReady?'保存済み':s.recordingStatus==='uploading'?'保存処理中':'録画なし';return'<div class="history-item"><p>'+esc(s.prompt)+'</p><small>'+esc(date)+' ・ '+esc(ratio)+' ・ H3 Max Live ・ '+esc(status)+'</small><div>'+buttons+'</div></div>'}).join(''):'履歴はまだありません。';Array.prototype.forEach.call($('history').querySelectorAll('[data-play]'),function(b){b.onclick=function(){openRecording(b.dataset.play,false,b.dataset.ratio)}});Array.prototype.forEach.call($('history').querySelectorAll('[data-save]'),function(b){b.onclick=function(){openRecording(b.dataset.save,true)}})}catch(e){$('history').textContent='履歴を確認できませんでした。'}}
