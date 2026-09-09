@@ -255,6 +255,7 @@
           return;
         }
         $('action').disabled=!$('prompt').value.trim();log('準備完了。最初の指示を入力してライブを開始してください。');
+        if(/\.vercel\.app$/.test(location.hostname)&&location.hostname!=='flowvid-studio.vercel.app'){log('Previewテスト中: Live開始で440 creditsを消費します。')}
       }catch(e){$('gate').className='gate show';$('gate').textContent=e.message||'利用状態を確認できませんでした。';$('imagePickBtn').disabled=true;$('action').disabled=true}
     })();
   })();

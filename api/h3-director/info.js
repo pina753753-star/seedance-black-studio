@@ -22,9 +22,15 @@ module.exports = async function handler(req, res) {
     return res.status(503).json({ ok: false, error: 'entitlement_unavailable' });
   }
 
+  // Same Preview-only relaxation as start-session.js / image-upload-url.js:
+  // report "enabled" to the UI on Preview even while the kill switch is OFF,
+  // so the gate does not block a one-time real-device test. The actual
+  // authorization decision is still made server-side in start-session.js.
+  const isVercelPreview = process.env.VERCEL_ENV === 'preview';
+
   return res.status(200).json({
     ok: true,
-    enabled: control.ok,
+    enabled: control.ok || isVercelPreview,
     eligible: entitlement.allowed,
     accountStatus: entitlement.accountStatus,
     plan: entitlement.plan,

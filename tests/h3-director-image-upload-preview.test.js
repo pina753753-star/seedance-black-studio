@@ -211,12 +211,10 @@ test('PreviewでもaccountStatus != active は拒否される', async () => {
   }
 });
 
-test('start-session.jsはこの変更の対象外であり、image-upload-url.jsのVERCEL_ENV分岐を含まない', () => {
-  const startSessionSource = fs.readFileSync(
-    path.join(repoRoot, 'api', 'h3-director', 'start-session.js'), 'utf8'
-  );
-  assert.doesNotMatch(startSessionSource, /VERCEL_ENV/);
-});
+// start-session.js later gained its own, separately-reviewed Preview-only
+// relaxation (tests/h3-director-preview-generation.test.js) — this file's
+// scope stays limited to image-upload-url.js, so no assertion about
+// start-session.js's contents is made here.
 
 test('h3-director.htmlはgate表示後blocked=trueとなりprompt入力でactionが有効化されない', () => {
   const page = fs.readFileSync(path.join(repoRoot, 'h3-director.html'), 'utf8');

@@ -100,7 +100,14 @@ function createHandler(overrides = {}) {
   const db = auth.supabase;
 
   const control = await deps.checkDirectorEnabled(db);
-  if (!control.ok) {
+  // Same Preview-only relaxation as api/h3-director/image-upload-url.js:
+  // Vercel Preview deployments may exercise the real generation path even
+  // while the kill switch is OFF, so a one-time real-device test can run
+  // without turning the switch on for production. process.env.VERCEL_ENV
+  // is set by Vercel itself ('production' | 'preview' | 'development') and
+  // is never 'preview' on the production deployment.
+  const isVercelPreview = process.env.VERCEL_ENV === 'preview';
+  if (!control.ok && !isVercelPreview) {
     return res.status(503).json({ ok: false, error: 'h3_director_disabled', message: 'H3 Director は現在停止中です。' });
   }
 
@@ -339,7 +346,7 @@ function createHandler(overrides = {}) {
     deps.checkDirectorEnabled(db),
     deps.getDirectorEntitlement(db, auth.user.id, ALLOWED_PLANS)
   ]);
-  if (!controlAgain.ok || !entitlementAgain.ok || !entitlementAgain.allowed || entitlementAgain.accountStatus !== 'active') {
+  if ((!controlAgain.ok && !isVercelPreview) || !entitlementAgain.ok || !entitlementAgain.allowed || entitlementAgain.accountStatus !== 'active') {
     const refundResult = await refund(db, session.id, 'pre_provider_recheck_failed', 'Access changed before provider session creation.');
     if (!refundResult) return res.status(500).json({ ok: false, error: 'refund_unconfirmed' });
     return res.status(409).json({ ok: false, error: 'access_changed', refunded: refundResult.refunded === true });
