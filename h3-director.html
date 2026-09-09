@@ -34,7 +34,6 @@
     .dot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live)}.timer{font:700 12px ui-monospace,monospace}
     .notice{position:absolute;left:50%;bottom:15px;transform:translateX(-50%);max-width:88%;background:rgba(0,0,0,.82);border:1px solid var(--line);border-radius:11px;padding:8px 12px;font-size:12px;text-align:center;display:none}.notice.show{display:block}
     aside{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}@media(max-width:900px){aside{border-left:0;border-top:1px solid var(--line)}}
-    .side-head{padding:17px;border-bottom:1px solid var(--line)}.side-head h1{font-size:15px;margin:0 0 5px}.side-head p{margin:0;color:var(--muted);font-size:11px;line-height:1.6}
     .log{flex:1;min-height:150px;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:9px}.msg{font-size:12.5px;line-height:1.65;border:1px solid var(--line);border-radius:13px;padding:9px 11px;max-width:92%}.msg.user{align-self:flex-end;background:#151519}.msg.system{align-self:flex-start;color:#aaa;background:#080809}
     .history{border-bottom:1px solid var(--line);padding:12px 14px;display:grid;gap:8px;max-height:210px;overflow:auto}.history-title{font-size:10px;letter-spacing:.18em;color:#777;font-weight:900}.history-item{border:1px solid var(--line);border-radius:11px;padding:9px;background:#070708;font-size:11px}.history-item p{margin:0 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.history-item small{color:#777}.history-item button{margin:7px 6px 0 0;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:#151519;color:#fff;font-size:10px}
     .history-wrap{border-bottom:1px solid var(--line)}
@@ -62,15 +61,33 @@
         padding:8px;
       }
 
-      body.live-mode .side-head,
       body.live-mode .history-wrap,
       body.live-mode .history,
-      body.live-mode .log,
       body.live-mode .imagepick,
       body.live-mode .imagepreview,
       body.live-mode .meta,
       body.live-mode .footnote{
         display:none!important;
+      }
+
+      .log{
+        flex:none;
+        min-height:0;
+        max-height:110px;
+        padding:8px 10px;
+        gap:6px;
+        border-bottom:1px solid var(--line);
+      }
+
+      .msg{
+        font-size:11.5px;
+        line-height:1.45;
+        padding:7px 9px;
+      }
+
+      body.live-mode .log{
+        display:flex;
+        max-height:96px;
       }
 
       body.live-mode .composer{
@@ -114,12 +131,7 @@
       </div>
     </section>
     <aside>
-      <div class="side-head"><h1>ライブ指示</h1><p>最初の指示でライブを開始。Live中は追加指示で映像を変化させられます。</p></div>
       <div class="gate" id="gate"></div>
-      <div class="history-wrap" id="historyWrap">
-        <button type="button" class="history-toggle" id="historyToggle" aria-expanded="false" aria-controls="historyPanel">履歴を見る</button>
-        <div class="history" id="historyPanel" hidden><div class="history-title">H3 MAX LIVE HISTORY</div><div id="history">履歴を確認中…</div></div>
-      </div>
       <div class="log" id="log"></div>
       <div class="composer">
         <button type="button" class="imagepick" id="imagePickBtn">＋ 開始画像を追加（任意・JPEG/PNG/WebP・20MBまで）</button>
@@ -135,6 +147,10 @@
         <button class="stop" id="stop">ライブを終了</button>
         <button class="retry" id="retrySave">録画保存を再試行</button>
         <div class="footnote">開始ごとに440クレジット。falの最低課金が60秒のため、途中終了でも返還されません。終了した録画は非公開で自動保存します。強制終了や通信切断時は保存できない場合があります。</div>
+      </div>
+      <div class="history-wrap" id="historyWrap">
+        <button type="button" class="history-toggle" id="historyToggle" aria-expanded="false" aria-controls="historyPanel">履歴を見る</button>
+        <div class="history" id="historyPanel" hidden><div class="history-title">H3 MAX LIVE HISTORY</div><div id="history">履歴を確認中…</div></div>
       </div>
     </aside>
   </main>
