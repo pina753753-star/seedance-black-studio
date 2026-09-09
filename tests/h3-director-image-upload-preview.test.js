@@ -216,15 +216,20 @@ test('PreviewでもaccountStatus != active は拒否される', async () => {
 // scope stays limited to image-upload-url.js, so no assertion about
 // start-session.js's contents is made here.
 
-test('h3-director.htmlはgate表示後blocked=trueとなりprompt入力でactionが有効化されない', () => {
+test('h3-director.htmlはgate表示後blocked=trueで有効にならないが、Live中は追加指示を許可する', () => {
   const page = fs.readFileSync(path.join(repoRoot, 'h3-director.html'), 'utf8');
   assert.match(
     page,
     /if\(renderAccessGate\(info\)\)\{\s*blocked=true;\s*\$\('action'\)\.disabled=true;\s*return;\s*\}/
   );
-  // prompt入力時のハンドラは既存のblockedチェックを維持している(緩めていない)。
+  // prompt入力時のハンドラはblockedチェックを維持しつつ、Live中の追加指示を
+  // 塞がないよう`||live`は含まない(H3 Max Live途中指示UI修正で意図的に削除)。
   assert.match(
     page,
-    /\$\('prompt'\)\.addEventListener\('input',function\(\)\{\$\('action'\)\.disabled=blocked\|\|starting\|\|live\|\|imageUploading\|\|!this\.value\.trim\(\)\}\)/
+    /\$\('prompt'\)\.addEventListener\('input',function\(\)\{\$\('action'\)\.disabled=blocked\|\|starting\|\|imageUploading\|\|!this\.value\.trim\(\)\}\)/
+  );
+  assert.doesNotMatch(
+    page,
+    /\$\('prompt'\)\.addEventListener\('input',function\(\)\{\$\('action'\)\.disabled=blocked\|\|starting\|\|live\|\|imageUploading/
   );
 });

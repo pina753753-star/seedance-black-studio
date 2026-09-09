@@ -50,6 +50,45 @@
     .meta{display:flex;gap:8px;align-items:center;font-size:10.5px;line-height:1.5;color:var(--muted)}.meta span{flex:1}.format{display:flex;align-items:center;gap:7px;white-space:nowrap}.format select{border:1px solid var(--line);border-radius:8px;background:#111;color:#fff;padding:6px 8px;font:inherit}.format select:disabled{opacity:.45}.primary,.stop,.retry{border:0;border-radius:11px;padding:11px 14px;font-weight:900}.primary{background:#f3f3f3;color:#080808}.primary:disabled{opacity:.4;cursor:not-allowed}.stop{background:#281017;color:#ff7895;display:none}.stop.show{display:block}.retry{display:none;background:#17223d;color:#b9c8ff}.retry.show{display:block}
     .footnote{font-size:10.5px;color:#666;line-height:1.6}.connecting:after{content:'';display:inline-block;width:12px;height:12px;margin-left:8px;border:2px solid #555;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
     @media(max-width:650px){header{gap:7px;padding:0 10px}header>.live,.brand{display:none}.model-switch a{padding:6px 8px;font-size:10px}.pill.balance-pill{display:none}}
+    @media(max-width:900px){
+      body.live-mode .screen-wrap{
+        position:sticky;
+        top:0;
+        z-index:20;
+        padding:8px;
+      }
+
+      body.live-mode .side-head,
+      body.live-mode .history,
+      body.live-mode .log,
+      body.live-mode .imagepick,
+      body.live-mode .imagepreview,
+      body.live-mode .meta,
+      body.live-mode .footnote{
+        display:none!important;
+      }
+
+      body.live-mode .composer{
+        padding:10px;
+        gap:8px;
+        background:#0a0a0b;
+      }
+
+      body.live-mode textarea{
+        min-height:64px;
+        max-height:96px;
+        resize:none;
+      }
+
+      body.live-mode .primary{
+        min-height:48px;
+        font-size:14px;
+      }
+
+      body.live-mode .stop{
+        min-height:42px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -123,7 +162,7 @@
     function maybeStartRecording(){clearTimeout(recordStartTimer);recordStartTimer=setTimeout(function(){if(!live||recorder||!remoteStream||!remoteStream.getVideoTracks().length)return;try{recordMime=recordingMime();var options={videoBitsPerSecond:3500000,audioBitsPerSecond:128000};if(recordMime)options.mimeType=recordMime;try{recorder=new MediaRecorder(remoteStream,options)}catch(_){recorder=recordMime?new MediaRecorder(remoteStream,{mimeType:recordMime}):new MediaRecorder(remoteStream)}recordChunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)recordChunks.push(e.data)};recorder.onerror=function(){log('録画処理でエラーが発生しました。')};recorder.start(1000);log('ライブ映像の録画を開始しました。')}catch(e){log('この端末ではライブ録画を開始できませんでした。')}},700)}
     function stopRecording(){clearTimeout(recordStartTimer);return new Promise(function(resolve){if(!recorder||recorder.state==='inactive'){resolve(null);return}var current=recorder;current.addEventListener('stop',function(){var mime=String(current.mimeType||recordMime||'video/webm').split(';')[0];var blob=recordChunks.length?new Blob(recordChunks,{type:mime}):null;recorder=null;recordChunks=[];resolve(blob)},{once:true});try{current.stop()}catch(e){resolve(null)}})}
     function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent='残り '+String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。')}
-    function cleanup(){live=false;starting=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
+    function cleanup(){live=false;starting=false;document.body.classList.remove('live-mode');clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
 
     function renderAccessGate(info){
       var messages=[];
@@ -218,7 +257,7 @@
         initialImageUrlForConfigure=(result.media&&result.media.initialImageUrl)||null;
         sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
         clearPendingStart();
-        live=true;starting=false;heartbeatFailures=0;$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
+        live=true;starting=false;heartbeatFailures=0;document.body.classList.add('live-mode');$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
         log('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。');updateTimer();countdownTimer=setInterval(updateTimer,250);await heartbeat();heartbeatTimer=setInterval(heartbeat,5000);
       }catch(e){if(unknownStartError(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}else{clearPendingStart()}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
     }
@@ -229,7 +268,7 @@
     async function loadHistory(){try{var d=await api('/api/h3-director/history?limit=10',{method:'GET'});var rows=d.sessions||[];$('history').innerHTML=rows.length?rows.map(function(s){var date=s.createdAt?new Date(s.createdAt).toLocaleString('ja-JP'):'';var ratio=['16:9','9:16'].includes(s.aspectRatio)?s.aspectRatio:'16:9';var buttons=s.recordingReady?'<button data-play="'+s.id+'" data-ratio="'+ratio+'">再生</button><button data-save="'+s.id+'">保存</button>':'';var status=s.recordingReady?'保存済み':s.recordingStatus==='uploading'?'保存処理中':'録画なし';return'<div class="history-item"><p>'+esc(s.prompt)+'</p><small>'+esc(date)+' ・ '+esc(ratio)+' ・ H3 Max Live ・ '+esc(status)+'</small><div>'+buttons+'</div></div>'}).join(''):'履歴はまだありません。';Array.prototype.forEach.call($('history').querySelectorAll('[data-play]'),function(b){b.onclick=function(){openRecording(b.dataset.play,false,b.dataset.ratio)}});Array.prototype.forEach.call($('history').querySelectorAll('[data-save]'),function(b){b.onclick=function(){openRecording(b.dataset.save,true)}})}catch(e){$('history').textContent='履歴を確認できませんでした。'}}
     async function restorePendingStart(){var pending=readPendingStart();if(!pending)return false;try{var status=await api('/api/h3-director/start-status?idempotencyKey='+encodeURIComponent(pending.idempotencyKey),{method:'GET'});if(status.resolved){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始結果を確認中です。新しい生成は停止しています。管理画面で確認してください。';return true}catch(e){if(e.code==='session_not_found'){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始状態を確認できません。新しい生成は停止しています。';return true}}
 
-    $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||live||imageUploading||!this.value.trim()});
+    $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||imageUploading||!this.value.trim()});
     $('imagePickBtn').addEventListener('click',function(){$('imageFileInput').click()});
     $('imageFileInput').addEventListener('change',function(){var file=this.files&&this.files[0];if(file)uploadImage(file)});
     $('imageRemoveBtn').addEventListener('click',function(e){if(e){try{e.preventDefault();e.stopPropagation()}catch(_){}}clearImage()});
