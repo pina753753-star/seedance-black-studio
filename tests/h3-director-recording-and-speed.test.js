@@ -70,7 +70,10 @@ test('Live開始成功直後からmaybeStartRecording()が削除されている�
 });
 
 test("msg.type==='chunk'でmaybeStartRecording()が呼ばれる", () => {
-  assert.match(page, /if\(msg\.type==='chunk'\)maybeStartRecording\(\);/);
+  // chunk handling now also records Preview-only diagnostics, but
+  // maybeStartRecording() is still called for every chunk message.
+  const chunkBlock = page.slice(page.indexOf("if(msg.type==='chunk'){"), page.indexOf("if(msg.type==='error')"));
+  assert.match(chunkBlock, /maybeStartRecording\(\);/);
 });
 
 test('maybeStartRecording()自体の多重開始ガード(recorder存在チェック)は無変更', () => {
@@ -155,7 +158,19 @@ test('placeholderから「ゆっくり」を誘導する文言が削除されて
   assert.doesNotMatch(textareaMatch[1], /ゆっくり/);
 });
 
-test('acceleration / chunk_duration などの未公開パラメータを追加していない', () => {
-  assert.doesNotMatch(page, /acceleration/i);
-  assert.doesNotMatch(page, /chunk_duration/i);
+test('acceleration / chunk_duration などの未公開パラメータをClientメッセージへ送信していない（受信診断としての参照のみ許可）', () => {
+  // configure/prompt messages sent to fal must not gain new fields.
+  assert.match(
+    page,
+    /var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:directorPrompt\(prompt\),resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
+  );
+  assert.match(
+    page,
+    /sendControl\(\{type:'prompt',prompt_version:approved\.promptVersion,prompt:directorPrompt\(approved\.prompt\),replan:true\}\);/
+  );
+  // acceleration/chunk_duration appear ONLY as read-only diagnostic() output
+  // sourced from server messages (msg.acceleration / msg.chunk_duration),
+  // never as a property being written into an outgoing message object.
+  assert.doesNotMatch(page, /acceleration:/i);
+  assert.doesNotMatch(page, /chunk_duration:/i);
 });

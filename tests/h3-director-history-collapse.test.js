@@ -122,7 +122,9 @@ test('チャット風ログ(log(prompt,\'user\')・prompt_pending/applied/reject
   assert.match(page, /if\(msg\.type==='prompt_pending'\)log\('次の映像へ反映準備中です。'\);/);
   assert.match(page, /if\(msg\.type==='prompt_applied'\)log\('追加指示を反映しました。'\);/);
   assert.match(page, /if\(msg\.type==='prompt_rejected'\)\{/);
-  assert.match(page, /if\(msg\.type==='deadline_missed'\)log\('生成が追いつくまで映像を調整しています。'\);/);
+  // deadline_missed now also carries a Preview-only diagnostic() call, but the
+  // user-facing message text itself is unchanged.
+  assert.match(page, /if\(msg\.type==='deadline_missed'\)\{\s*log\('生成が追いつくまで映像を調整しています。'\);/);
   assert.match(page, /log\('準備完了。最初の指示を入力してライブを開始してください。'\);/);
   assert.match(page, /log\('Previewテスト中: Live開始で440 creditsを消費します。'\)/);
 });

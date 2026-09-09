@@ -350,5 +350,7 @@ test('prompt_rejected is shown with a Japanese reason breakdown', () => {
 });
 
 test('deadline_missed is shown without triggering automatic regeneration', () => {
-  assert.match(page, /msg\.type==='deadline_missed'\)log\('生成が追いつくまで映像を調整しています。'\)/);
+  // Now also emits a Preview-only diagnostic() call, but the user-facing
+  // message and the absence of any regeneration/retry call are unchanged.
+  assert.match(page, /msg\.type==='deadline_missed'\)\{\s*log\('生成が追いつくまで映像を調整しています。'\);/);
 });

@@ -165,6 +165,7 @@
     var pc=null,control=null,remoteStream=null,sessionId=null,heartbeatTimer=null,countdownTimer=null;
     var recorder=null,recordChunks=[],recordMime='',recordStartTimer=null,pendingRecording=null;
     var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='';
+    var liveStartRequestedAt=0,firstChunkAt=0,chunkPlaybackTotal=0,chunkRequestedTotal=0,diagnosticSummaryShown=false;
     var pendingStartKey='h3_director_pending_start_v1';
     var imageUploadId=null,imageUploading=false,imageObjectUrl=null,sessionExpectsImage=false,initialImageUrlForConfigure=null;
 
@@ -184,6 +185,14 @@
         return prompt;
       }
       return prompt+' 動きは自然な実時間の速度。スローモーションにしない。';
+    }
+    function isPreviewHost(){
+      return /\.vercel\.app$/.test(location.hostname)
+        && location.hostname!=='flowvid-studio.vercel.app';
+    }
+    function diagnostic(text){
+      if(!isPreviewHost())return;
+      log('[診断] '+text,'system');
     }
     function savePendingStart(value){try{sessionStorage.setItem(pendingStartKey,JSON.stringify(value))}catch(e){}}
     function readPendingStart(){try{var value=JSON.parse(sessionStorage.getItem(pendingStartKey)||'null');return value&&value.idempotencyKey?value:null}catch(e){return null}}
@@ -237,7 +246,7 @@
 
     async function saveRecording(blob,targetSession){if(!blob||!blob.size||!targetSession)return;pendingRecording={blob:blob,sessionId:targetSession};$('retrySave').classList.remove('show');state('SAVING');log('録画を保存しています…');try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:targetSession})});var slot=await api('/api/h3-director/recording-upload-url',{method:'POST',body:JSON.stringify({sessionId:targetSession,contentType:blob.type||'video/webm',byteSize:blob.size})});var up=await supabaseClient.storage.from(slot.bucket).uploadToSignedUrl(slot.path,slot.token,blob,{contentType:blob.type||'video/webm',upsert:true});if(up&&up.error)throw new Error('録画ファイルを保存できませんでした。');await api('/api/h3-director/recording-complete',{method:'POST',body:JSON.stringify({sessionId:targetSession})});pendingRecording=null;state('SAVED');log('録画を履歴へ保存しました。');notice('録画を保存しました。');await loadHistory();setTimeout(function(){if(!live)state('OFFLINE')},1800)}catch(e){state('SAVE ERROR');$('retrySave').classList.add('show');log('録画の保存に失敗しました。再試行してください。');notice(e.message)}}
 
-    async function finish(message){if(!live&&!starting)return;var endingSession=sessionId;live=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}var recording=await stopRecording();if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}cleanup();sessionId=null;if(message){log(message);notice(message)}if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()}
+    async function finish(message){if(!live&&!starting)return;if(!diagnosticSummaryShown){diagnosticSummaryShown=true;diagnostic('summary: firstChunk='+(firstChunkAt?((firstChunkAt-liveStartRequestedAt)/1000).toFixed(1):'なし')+'s / requested='+chunkRequestedTotal.toFixed(2)+'s / playback='+chunkPlaybackTotal.toFixed(2)+'s')}var endingSession=sessionId;live=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}var recording=await stopRecording();if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}cleanup();sessionId=null;if(message){log(message);notice(message)}if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()}
 
     async function heartbeat(){if(!live||!sessionId)return;try{var data=await api('/api/h3-director/heartbeat',{method:'POST',body:JSON.stringify({sessionId:sessionId})});heartbeatFailures=0;if(!data.alive){await finish('ライブセッションが終了しました。')}}catch(e){heartbeatFailures++;if(e.code==='account_restricted'){await finish('アカウント状態の変更によりライブを終了しました。');return}if(heartbeatFailures>=3){await finish('接続を維持できなかったためライブを終了しました。自動再生成は行いません。')}}}
 
@@ -247,6 +256,7 @@
       if(!window.RTCPeerConnection||!window.MediaRecorder){notice('このブラウザはライブ生成・録画に対応していません。');return}
       var startImageUploadId=imageUploadId;
       sessionExpectsImage=!!startImageUploadId;initialImageUrlForConfigure=null;
+      liveStartRequestedAt=Date.now();firstChunkAt=0;chunkPlaybackTotal=0;chunkRequestedTotal=0;diagnosticSummaryShown=false;
       starting=true;$('aspectRatio').disabled=true;$('action').disabled=true;$('action').textContent='接続を準備中…';$('action').classList.add('connecting');state('CONNECTING');log(prompt,'user');
       var idem=uuid();
       try{
@@ -263,8 +273,25 @@
         }catch(e){notice(e.message)}};
         control.onmessage=function(event){try{
           var msg=JSON.parse(event.data);
+          if(msg.type==='session_info'){
+            diagnostic(
+              'session: fps='+msg.fps+
+              ' / defaultChunk='+msg.default_chunk_duration+'s'+
+              ' / min='+msg.min_chunk_duration+'s'+
+              ' / max='+msg.max_chunk_duration+'s'+
+              ' / acceleration='+msg.default_acceleration+
+              ' / continuation='+msg.continuation_playback_seconds+'s'
+            );
+          }
           if(msg.type==='configured'){
             if(sessionExpectsImage&&msg.has_initial_image!==true){finish('添付画像を開始フレームとして確認できなかったため停止しました。');return}
+            diagnostic(
+              'configured: chunk='+msg.chunk_duration+'s'+
+              ' / acceleration='+msg.acceleration+
+              ' / memory='+msg.memory+
+              ' / resolution='+msg.resolution+
+              ' / ratio='+msg.aspect_ratio
+            );
           }
           if(msg.type==='prompt_pending')log('次の映像へ反映準備中です。');
           if(msg.type==='prompt_applied')log('追加指示を反映しました。');
@@ -272,8 +299,41 @@
             var reasonText={content_policy:'内容がコンテンツポリシーに抵触しました。',preparation_failed:'映像の準備に失敗しました。',stale_prompt_version:'指示のバージョンが古くなっています。'}[msg.reason]||'';
             log('この指示は反映できませんでした。'+(reasonText?'('+reasonText+')':''))
           }
-          if(msg.type==='deadline_missed')log('生成が追いつくまで映像を調整しています。');
-          if(msg.type==='chunk')maybeStartRecording();
+          if(msg.type==='deadline_missed'){
+            log('生成が追いつくまで映像を調整しています。');
+            diagnostic(
+              'deadline missed: chunk #'+msg.chunk_index+
+              ' / late='+Number(msg.late_by_seconds||0).toFixed(2)+'s'+
+              ' / behavior='+msg.behavior
+            );
+          }
+          if(msg.type==='chunk'){
+            if(!firstChunkAt){
+              firstChunkAt=Date.now();
+              diagnostic(
+                'first chunk到着まで '+
+                ((firstChunkAt-liveStartRequestedAt)/1000).toFixed(1)+
+                '秒'
+              );
+            }
+            chunkRequestedTotal+=Number(msg.requested_duration_seconds)||0;
+            chunkPlaybackTotal+=Number(msg.playback_seconds)||0;
+            diagnostic(
+              'chunk #'+msg.chunk_index+
+              ': requested='+msg.requested_duration_seconds+'s'+
+              ' / playback='+Number(msg.playback_seconds||0).toFixed(2)+'s'+
+              ' / generation='+Number(msg.generation_seconds||0).toFixed(2)+'s'+
+              ' / buffer='+Number(msg.buffer_depth_seconds||0).toFixed(2)+'s'+
+              ' / estimate='+Number(msg.next_generation_estimate_seconds||0).toFixed(2)+'s'+
+              ' / frames='+msg.generated_frame_count+
+              ' / route='+msg.route
+            );
+            diagnostic(
+              '累計: requested='+chunkRequestedTotal.toFixed(2)+'s'+
+              ' / playback='+chunkPlaybackTotal.toFixed(2)+'s'
+            );
+            maybeStartRecording();
+          }
           if(msg.type==='error')notice('H3 Max Live: '+(msg.error||'エラー'));
           if(msg.type==='stream_exhausted')finish('ライブ生成が完了しました。')
         }catch(e){}};
