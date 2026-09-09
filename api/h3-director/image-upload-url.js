@@ -44,7 +44,9 @@ module.exports = async function handler(req, res) {
   // Director's own kill switch — never hand out an upload URL while H3 Max
   // Live is disabled, independent of H3 Live's (h3_live) switch.
   const control = await checkDirectorEnabled(db);
-  if (!control.ok) {
+  const isVercelPreview = process.env.VERCEL_ENV === 'preview';
+
+  if (!control.ok && !isVercelPreview) {
     return res.status(503).json({
       ok: false,
       error: 'h3_director_disabled',

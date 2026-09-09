@@ -42,7 +42,7 @@ test('OFF and ineligible plan notices can be shown together', () => {
   assert.match(accessGate, /if\(!info\.enabled\)messages\.push\('H3 Max Live は現在テスト停止中です。'\)/);
   assert.match(accessGate, /if\(!info\.eligible\)messages\.push\('H3 Max Live は Premium 以上/);
   assert.match(accessGate, /messages\.join\('<br>'\)/);
-  assert.match(page, /if\(renderAccessGate\(info\)\)return/);
+  assert.match(page, /if\(renderAccessGate\(info\)\)\{\s*blocked=true;\s*\$\('action'\)\.disabled=true;\s*return;\s*\}/);
   assert.doesNotMatch(page, /if\(!info\.enabled\)\{[^}]+return\}/);
 });
 
