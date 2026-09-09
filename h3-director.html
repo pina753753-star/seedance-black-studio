@@ -37,6 +37,10 @@
     .side-head{padding:17px;border-bottom:1px solid var(--line)}.side-head h1{font-size:15px;margin:0 0 5px}.side-head p{margin:0;color:var(--muted);font-size:11px;line-height:1.6}
     .log{flex:1;min-height:150px;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:9px}.msg{font-size:12.5px;line-height:1.65;border:1px solid var(--line);border-radius:13px;padding:9px 11px;max-width:92%}.msg.user{align-self:flex-end;background:#151519}.msg.system{align-self:flex-start;color:#aaa;background:#080809}
     .history{border-bottom:1px solid var(--line);padding:12px 14px;display:grid;gap:8px;max-height:210px;overflow:auto}.history-title{font-size:10px;letter-spacing:.18em;color:#777;font-weight:900}.history-item{border:1px solid var(--line);border-radius:11px;padding:9px;background:#070708;font-size:11px}.history-item p{margin:0 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.history-item small{color:#777}.history-item button{margin:7px 6px 0 0;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:#151519;color:#fff;font-size:10px}
+    .history-wrap{border-bottom:1px solid var(--line)}
+    .history-toggle{width:100%;border:0;background:#0a0a0b;color:#aaa;padding:12px 14px;text-align:left;font-size:11px;font-weight:700}
+    .history-toggle:hover{color:#fff}
+    .history[hidden]{display:none!important}
     .gate{margin:14px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#111;font-size:12px;line-height:1.7;display:none}.gate.show{display:block}.gate a{color:#c9d2ff}
     .composer{padding:13px;border-top:1px solid var(--line);display:grid;gap:9px}textarea{width:100%;min-height:76px;max-height:150px;resize:vertical;background:#020202;color:#fff;border:1px solid var(--line);border-radius:13px;padding:11px 12px;outline:none}textarea:focus{border-color:#6976a6}
     .imagepick{align-self:start;border:1px dashed var(--line);background:#0c0c0e;color:#cfd3ff;border-radius:11px;padding:9px 12px;font-size:11.5px}
@@ -59,6 +63,7 @@
       }
 
       body.live-mode .side-head,
+      body.live-mode .history-wrap,
       body.live-mode .history,
       body.live-mode .log,
       body.live-mode .imagepick,
@@ -111,7 +116,10 @@
     <aside>
       <div class="side-head"><h1>ライブ指示</h1><p>最初の指示でライブを開始。Live中は追加指示で映像を変化させられます。</p></div>
       <div class="gate" id="gate"></div>
-      <div class="history"><div class="history-title">H3 MAX LIVE HISTORY</div><div id="history">履歴を確認中…</div></div>
+      <div class="history-wrap" id="historyWrap">
+        <button type="button" class="history-toggle" id="historyToggle" aria-expanded="false" aria-controls="historyPanel">履歴を見る</button>
+        <div class="history" id="historyPanel" hidden><div class="history-title">H3 MAX LIVE HISTORY</div><div id="history">履歴を確認中…</div></div>
+      </div>
       <div class="log" id="log"></div>
       <div class="composer">
         <button type="button" class="imagepick" id="imagePickBtn">＋ 開始画像を追加（任意・JPEG/PNG/WebP・20MBまで）</button>
@@ -257,7 +265,7 @@
         initialImageUrlForConfigure=(result.media&&result.media.initialImageUrl)||null;
         sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
         clearPendingStart();
-        live=true;starting=false;heartbeatFailures=0;document.body.classList.add('live-mode');$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
+        live=true;starting=false;heartbeatFailures=0;document.body.classList.add('live-mode');$('historyPanel').hidden=true;$('historyToggle').textContent='履歴を見る';$('historyToggle').setAttribute('aria-expanded','false');$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');maybeStartRecording();
         log('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。');updateTimer();countdownTimer=setInterval(updateTimer,250);await heartbeat();heartbeatTimer=setInterval(heartbeat,5000);
       }catch(e){if(unknownStartError(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}else{clearPendingStart()}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
     }
@@ -269,6 +277,7 @@
     async function restorePendingStart(){var pending=readPendingStart();if(!pending)return false;try{var status=await api('/api/h3-director/start-status?idempotencyKey='+encodeURIComponent(pending.idempotencyKey),{method:'GET'});if(status.resolved){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始結果を確認中です。新しい生成は停止しています。管理画面で確認してください。';return true}catch(e){if(e.code==='session_not_found'){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始状態を確認できません。新しい生成は停止しています。';return true}}
 
     $('prompt').addEventListener('input',function(){$('action').disabled=blocked||starting||imageUploading||!this.value.trim()});
+    $('historyToggle').addEventListener('click',function(){var open=$('historyPanel').hidden;$('historyPanel').hidden=!open;$('historyToggle').textContent=open?'履歴を閉じる':'履歴を見る';$('historyToggle').setAttribute('aria-expanded',open?'true':'false')});
     $('imagePickBtn').addEventListener('click',function(){$('imageFileInput').click()});
     $('imageFileInput').addEventListener('change',function(){var file=this.files&&this.files[0];if(file)uploadImage(file)});
     $('imageRemoveBtn').addEventListener('click',function(e){if(e){try{e.preventDefault();e.stopPropagation()}catch(_){}}clearImage()});
