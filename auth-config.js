@@ -13,6 +13,25 @@ window.FLOWVID_AUTH = {
   turnstileSiteKey: ""
 };
 
+// Vercel Previewでは本番固定URL(flowvid-studio.vercel.app)へリダイレクトされて
+// しまい、Preview上でログイン確認ができない。本番ドメインではredirectTo /
+// adminRedirectToを上記の既存値のまま維持し、それ以外の *.vercel.app
+// (Vercel Previewのプレビュー用ドメイン)のときだけ、現在表示している
+// location.originを使うよう上書きする。Supabase URL・anon key・Turnstile・
+// ログイン方式・年齢確認・招待コード・管理者判定には一切影響しない。
+(function(){
+  try{
+    var PROD_HOST='flowvid-studio.vercel.app';
+    var host=(typeof location!=='undefined'&&location.hostname)||'';
+    var isVercelPreview=/\.vercel\.app$/.test(host)&&host!==PROD_HOST;
+    if(isVercelPreview){
+      var origin=location.origin;
+      window.FLOWVID_AUTH.redirectTo=origin+'/profile.html';
+      window.FLOWVID_AUTH.adminRedirectTo=origin+'/admin.html';
+    }
+  }catch(e){}
+})();
+
 window.flowvidSupabaseClient = function(){
   const cfg=window.FLOWVID_AUTH||{};
   if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey) return null;
