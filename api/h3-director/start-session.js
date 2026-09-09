@@ -5,7 +5,10 @@ const { requireConfirmedAuth } = require('../_lib/confirmed-auth.js');
 const {
   jsonBody, isUuid, checkDirectorEnabled, getDirectorEntitlement, publicSession
 } = require('../_lib/h3-director-store.js');
-const { moderateDirectorPrompt } = require('../_lib/h3-director-moderation.js');
+const {
+  moderateDirectorPrompt,
+  moderateDirectorImageInput
+} = require('../_lib/h3-director-moderation.js');
 const { createDirectorSession } = require('../_lib/h3-director-fal.js');
 const {
   ALLOWED_PLANS, CREDIT_COST, DURATION_SECONDS, RESOLUTION,
@@ -21,7 +24,6 @@ const {
   getUploadRow, downloadAndValidate, createModerationSignedUrl,
   createFalSignedUrl, markModeration, deleteUploadObject
 } = require('../_lib/h3-live-image-store.js');
-const { moderateH3LiveImageInput } = require('../_lib/h3-live-image-moderation.js');
 
 function idempotencyKey(req) {
   return String(req?.headers?.['idempotency-key'] || req?.headers?.['Idempotency-Key'] || '').trim();
@@ -84,7 +86,7 @@ function createHandler(overrides = {}) {
     createFalSignedUrl,
     markModeration,
     deleteUploadObject,
-    moderateImageInput: moderateH3LiveImageInput,
+    moderateImageInput: moderateDirectorImageInput,
     interruptionHook: async () => {},
     ...overrides
   };
