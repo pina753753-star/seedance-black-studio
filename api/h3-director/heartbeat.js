@@ -24,11 +24,22 @@ module.exports = async function handler(req, res) {
     return res.status(409).json({ ok: false, error: 'session_not_live', session: publicSession(session) });
   }
 
+  // Same Preview-only relaxation as start-session.js: process.env.VERCEL_ENV
+  // is set by Vercel itself and is never 'preview' on the production
+  // deployment, so production keeps ending the session when the kill
+  // switch is OFF.
+  const isVercelPreview = process.env.VERCEL_ENV === 'preview';
+
   const [control, entitlement] = await Promise.all([
     checkDirectorEnabled(db),
     getDirectorEntitlement(db, auth.user.id, ALLOWED_PLANS)
   ]);
-  if (!control.ok || !entitlement.ok || !entitlement.allowed || entitlement.accountStatus !== 'active') {
+  if (
+    (!control.ok && !isVercelPreview) ||
+    !entitlement.ok ||
+    !entitlement.allowed ||
+    entitlement.accountStatus !== 'active'
+  ) {
     const ended = new Date().toISOString();
     await db.from('h3_director_sessions').update({
       status: 'completed', ended_at: ended, finished_at: ended,

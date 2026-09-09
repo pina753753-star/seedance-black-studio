@@ -28,11 +28,19 @@ module.exports = async function handler(req, res) {
     return res.status(409).json({ ok: false, error: 'session_not_live' });
   }
 
+  // Same Preview-only relaxation as start-session.js / heartbeat.js.
+  const isVercelPreview = process.env.VERCEL_ENV === 'preview';
+
   const [control, entitlement] = await Promise.all([
     checkDirectorEnabled(auth.supabase),
     getDirectorEntitlement(auth.supabase, auth.user.id, ALLOWED_PLANS)
   ]);
-  if (!control.ok || !entitlement.ok || !entitlement.allowed || entitlement.accountStatus !== 'active') {
+  if (
+    (!control.ok && !isVercelPreview) ||
+    !entitlement.ok ||
+    !entitlement.allowed ||
+    entitlement.accountStatus !== 'active'
+  ) {
     return res.status(403).json({ ok: false, error: entitlement.accountStatus !== 'active' ? 'account_restricted' : 'access_revoked' });
   }
 

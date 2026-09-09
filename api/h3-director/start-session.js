@@ -240,7 +240,10 @@ function createHandler(overrides = {}) {
     p_idempotency_key: idem,
     p_initial_prompt: prompt,
     p_offer_fingerprint: offerFingerprint,
-    p_aspect_ratio: aspectRatio
+    p_aspect_ratio: aspectRatio,
+    // Server-computed only — never taken from request body/query. See the
+    // isVercelPreview note above; DB kill switch stays OFF in production.
+    p_preview_test: isVercelPreview
   });
   if (reserveError) {
     console.error('[h3-director/start] reserve failed:', reserveError.message);
@@ -319,7 +322,8 @@ function createHandler(overrides = {}) {
 
   const { data: charged, error: chargeError } = await db.rpc('deduct_h3_director_credits_atomic', {
     p_session_id: session.id,
-    p_user_id: auth.user.id
+    p_user_id: auth.user.id,
+    p_preview_test: isVercelPreview
   });
   if (chargeError) {
     console.error('[h3-director/start] credit deduction failed:', chargeError.message);

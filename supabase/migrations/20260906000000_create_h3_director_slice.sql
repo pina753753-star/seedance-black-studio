@@ -146,7 +146,8 @@ create or replace function public.reserve_h3_director_session_atomic(
   p_idempotency_key uuid,
   p_initial_prompt text,
   p_offer_fingerprint text,
-  p_aspect_ratio text
+  p_aspect_ratio text,
+  p_preview_test boolean default false
 )
 returns table (session_id uuid, code text, existing boolean)
 language plpgsql
@@ -177,7 +178,8 @@ begin
 
   select enabled into v_enabled
     from public.h3_director_controls where control_key = 'h3_director';
-  if coalesce(v_enabled, false) is not true then
+  if coalesce(v_enabled, false) is not true
+     and coalesce(p_preview_test, false) is not true then
     return query select null::uuid, 'service_disabled'::text, false;
     return;
   end if;
@@ -240,14 +242,15 @@ begin
 end;
 $$;
 
-revoke all on function public.reserve_h3_director_session_atomic(uuid, uuid, text, text, text)
+revoke all on function public.reserve_h3_director_session_atomic(uuid, uuid, text, text, text, boolean)
   from public, anon, authenticated, service_role;
-grant execute on function public.reserve_h3_director_session_atomic(uuid, uuid, text, text, text)
+grant execute on function public.reserve_h3_director_session_atomic(uuid, uuid, text, text, text, boolean)
   to service_role;
 
 create or replace function public.deduct_h3_director_credits_atomic(
   p_session_id uuid,
-  p_user_id uuid
+  p_user_id uuid,
+  p_preview_test boolean default false
 )
 returns jsonb
 language plpgsql
@@ -329,7 +332,8 @@ begin
 
   select enabled into v_enabled
     from public.h3_director_controls where control_key = 'h3_director';
-  if coalesce(v_enabled, false) is not true then
+  if coalesce(v_enabled, false) is not true
+     and coalesce(p_preview_test, false) is not true then
     update public.h3_director_sessions
        set status='failed', error_code='service_disabled', error_message='H3 Director is disabled',
            failed_at=now(), finished_at=now(), updated_at=now()
@@ -402,9 +406,9 @@ begin
 end;
 $$;
 
-revoke all on function public.deduct_h3_director_credits_atomic(uuid, uuid)
+revoke all on function public.deduct_h3_director_credits_atomic(uuid, uuid, boolean)
   from public, anon, authenticated, service_role;
-grant execute on function public.deduct_h3_director_credits_atomic(uuid, uuid)
+grant execute on function public.deduct_h3_director_credits_atomic(uuid, uuid, boolean)
   to service_role;
 
 create or replace function public.refund_h3_director_session_atomic(
