@@ -182,14 +182,14 @@ test('heartbeat: DB更新条件(status/ended_at/finished_at)は既存のまま',
 const fs = require('fs');
 const page = fs.readFileSync(path.join(repoRoot, 'h3-director.html'), 'utf8');
 
-test('stream_exhausted: reason/chunksを診断し、reasonに応じたユーザー表示でfinish()する', () => {
+test('stream_exhausted: reason/chunksを診断し、reasonに応じたユーザー表示でfinish()する(session_limitはnatural:true)', () => {
   const idx = page.indexOf("if(msg.type==='stream_exhausted'){");
   assert.ok(idx > 0, 'stream_exhausted handler not found');
-  const chunk = page.slice(idx, idx + 500);
+  const chunk = page.slice(idx, idx + 700);
   assert.match(chunk, /streamEndedReason=String\(msg\.reason\|\|'unknown'\);/);
   assert.match(chunk, /diagnostic\('stream exhausted: reason='\+streamEndedReason\+' \/ chunks='\+Number\(msg\.chunks\|\|0\)\);/);
   assert.match(chunk, /streamEndedReason==='session_limit'\s*\?'ライブ生成の上限に達しました。'\s*:'ライブ生成が終了しました。';/);
-  assert.match(chunk, /finish\(exhaustedMessage\);/);
+  assert.match(chunk, /if\(streamEndedReason==='session_limit'\)\{\s*finish\(exhaustedMessage,\{natural:true\}\);\s*\}else\{\s*finish\(exhaustedMessage\);\s*\}/);
 });
 
 test('chunk_metrics: Preview限定でready/interval/routeを診断する（phases_ms/gaugesは展開しない）', () => {
@@ -268,7 +268,7 @@ test('60秒設定・DURATION_SECONDSは今回変更していない', () => {
   const configSrc = fs.readFileSync(path.join(repoRoot, 'api', '_lib', 'h3-director-config.js'), 'utf8');
   assert.match(configSrc, /const DURATION_SECONDS = 60;/);
   assert.match(page, /id="timer">60秒<\/span>/);
-  assert.match(page, /if\(left<=0&&live\)finish\('60秒のライブが終了しました。'\)/);
+  assert.match(page, /if\(left<=0&&live\)finish\('60秒のライブが終了しました。',\{natural:true\}\)/);
 });
 
 // ---------------------------------------------------------------

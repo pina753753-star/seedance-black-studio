@@ -196,10 +196,10 @@ test('deadline_missedはchunk_index/late_by_seconds/behaviorを診断表示す�
 // ---------------------------------------------------------------
 
 test('finish()はPreview限定・一度だけサマリーを表示する(stopRecording後・拡張フィールド付き)', () => {
-  const idx = page.indexOf('async function finish(message){');
+  const idx = page.indexOf('async function finish(message,options){');
   assert.ok(idx > 0, 'finish() not found');
-  const chunk = page.slice(idx, idx + 2600);
-  assert.match(chunk, /if\(!live&&!starting\)return;/);
+  const chunk = page.slice(idx, idx + 3400);
+  assert.match(chunk, /if\(\(!live&&!starting\)\|\|finishing\)return;/);
   // The summary guard runs AFTER stopRecording() so recorderWall can be
   // computed from the now-finalized recorderStoppedAt.
   const stopIdx = chunk.indexOf('await stopRecording();');
@@ -229,10 +229,10 @@ test('finish()はPreview限定・一度だけサマリーを表示する(stopRec
 // Untouched invariants (60s timer / expiresAt / credits / recording start / directorPrompt)
 // ---------------------------------------------------------------
 
-test('60秒タイマー・expiresAt処理は無変更', () => {
+test('60秒タイマー・expiresAt処理は無変更(自然終了扱いnatural:trueのみ追加)', () => {
   assert.match(page, /id="timer">60秒<\/span>/);
   assert.match(page, /function updateTimer\(\)\{var left=Math\.max\(0,Math\.ceil\(\(expiresAt-Date\.now\(\)\)\/1000\)\);/);
-  assert.match(page, /if\(left<=0&&live\)finish\('60秒のライブが終了しました。'\)/);
+  assert.match(page, /if\(left<=0&&live\)finish\('60秒のライブが終了しました。',\{natural:true\}\)/);
 });
 
 test('440クレジット表示・directorPromptロジックは無変更', () => {

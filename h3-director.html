@@ -177,7 +177,7 @@
     var supabaseClient=typeof window.flowvidSupabaseClient==='function'?window.flowvidSupabaseClient():null;
     var pc=null,control=null,remoteStream=null,sessionId=null,heartbeatTimer=null,countdownTimer=null;
     var recorder=null,recordChunks=[],recordMime='',recordStartTimer=null,pendingRecording=null;
-    var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='',promptSending=false;
+    var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='',promptSending=false,finishing=false;
     var liveStartRequestedAt=0,firstChunkAt=0,chunkPlaybackTotal=0,chunkRequestedTotal=0,diagnosticSummaryShown=false;
     var dataChannelOpenedAt=0,configuredAt=0,firstVideoTrackAt=0,recorderStartedAt=0,recorderStoppedAt=0;
     var lastHeartbeatAt=0,heartbeatCount=0,streamEndedReason='',lastSessionWallMs=0,chunkMetricsCount=0;
@@ -325,8 +325,8 @@
     // only and never used to alter recording/billing behavior.
     function maybeStartRecording(){clearTimeout(recordStartTimer);recordStartTimer=setTimeout(function(){if(!live||recorder||!remoteStream||!remoteStream.getVideoTracks().length)return;try{recordMime=recordingMime();var options={videoBitsPerSecond:3500000,audioBitsPerSecond:128000};if(recordMime)options.mimeType=recordMime;try{recorder=new MediaRecorder(remoteStream,options)}catch(_){recorder=recordMime?new MediaRecorder(remoteStream,{mimeType:recordMime}):new MediaRecorder(remoteStream)}recordChunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)recordChunks.push(e.data)};recorder.onerror=function(){log('録画処理でエラーが発生しました。')};recorder.start(1000);recorderStartedAt=Date.now();diagnostic('recorder start: +'+(elapsedFromStart(recorderStartedAt)||0).toFixed(1)+'s / afterFirstChunk='+(firstChunkAt?((recorderStartedAt-firstChunkAt)/1000).toFixed(1):'なし')+'s');log('ライブ映像の録画を開始しました。')}catch(e){log('この端末ではライブ録画を開始できませんでした。')}},700)}
     function stopRecording(){clearTimeout(recordStartTimer);return new Promise(function(resolve){if(!recorder||recorder.state==='inactive'){resolve(null);return}var current=recorder;var stopRequestedAt=Date.now();current.addEventListener('stop',function(){recorderStoppedAt=Date.now();var wall=recorderStartedAt?(recorderStoppedAt-recorderStartedAt)/1000:0;var mime=String(current.mimeType||recordMime||'video/webm').split(';')[0];var blob=recordChunks.length?new Blob(recordChunks,{type:mime}):null;diagnostic('recorder stop: wall='+wall.toFixed(2)+'s / chunks='+recordChunks.length+' / blobBytes='+(blob?blob.size:0)+' / stopEventDelay='+(recorderStoppedAt-stopRequestedAt)+'ms');recorder=null;recordChunks=[];resolve(blob)},{once:true});try{current.stop()}catch(e){resolve(null)}})}
-    function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent='残り '+String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。')}
-    function cleanup(){stopVideoDiagnostics();live=false;starting=false;promptSending=false;document.body.classList.remove('live-mode');clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
+    function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent='残り '+String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。',{natural:true})}
+    function cleanup(){stopVideoDiagnostics();live=false;starting=false;promptSending=false;finishing=false;document.body.classList.remove('live-mode');clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
 
     function renderAccessGate(info){
       var messages=[];
@@ -368,7 +368,76 @@
 
     async function saveRecording(blob,targetSession){if(!blob||!blob.size||!targetSession)return;pendingRecording={blob:blob,sessionId:targetSession};$('retrySave').classList.remove('show');state('SAVING');log('録画を保存しています…');try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:targetSession})});var slot=await api('/api/h3-director/recording-upload-url',{method:'POST',body:JSON.stringify({sessionId:targetSession,contentType:blob.type||'video/webm',byteSize:blob.size})});var up=await supabaseClient.storage.from(slot.bucket).uploadToSignedUrl(slot.path,slot.token,blob,{contentType:blob.type||'video/webm',upsert:true});if(up&&up.error)throw new Error('録画ファイルを保存できませんでした。');await api('/api/h3-director/recording-complete',{method:'POST',body:JSON.stringify({sessionId:targetSession})});pendingRecording=null;state('SAVED');log('録画を履歴へ保存しました。');notice('録画を保存しました。');await loadHistory();setTimeout(function(){if(!live)state('OFFLINE')},1800)}catch(e){state('SAVE ERROR');$('retrySave').classList.add('show');log('録画の保存に失敗しました。再試行してください。');notice(e.message)}}
 
-    async function finish(message){if(!live&&!starting)return;var endingSession=sessionId;live=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}var recording=await stopRecording();if(!diagnosticSummaryShown){diagnosticSummaryShown=true;var recorderWall=(recorderStartedAt&&recorderStoppedAt)?((recorderStoppedAt-recorderStartedAt)/1000).toFixed(1):'なし';diagnostic('summary: local='+(elapsedFromStart(Date.now())||0).toFixed(1)+'s'+' / dataChannel='+(elapsedFromStart(dataChannelOpenedAt)!=null?elapsedFromStart(dataChannelOpenedAt).toFixed(1):'なし')+'s'+' / configured='+(elapsedFromStart(configuredAt)!=null?elapsedFromStart(configuredAt).toFixed(1):'なし')+'s'+' / videoTrack='+(elapsedFromStart(firstVideoTrackAt)!=null?elapsedFromStart(firstVideoTrackAt).toFixed(1):'なし')+'s'+' / firstChunk='+(elapsedFromStart(firstChunkAt)!=null?elapsedFromStart(firstChunkAt).toFixed(1):'なし')+'s'+' / requested='+chunkRequestedTotal.toFixed(2)+'s'+' / playback='+chunkPlaybackTotal.toFixed(2)+'s'+' / recorderWall='+recorderWall+'s'+' / providerSessionWall='+(lastSessionWallMs?(lastSessionWallMs/1000).toFixed(2):'なし')+'s'+' / heartbeats='+heartbeatCount+' / streamReason='+(streamEndedReason||'なし')+' / videoClockRatio='+(lastVideoClockRatio!=null?lastVideoClockRatio.toFixed(3):'なし')+' / videoMediaElapsed='+(lastVideoMediaElapsed!=null?lastVideoMediaElapsed.toFixed(2):'なし')+'s / videoWallElapsed='+(lastVideoWallElapsed!=null?lastVideoWallElapsed.toFixed(2):'なし')+'s / presentedFrames='+(lastPresentedFrames!=null?lastPresentedFrames:'なし')+' / playbackRate='+$('video').playbackRate+' / defaultPlaybackRate='+$('video').defaultPlaybackRate)}if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}cleanup();sessionId=null;if(message){log(message);notice(message)}if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()}
+    // 自然終了(natural:true)時だけ、既にブラウザへ届いている映像を最大15秒まで
+    // 吐き切ってから録画を止める。falへの新しい生成リクエストは一切送らない。
+    async function waitForPlaybackDrain(){
+      var videoEl=$('video');
+      var startedAt=Date.now();
+      var lastTime=Number(videoEl.currentTime||0);
+      var lastMovedAt=Date.now();
+
+      diagnostic('recording drain start: currentTime='+lastTime.toFixed(2));
+
+      while(Date.now()-startedAt<15000){
+        await new Promise(function(resolve){setTimeout(resolve,250)});
+
+        var current=Number(videoEl.currentTime||0);
+
+        if(current>lastTime+0.02){
+          lastTime=current;
+          lastMovedAt=Date.now();
+          continue;
+        }
+
+        if(Date.now()-lastMovedAt>=2000){
+          diagnostic(
+            'recording drain settled: currentTime='+
+            current.toFixed(2)+
+            ' / waited='+
+            ((Date.now()-startedAt)/1000).toFixed(2)+'s'
+          );
+          return;
+        }
+      }
+
+      diagnostic(
+        'recording drain timeout: currentTime='+
+        Number(videoEl.currentTime||0).toFixed(2)+
+        ' / waited=15.00s'
+      );
+    }
+
+    async function finish(message,options){
+      var opts=options||{};
+      var natural=opts.natural===true;
+
+      if((!live&&!starting)||finishing)return;
+
+      finishing=true;
+
+      var endingSession=sessionId;
+
+      clearInterval(heartbeatTimer);
+      clearInterval(countdownTimer);
+
+      if(natural){
+        // provider側は既に自然終了している。新しい生成は追加せず、
+        // 到着済み映像の再生だけを待ってから録画を止める。
+        await waitForPlaybackDrain();
+      }else{
+        try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}
+      }
+
+      live=false;
+
+      var recording=await stopRecording();
+      if(!diagnosticSummaryShown){diagnosticSummaryShown=true;var recorderWall=(recorderStartedAt&&recorderStoppedAt)?((recorderStoppedAt-recorderStartedAt)/1000).toFixed(1):'なし';diagnostic('summary: local='+(elapsedFromStart(Date.now())||0).toFixed(1)+'s'+' / dataChannel='+(elapsedFromStart(dataChannelOpenedAt)!=null?elapsedFromStart(dataChannelOpenedAt).toFixed(1):'なし')+'s'+' / configured='+(elapsedFromStart(configuredAt)!=null?elapsedFromStart(configuredAt).toFixed(1):'なし')+'s'+' / videoTrack='+(elapsedFromStart(firstVideoTrackAt)!=null?elapsedFromStart(firstVideoTrackAt).toFixed(1):'なし')+'s'+' / firstChunk='+(elapsedFromStart(firstChunkAt)!=null?elapsedFromStart(firstChunkAt).toFixed(1):'なし')+'s'+' / requested='+chunkRequestedTotal.toFixed(2)+'s'+' / playback='+chunkPlaybackTotal.toFixed(2)+'s'+' / recorderWall='+recorderWall+'s'+' / providerSessionWall='+(lastSessionWallMs?(lastSessionWallMs/1000).toFixed(2):'なし')+'s'+' / heartbeats='+heartbeatCount+' / streamReason='+(streamEndedReason||'なし')+' / videoClockRatio='+(lastVideoClockRatio!=null?lastVideoClockRatio.toFixed(3):'なし')+' / videoMediaElapsed='+(lastVideoMediaElapsed!=null?lastVideoMediaElapsed.toFixed(2):'なし')+'s / videoWallElapsed='+(lastVideoWallElapsed!=null?lastVideoWallElapsed.toFixed(2):'なし')+'s / presentedFrames='+(lastPresentedFrames!=null?lastPresentedFrames:'なし')+' / playbackRate='+$('video').playbackRate+' / defaultPlaybackRate='+$('video').defaultPlaybackRate)}
+      if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}
+      cleanup();
+      sessionId=null;
+      if(message){log(message);notice(message)}
+      if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()
+    }
 
     async function heartbeat(){if(!live||!sessionId)return;try{var data=await api('/api/h3-director/heartbeat',{method:'POST',body:JSON.stringify({sessionId:sessionId})});heartbeatFailures=0;heartbeatCount++;lastHeartbeatAt=Date.now();if(!data.alive){diagnostic('heartbeat end: reason='+(data.endReason||'unknown')+' / expired='+(data.expired===true)+' / remaining='+(data.remainingSeconds!=null?data.remainingSeconds:'なし')+' / +'+(elapsedFromStart(lastHeartbeatAt)||0).toFixed(1)+'s');await finish('ライブセッションが終了しました。')}else if(heartbeatCount%2===0){diagnostic('heartbeat #'+heartbeatCount+': alive=true / remaining='+data.remainingSeconds)}}catch(e){heartbeatFailures++;diagnostic('heartbeat error: code='+(e.code||'unknown')+' / failures='+heartbeatFailures);if(e.code==='account_restricted'){await finish('アカウント状態の変更によりライブを終了しました。');return}if(heartbeatFailures>=3){await finish('接続を維持できなかったためライブを終了しました。自動再生成は行いません。')}}}
 
@@ -515,7 +584,11 @@
             var exhaustedMessage=streamEndedReason==='session_limit'
               ?'ライブ生成の上限に達しました。'
               :'ライブ生成が終了しました。';
-            finish(exhaustedMessage);
+            if(streamEndedReason==='session_limit'){
+              finish(exhaustedMessage,{natural:true});
+            }else{
+              finish(exhaustedMessage);
+            }
           }
         }catch(e){}};
         var offer=await pc.createOffer();await pc.setLocalDescription(offer);await waitIce(pc);

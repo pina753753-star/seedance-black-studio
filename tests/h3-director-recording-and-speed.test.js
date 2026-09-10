@@ -191,7 +191,7 @@ function extractSendPromptSource(src) {
 test('promptSendingが状態変数として宣言されている(初期値false)', () => {
   assert.match(
     page,
-    /var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='',promptSending=false;/
+    /var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='',promptSending=false,finishing=false;/
   );
 });
 
@@ -242,11 +242,11 @@ test("input listener: promptSending中は文字入力してもaction buttonを�
   assert.match(chunk, /blocked\|\|\s*starting\|\|\s*imageUploading\|\|\s*promptSending\|\|\s*!this\.value\.trim\(\)/);
 });
 
-test('cleanup(): promptSending=falseを設定する(Live終了・接続失敗後に送信中状態を残さない)', () => {
+test('cleanup(): promptSending=false/finishing=falseを設定する(Live終了・接続失敗後に送信中・終了中状態を残さない)', () => {
   const idx = page.indexOf('function cleanup(){stopVideoDiagnostics();');
   assert.ok(idx > 0, 'cleanup() not found');
-  const chunk = page.slice(idx, idx + 150);
-  assert.match(chunk, /function cleanup\(\)\{stopVideoDiagnostics\(\);live=false;starting=false;promptSending=false;document\.body\.classList\.remove\('live-mode'\);/);
+  const chunk = page.slice(idx, idx + 170);
+  assert.match(chunk, /function cleanup\(\)\{stopVideoDiagnostics\(\);live=false;starting=false;promptSending=false;finishing=false;document\.body\.classList\.remove\('live-mode'\);/);
 });
 
 test('approve-prompt APIルート自体は変更していない(呼び出しシグネチャのみ確認、ファイルは触っていない)', () => {
@@ -255,4 +255,134 @@ test('approve-prompt APIルート自体は変更していない(呼び出しシ�
   assert.match(src, /method:'POST',/);
   assert.match(src, /sessionId:sessionId,/);
   assert.match(src, /prompt:prompt/);
+});
+
+// ---------------------------------------------------------------
+// D. 自然終了(natural:true)時だけ録画drain待ちを行う
+//    (fal生成時間60秒・credits・API・DBは変更しない)
+// ---------------------------------------------------------------
+
+function extractFinishSource() {
+  const startIndex = page.indexOf('async function finish(message,options){');
+  assert.ok(startIndex > 0, 'finish() not found in h3-director.html');
+  return extractFunctionSource(page, startIndex + 'async '.length);
+}
+
+function extractWaitForPlaybackDrainSource() {
+  const startIndex = page.indexOf('async function waitForPlaybackDrain(){');
+  assert.ok(startIndex > 0, 'waitForPlaybackDrain() not found in h3-director.html');
+  return extractFunctionSource(page, startIndex + 'async '.length);
+}
+
+test('finishingが状態変数として宣言されている(初期値false)', () => {
+  assert.match(
+    page,
+    /var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='',promptSending=false,finishing=false;/
+  );
+});
+
+test('finish(): finishing中はearly returnし、二重実行を拒否する', () => {
+  const src = extractFinishSource();
+  assert.match(src, /if\(\(!live&&!starting\)\|\|finishing\)return;/);
+  assert.match(src, /finishing=true;/);
+});
+
+test('cleanup(): finishing=falseへ戻す', () => {
+  assert.match(page, /function cleanup\(\)\{stopVideoDiagnostics\(\);live=false;starting=false;promptSending=false;finishing=false;/);
+});
+
+test('waitForPlaybackDrain()が存在し、最大15秒でループを終える', () => {
+  const src = extractWaitForPlaybackDrainSource();
+  assert.match(src, /var startedAt=Date\.now\(\);/);
+  assert.match(src, /while\(Date\.now\(\)-startedAt<15000\)\{/);
+  assert.match(src, /diagnostic\(\s*'recording drain timeout: currentTime='\+/);
+});
+
+test('waitForPlaybackDrain(): video.currentTimeの進行を監視し、進んでいれば継続する', () => {
+  const src = extractWaitForPlaybackDrainSource();
+  assert.match(src, /var lastTime=Number\(videoEl\.currentTime\|\|0\);/);
+  assert.match(src, /var current=Number\(videoEl\.currentTime\|\|0\);/);
+  assert.match(src, /if\(current>lastTime\+0\.02\)\{\s*lastTime=current;\s*lastMovedAt=Date\.now\(\);\s*continue;\s*\}/);
+});
+
+test('waitForPlaybackDrain(): currentTimeが約2秒以上進まなければ「吐き切った」とみなして終了する', () => {
+  const src = extractWaitForPlaybackDrainSource();
+  assert.match(src, /if\(Date\.now\(\)-lastMovedAt>=2000\)\{/);
+  assert.match(src, /diagnostic\(\s*'recording drain settled: currentTime='\+/);
+  assert.match(src, /return;/);
+});
+
+test('waitForPlaybackDrain(): fal/API/DBへの新規リクエストを一切送っていない(currentTime監視のみ)', () => {
+  const src = extractWaitForPlaybackDrainSource();
+  assert.doesNotMatch(src, /api\(/);
+  assert.doesNotMatch(src, /sendControl\(/);
+  assert.doesNotMatch(src, /fetch\(/);
+});
+
+test("updateTimer()の60秒終了はfinish(...,{natural:true})を呼ぶ", () => {
+  assert.match(page, /if\(left<=0&&live\)finish\('60秒のライブが終了しました。',\{natural:true\}\)/);
+});
+
+test('stream_exhausted: session_limitはnatural:trueを付け、それ以外は付けない', () => {
+  const idx = page.indexOf("if(msg.type==='stream_exhausted'){");
+  assert.ok(idx > 0, 'stream_exhausted handler not found');
+  const chunk = page.slice(idx, idx + 700);
+  assert.match(chunk, /if\(streamEndedReason==='session_limit'\)\{\s*finish\(exhaustedMessage,\{natural:true\}\);\s*\}else\{\s*finish\(exhaustedMessage\);\s*\}/);
+});
+
+test('手動停止ボタンはnatural:trueを付けない(即時終了のまま)', () => {
+  assert.match(page, /\$\('stop'\)\.addEventListener\('click',function\(\)\{finish\('ライブを終了しました。'\)\}\);/);
+});
+
+test('WebRTC failed/closedはnatural:trueを付けない(即時終了のまま)', () => {
+  const idx = page.indexOf('pc.onconnectionstatechange=function(){');
+  assert.ok(idx > 0, 'onconnectionstatechange not found');
+  const chunk = page.slice(idx, idx + 300);
+  assert.match(chunk, /if\(\['failed','closed'\]\.includes\(pc\.connectionState\)&&live\)finish\('WebRTC接続が終了しました。自動再生成は行いません。'\)/);
+  assert.doesNotMatch(chunk, /natural:true/);
+});
+
+test('heartbeat失敗(account_restricted/3回失敗)はnatural:trueを付けない(即時終了のまま)', () => {
+  const idx = page.indexOf('async function heartbeat(){');
+  assert.ok(idx > 0, 'heartbeat() not found');
+  const chunk = page.slice(idx, page.indexOf('async function start('));
+  assert.match(chunk, /await finish\('ライブセッションが終了しました。'\)/);
+  assert.match(chunk, /await finish\('アカウント状態の変更によりライブを終了しました。'\)/);
+  assert.match(chunk, /await finish\('接続を維持できなかったためライブを終了しました。自動再生成は行いません。'\)/);
+  assert.doesNotMatch(chunk, /natural:true/);
+});
+
+test('finish(): natural:true(自然終了)の場合はdrain前にcontrol stopを送らない', () => {
+  const src = extractFinishSource();
+  const naturalIdx = src.indexOf('if(natural){');
+  const elseIdx = src.indexOf('}else{');
+  assert.ok(naturalIdx > 0 && elseIdx > naturalIdx, 'natural/else branches not found');
+  const naturalBlock = src.slice(naturalIdx, elseIdx);
+  assert.match(naturalBlock, /await waitForPlaybackDrain\(\);/);
+  assert.doesNotMatch(naturalBlock, /control\.send/);
+  assert.doesNotMatch(naturalBlock, /type:'stop'/);
+});
+
+test('finish(): natural:falseの即時終了では従来どおりcontrol stopを送る', () => {
+  const src = extractFinishSource();
+  const elseIdx = src.indexOf('}else{');
+  const elseEndIdx = src.indexOf('live=false;', elseIdx);
+  assert.ok(elseIdx > 0 && elseEndIdx > elseIdx, 'else branch not found');
+  const elseBlock = src.slice(elseIdx, elseEndIdx);
+  assert.match(elseBlock, /if\(control&&control\.readyState==='open'\)control\.send\(JSON\.stringify\(\{type:'stop'\}\)\)/);
+});
+
+test('finish(): MediaRecorder停止(stopRecording)・end-session・cleanup・saveRecording/loadHistoryの流れは維持されている', () => {
+  const src = extractFinishSource();
+  assert.match(src, /var recording=await stopRecording\(\);/);
+  assert.match(src, /api\('\/api\/h3-director\/end-session',\{method:'POST',body:JSON\.stringify\(\{sessionId:endingSession\}\),keepalive:true\}\)/);
+  assert.match(src, /cleanup\(\);/);
+  assert.match(src, /if\(recording&&endingSession\)await saveRecording\(recording,endingSession\);else await loadHistory\(\)/);
+});
+
+test('finish(): fal生成時間・credits・DBへの新規呼び出しを追加していない(既存API呼び出しのみ)', () => {
+  const src = extractFinishSource();
+  // Only the pre-existing end-session call; no new fal/credits/DB calls added.
+  const apiCalls = src.match(/api\('\/api\/[^']+'/g) || [];
+  assert.deepEqual(apiCalls, ["api('/api/h3-director/end-session'"]);
 });
