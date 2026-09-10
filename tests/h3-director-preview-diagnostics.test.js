@@ -66,10 +66,22 @@ test('isPreviewHost: localhostもfalse', () => {
 });
 
 test('diagnostic()はisPreviewHost()がfalseなら何もしない(early return)', () => {
-  assert.match(
-    page,
-    /function diagnostic\(text\)\{\s*if\(!isPreviewHost\(\)\)return;\s*log\('\[診断\] '\+text,'system'\);\s*\}/
-  );
+  const idx = page.indexOf('function diagnostic(text){');
+  assert.ok(idx > 0, 'diagnostic() not found');
+  const chunk = page.slice(idx, idx + 300);
+  assert.match(chunk, /if\(!isPreviewHost\(\)\)return;/);
+});
+
+test('diagnostic()はチャット#logを呼ばず、#diagnosticsLogへtextContentで追記する', () => {
+  const idx = page.indexOf('function diagnostic(text){');
+  assert.ok(idx > 0, 'diagnostic() not found');
+  const chunk = page.slice(idx, idx + 300);
+  assert.match(chunk, /var root=\$\('diagnosticsLog'\);/);
+  assert.match(chunk, /if\(!root\)return;/);
+  assert.match(chunk, /row\.textContent='\[診断\] '\+text;/);
+  assert.match(chunk, /root\.appendChild\(row\);/);
+  assert.doesNotMatch(chunk, /log\(/);
+  assert.doesNotMatch(chunk, /innerHTML/);
 });
 
 // ---------------------------------------------------------------

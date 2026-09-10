@@ -399,3 +399,83 @@ test('診断の開始呼び出しは既存heartbeatとは独立し、7秒間隔�
   assert.match(page, /\},7000\);/);
   assert.match(page, /startVideoClockDiagnostics\(myGeneration\);startWebrtcStatsDiagnostics\(myGeneration\)/);
 });
+
+// ---------------------------------------------------------------
+// 診断ログのチャットからの分離: Preview専用の折りたたみパネルへ移す。
+// 通常チャット#logは影響を受けない。static-source checksのみ。
+// ---------------------------------------------------------------
+
+test('diagnosticsWrap/diagnosticsToggle/diagnosticsPanel/diagnosticsLogがaside内、#logの直後・composerの前に配置されている', () => {
+  const logIdx = page.indexOf('<div class="log" id="log"></div>');
+  assert.ok(logIdx > 0, '#log not found');
+  const composerIdx = page.indexOf('<div class="composer">');
+  assert.ok(composerIdx > logIdx, '.composer not found after #log');
+  const between = page.slice(logIdx, composerIdx);
+  assert.match(between, /<div class="diagnostics-wrap" id="diagnosticsWrap" hidden>/);
+  assert.match(between, /<button[^>]*id="diagnosticsToggle"[^>]*aria-expanded="false"[^>]*aria-controls="diagnosticsPanel"[^>]*>診断を見る<\/button>/);
+  assert.match(between, /<div class="diagnostics-panel" id="diagnosticsPanel" hidden>/);
+  assert.match(between, /<div id="diagnosticsLog"><\/div>/);
+});
+
+test('diagnosticsWrapは初期状態でhidden属性を持つ(HTML上の初期状態)', () => {
+  const idx = page.indexOf('<div class="diagnostics-wrap" id="diagnosticsWrap"');
+  assert.ok(idx > 0, 'diagnosticsWrap not found');
+  const tagEnd = page.indexOf('>', idx);
+  const openingTag = page.slice(idx, tagEnd + 1);
+  assert.match(openingTag, /hidden/);
+});
+
+test('diagnosticsPanelも初期状態でhidden属性を持つ(初期状態は閉じている)', () => {
+  const idx = page.indexOf('<div class="diagnostics-panel" id="diagnosticsPanel"');
+  assert.ok(idx > 0, 'diagnosticsPanel not found');
+  const tagEnd = page.indexOf('>', idx);
+  const openingTag = page.slice(idx, tagEnd + 1);
+  assert.match(openingTag, /hidden/);
+});
+
+test('isPreviewHost()の場合のみdiagnosticsWrap.hiddenをfalseにする(本番はhiddenのまま)', () => {
+  assert.match(page, /if\(isPreviewHost\(\)\)\$\('diagnosticsWrap'\)\.hidden=false;/);
+});
+
+test('diagnosticsToggleクリックでdiagnosticsPanel.hiddenを切替え、textContent/aria-expandedを更新する', () => {
+  const idx = page.indexOf("$('diagnosticsToggle').addEventListener('click',");
+  assert.ok(idx > 0, 'diagnosticsToggle click handler not found');
+  const chunk = page.slice(idx, idx + 400);
+  assert.match(chunk, /var open=\$\('diagnosticsPanel'\)\.hidden;/);
+  assert.match(chunk, /\$\('diagnosticsPanel'\)\.hidden=!open;/);
+  assert.match(chunk, /\$\('diagnosticsToggle'\)\.textContent=open\?'診断を閉じる':'診断を見る';/);
+  assert.match(chunk, /\$\('diagnosticsToggle'\)\.setAttribute\('aria-expanded',open\?'true':'false'\)/);
+});
+
+test('Live開始時・終了時にdiagnosticsPanelを勝手に開閉するコードがない', () => {
+  assert.doesNotMatch(page, /diagnosticsPanel'\)\.hidden=false/);
+  assert.doesNotMatch(page, /diagnosticsPanel'\)\.hidden=true(?!;.*click)/);
+});
+
+test('diagnostic()は通常チャットlog()を一切呼ばず、#diagnosticsLogへtextContentのみで追記する(innerHTML禁止)', () => {
+  const idx = page.indexOf('function diagnostic(text){');
+  assert.ok(idx > 0, 'diagnostic() not found');
+  const chunk = page.slice(idx, idx + 400);
+  assert.match(chunk, /if\(!isPreviewHost\(\)\)return;/);
+  assert.match(chunk, /var root=\$\('diagnosticsLog'\);/);
+  assert.match(chunk, /if\(!root\)return;/);
+  assert.match(chunk, /var row=document\.createElement\('div'\);/);
+  assert.match(chunk, /row\.className='diagnostic-line';/);
+  assert.match(chunk, /row\.textContent='\[診断\] '\+text;/);
+  assert.match(chunk, /root\.appendChild\(row\);/);
+  assert.match(chunk, /root\.scrollTop=root\.scrollHeight/);
+  assert.doesNotMatch(chunk, /\blog\(/);
+  assert.doesNotMatch(chunk, /innerHTML/);
+});
+
+test('通常のlog()関数自体は変更されておらず、#logへtextContentで書き込む既存動作を維持している', () => {
+  assert.match(page, /function log\(text,kind\)\{var el=document\.createElement\('div'\);el\.className='msg '\+\(kind\|\|'system'\);el\.textContent=text;\$\('log'\)\.appendChild\(el\);\$\('log'\)\.scrollTop=\$\('log'\)\.scrollHeight\}/);
+});
+
+test('通常チャット処理(ユーザー入力ログ・追加指示反映・エラー・保存・Live終了メッセージ)は今回変更していない', () => {
+  assert.match(page, /log\(prompt,'user'\);/);
+  assert.match(page, /log\('H3 Max Liveへ初期指示を送信しました。'\)/);
+  assert.match(page, /log\('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。'\);/);
+  assert.match(page, /log\('録画を履歴へ保存しました。'\);/);
+  assert.match(page, /if\(message\)\{log\(message\);notice\(message\)\}/);
+});
