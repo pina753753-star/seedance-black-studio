@@ -4,14 +4,11 @@
   if(!/\/h3-director\.html(?:$|[?#])/.test(location.pathname+location.search))return;
 
   var supabaseClient=typeof window.flowvidSupabaseClient==='function'?window.flowvidSupabaseClient():null;
-  var overlay=null;
-  var player=null;
 
   // H3 Max Live本体は最初に video/mp4;codecs=h264,aac を試すが、
   // Safari系では「video/mp4」や avc1/mp4a だけを対応形式として返す場合がある。
-  // このページだけで MediaRecorder を薄く包み、ブラウザが実際に対応している
-  // MP4形式が1つでもあれば、それを本体の最優先候補として使わせる。
-  // MP4非対応端末では一切偽装せず、従来どおりWebM候補へフォールバックする。
+  // MP4対応端末では、その端末が実際に対応しているMP4形式へ安全に読み替える。
+  // MP4非対応端末では何も変更せず、本体のWebM候補へフォールバックする。
   function installMp4RecorderCompatibility(){
     var NativeMediaRecorder=window.MediaRecorder;
     if(!NativeMediaRecorder||NativeMediaRecorder.__h3Mp4Compat)return;
@@ -86,79 +83,132 @@
     return data;
   }
 
-  function ensureOverlay(){
-    if(overlay&&player)return overlay;
-
+  function installHistoryStyle(){
+    if(document.getElementById('h3-director-history-inline-style'))return;
     var style=document.createElement('style');
-    style.id='h3-director-history-player-style';
+    style.id='h3-director-history-inline-style';
     style.textContent=[
-      'body.h3-history-open{overflow:hidden!important}',
-      '.h3-history-player{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;z-index:100000;background:#000;display:none;overflow:hidden;overscroll-behavior:none}',
-      '.h3-history-player.show{display:flex!important;align-items:center;justify-content:center}',
-      '.h3-history-player video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;display:block!important;object-fit:contain!important;background:#000!important}',
-      '.h3-history-close{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:14px;z-index:100001;width:42px;height:42px;border:0;border-radius:50%;background:rgba(50,50,50,.78);color:#fff;font-size:24px;line-height:1;display:grid;place-items:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation}'
+      '#history{display:grid;gap:10px}',
+      '#history .history-item{display:grid;gap:8px;padding:10px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:#070708;overflow:hidden}',
+      '#history .history-item>p{margin:0;color:#d5d5da;font-size:11.5px;line-height:1.5;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}',
+      '#history .history-item>small{display:block;color:#777;font-size:10px;line-height:1.45}',
+      '#history .h3-history-video-frame{position:relative;width:100%;aspect-ratio:16/9;border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden;background:#000;display:grid;place-items:center}',
+      '#history .h3-history-video-frame.portrait{aspect-ratio:9/16;max-height:320px;justify-self:start;width:auto;min-width:180px}',
+      '#history .h3-history-video-frame video{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;background:#000;display:none}',
+      '#history .h3-history-video-frame.ready video{display:block}',
+      '#history .h3-history-video-placeholder{position:absolute;inset:0;display:grid;place-items:center;color:#777;font-size:10.5px;letter-spacing:.03em;pointer-events:none}',
+      '#history .h3-history-video-frame.ready .h3-history-video-placeholder{display:none}',
+      '#history .h3-history-actions{display:flex;gap:7px}',
+      '#history .h3-history-actions button{flex:1;min-height:36px;margin:0;padding:7px 10px;border:1px solid rgba(255,255,255,.12);border-radius:9px;background:#151519;color:#eee;font-size:10.5px;font-weight:700}',
+      '#history .h3-history-actions button:disabled{opacity:.5}',
+      '@media(max-width:520px){#history .history-item{padding:9px}#history .h3-history-video-frame.portrait{max-height:280px;min-width:158px}}'
     ].join('');
     document.head.appendChild(style);
+  }
 
-    overlay=document.createElement('div');
-    overlay.id='h3HistoryPlayer';
-    overlay.className='h3-history-player';
-    overlay.setAttribute('role','dialog');
-    overlay.setAttribute('aria-modal','true');
-    overlay.setAttribute('aria-label','保存動画の再生');
-    overlay.innerHTML='<video id="h3HistoryVideo" playsinline webkit-playsinline controls preload="metadata"></video><button type="button" class="h3-history-close" aria-label="閉じる">×</button>';
-    document.body.appendChild(overlay);
-    player=overlay.querySelector('video');
-
-    overlay.querySelector('.h3-history-close').addEventListener('click',function(event){
-      event.preventDefault();
-      event.stopPropagation();
-      closeOverlay();
+  function stopOtherHistoryVideos(except){
+    document.querySelectorAll('#history .h3-history-video-frame video').forEach(function(video){
+      if(video===except)return;
+      try{video.pause()}catch(e){}
+      var item=video.closest('.history-item');
+      var button=item&&item.querySelector('[data-play]');
+      if(button&&!button.disabled)button.textContent='再生';
     });
+  }
 
-    player.addEventListener('error',function(){
+  function enhanceHistoryItem(item){
+    if(!item||item.dataset.h3HistoryEnhanced==='1')return;
+    var playButton=item.querySelector('[data-play]');
+    var saveButton=item.querySelector('[data-save]');
+    if(!playButton&&!saveButton)return;
+
+    item.dataset.h3HistoryEnhanced='1';
+    var ratio=playButton&&playButton.dataset.ratio==='9:16'?'9:16':'16:9';
+    var frame=document.createElement('div');
+    frame.className='h3-history-video-frame'+(ratio==='9:16'?' portrait':'');
+    frame.innerHTML='<video playsinline webkit-playsinline controls preload="metadata"></video><div class="h3-history-video-placeholder">再生するとここに表示されます</div>';
+
+    var actionHost=(playButton&&playButton.parentElement)||(saveButton&&saveButton.parentElement);
+    if(actionHost){
+      actionHost.classList.add('h3-history-actions');
+      item.insertBefore(frame,actionHost);
+    }else{
+      item.appendChild(frame);
+    }
+
+    var video=frame.querySelector('video');
+    video.addEventListener('play',function(){
+      stopOtherHistoryVideos(video);
+      if(playButton)playButton.textContent='停止';
+    });
+    video.addEventListener('pause',function(){
+      if(playButton&&!playButton.disabled)playButton.textContent='再生';
+    });
+    video.addEventListener('error',function(){
+      frame.classList.remove('ready');
+      if(playButton){playButton.disabled=false;playButton.textContent='再生'}
       showNotice('保存した動画を再生できませんでした。');
     });
-
-    return overlay;
   }
 
-  function closeOverlay(){
-    if(!overlay||!player)return;
-    try{player.pause()}catch(e){}
-    player.removeAttribute('src');
-    try{player.load()}catch(e){}
-    overlay.classList.remove('show');
-    overlay.setAttribute('aria-hidden','true');
-    document.body.classList.remove('h3-history-open');
+  function enhanceHistory(){
+    installHistoryStyle();
+    document.querySelectorAll('#history .history-item').forEach(enhanceHistoryItem);
   }
 
-  async function playRecording(sessionId){
+  async function playRecording(button){
     if(document.body.classList.contains('live-mode')){
       showNotice('ライブ終了後に履歴を再生できます。');
       return;
     }
 
-    try{
-      var info=await recordingInfo(sessionId);
-      ensureOverlay();
-      try{player.pause()}catch(e){}
-      player.removeAttribute('src');
-      try{player.load()}catch(e){}
-      player.src=info.url;
-      player.setAttribute('playsinline','');
-      player.setAttribute('webkit-playsinline','');
-      player.controls=true;
-      document.body.classList.add('h3-history-open');
-      overlay.classList.add('show');
-      overlay.removeAttribute('aria-hidden');
-      try{player.load()}catch(e){}
+    var item=button&&button.closest('.history-item');
+    if(!item)return;
+    enhanceHistoryItem(item);
 
-      // iPhone/Safariでは履歴ボタン押下直後のplay()がネイティブ全画面へ
-      // 移行してページ状態を崩すことがあるため、自動再生はしない。
-      // controlsを常時表示し、ユーザーの明示タップで再生する。
-      showNotice('再生ボタンを押してください。');
+    var frame=item.querySelector('.h3-history-video-frame');
+    var video=frame&&frame.querySelector('video');
+    if(!frame||!video)return;
+
+    if(video.src){
+      if(video.paused){
+        stopOtherHistoryVideos(video);
+        var replay;
+        try{replay=video.play()}catch(e){replay=null}
+        if(replay&&typeof replay.catch==='function')replay.catch(function(){showNotice('動画内の再生ボタンを押してください。')});
+      }else{
+        try{video.pause()}catch(e){}
+      }
+      return;
+    }
+
+    var originalText=button.textContent||'再生';
+    button.disabled=true;
+    button.textContent='読み込み中…';
+
+    try{
+      var info=await recordingInfo(button.dataset.play||'');
+      stopOtherHistoryVideos(video);
+      video.src=info.url;
+      video.setAttribute('playsinline','');
+      video.setAttribute('webkit-playsinline','');
+      video.controls=true;
+      frame.classList.add('ready');
+      try{video.load()}catch(e){}
+      button.disabled=false;
+      button.textContent='再生';
+
+      var firstPlay;
+      try{firstPlay=video.play()}catch(e){firstPlay=null}
+      if(firstPlay&&typeof firstPlay.catch==='function'){
+        firstPlay.catch(function(){
+          showNotice('動画内の再生ボタンを押してください。');
+        });
+      }
     }catch(e){
+      button.disabled=false;
+      button.textContent=originalText;
+      frame.classList.remove('ready');
       showNotice(e&&e.message?e.message:'保存した動画を再生できませんでした。');
     }
   }
@@ -201,7 +251,7 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      playRecording(playButton.dataset.play||'');
+      playRecording(playButton);
       return;
     }
 
@@ -214,5 +264,16 @@
     }
   },true);
 
-  window.addEventListener('pagehide',closeOverlay);
+  var historyRoot=document.getElementById('history');
+  if(historyRoot){
+    enhanceHistory();
+    new MutationObserver(enhanceHistory).observe(historyRoot,{childList:true,subtree:true});
+  }else if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',function(){
+      historyRoot=document.getElementById('history');
+      if(!historyRoot)return;
+      enhanceHistory();
+      new MutationObserver(enhanceHistory).observe(historyRoot,{childList:true,subtree:true});
+    },{once:true});
+  }
 })();
