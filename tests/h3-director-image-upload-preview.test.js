@@ -226,7 +226,7 @@ test('h3-director.htmlはgate表示後blocked=trueで有効にならないが、
   // 塞がないよう`||live`は含まない(H3 Max Live途中指示UI修正で意図的に削除)。
   assert.match(
     page,
-    /\$\('prompt'\)\.addEventListener\('input',function\(\)\{\$\('action'\)\.disabled=blocked\|\|starting\|\|imageUploading\|\|!this\.value\.trim\(\)\}\)/
+    /\$\('prompt'\)\.addEventListener\('input',function\(\)\{\s*\$\('action'\)\.disabled=\s*blocked\|\|\s*starting\|\|\s*imageUploading\|\|\s*promptSending\|\|\s*!this\.value\.trim\(\)\s*\}\);/
   );
   assert.doesNotMatch(
     page,

@@ -327,7 +327,7 @@ test('an image-attached session stops safely when the provider does not confirm 
 test('additional prompt messages set replan:true', () => {
   // prompt is wrapped in directorPrompt() (adds a natural-speed hint unless the
   // user already specified a speed) — prompt_version and replan:true are unchanged.
-  assert.match(page, /type:'prompt',prompt_version:approved\.promptVersion,prompt:directorPrompt\(approved\.prompt\),replan:true/);
+  assert.match(page, /type:'prompt',\s*prompt_version:approved\.promptVersion,\s*prompt:directorPrompt\(approved\.prompt\),\s*replan:true/);
 });
 
 // ---------------------------------------------------------------
