@@ -88,6 +88,7 @@
     var style=document.createElement('style');
     style.id='h3-director-history-inline-style';
     style.textContent=[
+      '#historyPanel.history{max-height:min(52vh,520px);overflow:auto}',
       '#history{display:grid;gap:10px}',
       '#history .history-item{display:grid;gap:8px;padding:10px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:#070708;overflow:hidden}',
       '#history .history-item>p{margin:0;color:#d5d5da;font-size:11.5px;line-height:1.5;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}',
@@ -101,9 +102,64 @@
       '#history .h3-history-actions{display:flex;gap:7px}',
       '#history .h3-history-actions button{flex:1;min-height:36px;margin:0;padding:7px 10px;border:1px solid rgba(255,255,255,.12);border-radius:9px;background:#151519;color:#eee;font-size:10.5px;font-weight:700}',
       '#history .h3-history-actions button:disabled{opacity:.5}',
-      '@media(max-width:520px){#history .history-item{padding:9px}#history .h3-history-video-frame.portrait{max-height:280px;min-width:158px}}'
+      '.h3-price-meta{display:inline-flex;align-items:center;gap:6px}',
+      '.h3-price-help{position:relative;display:inline-flex;align-items:center}',
+      '.h3-price-help-button{width:20px;height:20px;padding:0;border:1px solid rgba(255,255,255,.2);border-radius:50%;background:#111;color:#cfd3ff;font-size:11px;font-weight:900;line-height:1;display:grid;place-items:center;-webkit-tap-highlight-color:transparent}',
+      '.h3-price-help-button:focus-visible{outline:2px solid #8799ff;outline-offset:2px}',
+      '.h3-price-help-panel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:60;width:min(290px,calc(100vw - 32px));padding:11px 12px;border:1px solid rgba(255,255,255,.14);border-radius:11px;background:#111216;box-shadow:0 14px 34px rgba(0,0,0,.45);color:#d7d7dc;font-size:10.5px;line-height:1.65}',
+      '.h3-price-help-panel[hidden]{display:none!important}',
+      '.h3-price-help-panel b{display:block;margin-bottom:4px;color:#fff;font-size:11px}',
+      '.h3-price-help-panel p{margin:0 0 4px}',
+      '.h3-price-help-panel p:last-child{margin-bottom:0;color:#aebcff}',
+      '.composer>.footnote.h3-price-footnote-hidden{display:none!important}',
+      '@media(max-width:900px){#historyPanel.history{max-height:min(48vh,460px)}}',
+      '@media(max-width:520px){#historyPanel.history{max-height:46vh}#history .history-item{padding:9px}#history .h3-history-video-frame.portrait{max-height:280px;min-width:158px}.h3-price-help-panel{right:-4px}}'
     ].join('');
     document.head.appendChild(style);
+  }
+
+  function installPricingHelp(){
+    installHistoryStyle();
+    var meta=document.querySelector('.composer .meta');
+    var footnote=document.querySelector('.composer>.footnote');
+    if(!meta||meta.dataset.h3PriceHelp==='1')return;
+
+    meta.dataset.h3PriceHelp='1';
+    var text=meta.querySelector('span');
+    if(text){
+      text.classList.add('h3-price-meta');
+      text.textContent='60秒 / 768p / 料金';
+
+      var help=document.createElement('span');
+      help.className='h3-price-help';
+      help.innerHTML='<button type="button" class="h3-price-help-button" aria-label="料金について" aria-expanded="false">?</button><div class="h3-price-help-panel" role="dialog" aria-label="H3 Max Liveの料金説明" hidden><b>H3 Max Liveの料金</b><p>クレジットは「ライブ生成を開始」した時にだけ消費します。</p><p>ライブ中の追加指示では、追加クレジットは消費しません。</p><p>途中でライブを終了しても、消費したクレジットは返還されません。</p><p>9/14までセール期間中です。セール内容は料金ページをご確認ください。</p></div>';
+      text.appendChild(help);
+
+      var button=help.querySelector('.h3-price-help-button');
+      var panel=help.querySelector('.h3-price-help-panel');
+      button.addEventListener('click',function(event){
+        event.preventDefault();
+        event.stopPropagation();
+        var willOpen=panel.hidden;
+        panel.hidden=!willOpen;
+        button.setAttribute('aria-expanded',willOpen?'true':'false');
+      });
+
+      document.addEventListener('click',function(event){
+        if(panel.hidden||help.contains(event.target))return;
+        panel.hidden=true;
+        button.setAttribute('aria-expanded','false');
+      });
+
+      document.addEventListener('keydown',function(event){
+        if(event.key!=='Escape'||panel.hidden)return;
+        panel.hidden=true;
+        button.setAttribute('aria-expanded','false');
+        button.focus();
+      });
+    }
+
+    if(footnote)footnote.classList.add('h3-price-footnote-hidden');
   }
 
   function stopOtherHistoryVideos(except){
@@ -264,12 +320,15 @@
     }
   },true);
 
+  installPricingHelp();
+
   var historyRoot=document.getElementById('history');
   if(historyRoot){
     enhanceHistory();
     new MutationObserver(enhanceHistory).observe(historyRoot,{childList:true,subtree:true});
   }else if(document.readyState==='loading'){
     document.addEventListener('DOMContentLoaded',function(){
+      installPricingHelp();
       historyRoot=document.getElementById('history');
       if(!historyRoot)return;
       enhanceHistory();
