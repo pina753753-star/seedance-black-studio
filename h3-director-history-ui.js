@@ -7,6 +7,54 @@
   var overlay=null;
   var player=null;
 
+  // H3 Max Live本体は最初に video/mp4;codecs=h264,aac を試すが、
+  // Safari系では「video/mp4」や avc1/mp4a だけを対応形式として返す場合がある。
+  // このページだけで MediaRecorder を薄く包み、ブラウザが実際に対応している
+  // MP4形式が1つでもあれば、それを本体の最優先候補として使わせる。
+  // MP4非対応端末では一切偽装せず、従来どおりWebM候補へフォールバックする。
+  function installMp4RecorderCompatibility(){
+    var NativeMediaRecorder=window.MediaRecorder;
+    if(!NativeMediaRecorder||NativeMediaRecorder.__h3Mp4Compat)return;
+    if(typeof NativeMediaRecorder.isTypeSupported!=='function')return;
+
+    var mp4Candidates=[
+      'video/mp4;codecs=h264,aac',
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4;codecs=avc1,mp4a',
+      'video/mp4'
+    ];
+    var supportedMp4='';
+    for(var i=0;i<mp4Candidates.length;i++){
+      try{
+        if(NativeMediaRecorder.isTypeSupported(mp4Candidates[i])){
+          supportedMp4=mp4Candidates[i];
+          break;
+        }
+      }catch(e){}
+    }
+    if(!supportedMp4)return;
+
+    function H3MediaRecorder(stream,options){
+      var opts=options;
+      if(options&&options.mimeType==='video/mp4;codecs=h264,aac'&&supportedMp4!==options.mimeType){
+        opts=Object.assign({},options,{mimeType:supportedMp4});
+      }
+      return new NativeMediaRecorder(stream,opts);
+    }
+
+    try{Object.setPrototypeOf(H3MediaRecorder,NativeMediaRecorder)}catch(e){}
+    H3MediaRecorder.prototype=NativeMediaRecorder.prototype;
+    H3MediaRecorder.isTypeSupported=function(type){
+      if(type==='video/mp4;codecs=h264,aac')return true;
+      return NativeMediaRecorder.isTypeSupported(type);
+    };
+    H3MediaRecorder.__h3Mp4Compat=true;
+    H3MediaRecorder.__h3SupportedMp4=supportedMp4;
+    window.MediaRecorder=H3MediaRecorder;
+  }
+
+  installMp4RecorderCompatibility();
+
   async function authToken(){
     if(!supabaseClient)return'';
     try{
@@ -44,18 +92,21 @@
     var style=document.createElement('style');
     style.id='h3-director-history-player-style';
     style.textContent=[
-      'body.h3-history-open{overflow:hidden}',
-      '.h3-history-player{position:fixed;inset:0;z-index:100000;background:#000;display:none}',
-      '.h3-history-player.show{display:block}',
-      '.h3-history-player video{width:100vw;height:100dvh;display:block;object-fit:contain;background:#000}',
-      '.h3-history-close{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:14px;z-index:100001;width:38px;height:38px;border:0;border-radius:50%;background:rgba(50,50,50,.72);color:#fff;font-size:22px;line-height:1;display:grid;place-items:center;-webkit-tap-highlight-color:transparent}'
+      'body.h3-history-open{overflow:hidden!important}',
+      '.h3-history-player{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;z-index:100000;background:#000;display:none;overflow:hidden;overscroll-behavior:none}',
+      '.h3-history-player.show{display:flex!important;align-items:center;justify-content:center}',
+      '.h3-history-player video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;display:block!important;object-fit:contain!important;background:#000!important}',
+      '.h3-history-close{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:14px;z-index:100001;width:42px;height:42px;border:0;border-radius:50%;background:rgba(50,50,50,.78);color:#fff;font-size:24px;line-height:1;display:grid;place-items:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation}'
     ].join('');
     document.head.appendChild(style);
 
     overlay=document.createElement('div');
     overlay.id='h3HistoryPlayer';
     overlay.className='h3-history-player';
-    overlay.innerHTML='<video id="h3HistoryVideo" playsinline controls preload="metadata"></video><button type="button" class="h3-history-close" aria-label="閉じる">×</button>';
+    overlay.setAttribute('role','dialog');
+    overlay.setAttribute('aria-modal','true');
+    overlay.setAttribute('aria-label','保存動画の再生');
+    overlay.innerHTML='<video id="h3HistoryVideo" playsinline webkit-playsinline controls preload="metadata"></video><button type="button" class="h3-history-close" aria-label="閉じる">×</button>';
     document.body.appendChild(overlay);
     player=overlay.querySelector('video');
 
@@ -78,6 +129,7 @@
     player.removeAttribute('src');
     try{player.load()}catch(e){}
     overlay.classList.remove('show');
+    overlay.setAttribute('aria-hidden','true');
     document.body.classList.remove('h3-history-open');
   }
 
@@ -94,16 +146,18 @@
       player.removeAttribute('src');
       try{player.load()}catch(e){}
       player.src=info.url;
+      player.setAttribute('playsinline','');
+      player.setAttribute('webkit-playsinline','');
+      player.controls=true;
       document.body.classList.add('h3-history-open');
       overlay.classList.add('show');
+      overlay.removeAttribute('aria-hidden');
       try{player.load()}catch(e){}
-      var playPromise;
-      try{playPromise=player.play()}catch(e){playPromise=null}
-      if(playPromise&&typeof playPromise.catch==='function'){
-        playPromise.catch(function(){
-          showNotice('再生ボタンを押してください。');
-        });
-      }
+
+      // iPhone/Safariでは履歴ボタン押下直後のplay()がネイティブ全画面へ
+      // 移行してページ状態を崩すことがあるため、自動再生はしない。
+      // controlsを常時表示し、ユーザーの明示タップで再生する。
+      showNotice('再生ボタンを押してください。');
     }catch(e){
       showNotice(e&&e.message?e.message:'保存した動画を再生できませんでした。');
     }
