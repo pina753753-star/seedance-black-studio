@@ -586,7 +586,111 @@
       }
     }
 
-    async function openRecording(id,download,ratio){try{var d=await api('/api/h3-director/recording-url?sessionId='+encodeURIComponent(id),{method:'GET'});if(download){var a=document.createElement('a');a.href=d.url;a.download=d.filename||('h3-director-'+id);a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();return}if(live){notice('ライブ終了後に履歴を再生できます。');return}if(['16:9','9:16'].includes(ratio)){$('aspectRatio').value=ratio;updateScreenRatio()}$('video').srcObject=null;$('video').src=d.url;$('empty').style.display='none';$('video').play().catch(function(){notice('再生ボタンを押してください。')})}catch(e){notice(e.message)}}
+    async function openRecording(id,download,ratio){
+      try{
+        var d=await api(
+          '/api/h3-director/recording-url?sessionId='+encodeURIComponent(id),
+          {method:'GET'}
+        );
+
+        if(download){
+          var a=document.createElement('a');
+          a.href=d.url;
+          a.download=d.filename||('h3-director-'+id);
+          a.target='_blank';
+          a.rel='noopener';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          return;
+        }
+
+        if(live){
+          notice('ライブ終了後に履歴を再生できます。');
+          return;
+        }
+
+        if(['16:9','9:16'].includes(ratio)){
+          $('aspectRatio').value=ratio;
+          updateScreenRatio();
+        }
+
+        var videoEl=$('video');
+
+        // WebRTC MediaStreamから履歴ファイル再生へ切り替える際、
+        // iPhone/Safariを含めてvideo要素を一度完全にリセットする。
+        try{videoEl.pause()}catch(e){}
+        videoEl.srcObject=null;
+        videoEl.removeAttribute('src');
+        try{videoEl.load()}catch(e){}
+
+        var playbackSettled=false;
+
+        function cleanupPlaybackListeners(){
+          videoEl.removeEventListener('canplay',onCanPlay);
+          videoEl.removeEventListener('error',onPlaybackError);
+        }
+
+        function onPlaybackError(){
+          if(playbackSettled)return;
+          playbackSettled=true;
+          cleanupPlaybackListeners();
+
+          var code=videoEl.error&&videoEl.error.code
+            ?videoEl.error.code
+            :'unknown';
+
+          diagnostic(
+            'history playback error: code='+code+
+            ' / contentType='+(d.contentType||'unknown')
+          );
+
+          notice('保存した動画を再生できませんでした。');
+        }
+
+        function onCanPlay(){
+          if(playbackSettled)return;
+          playbackSettled=true;
+          cleanupPlaybackListeners();
+
+          diagnostic(
+            'history playback ready: contentType='+
+            (d.contentType||'unknown')
+          );
+
+          var playPromise;
+          try{
+            playPromise=videoEl.play();
+          }catch(e){
+            notice('再生ボタンを押してください。');
+            return;
+          }
+
+          if(playPromise&&typeof playPromise.catch==='function'){
+            playPromise.catch(function(){
+              // 動画の読み込みには成功している。
+              // ここは自動再生制限として扱い、ファイル破損とは表示しない。
+              notice('再生ボタンを押してください。');
+            });
+          }
+        }
+
+        videoEl.addEventListener('canplay',onCanPlay);
+        videoEl.addEventListener('error',onPlaybackError);
+
+        videoEl.src=d.url;
+        $('empty').style.display='none';
+
+        try{
+          videoEl.load();
+        }catch(e){
+          cleanupPlaybackListeners();
+          notice('保存した動画を読み込めませんでした。');
+        }
+      }catch(e){
+        notice(e.message);
+      }
+    }
     async function loadHistory(){try{var d=await api('/api/h3-director/history?limit=10',{method:'GET'});var rows=d.sessions||[];$('history').innerHTML=rows.length?rows.map(function(s){var date=s.createdAt?new Date(s.createdAt).toLocaleString('ja-JP'):'';var ratio=['16:9','9:16'].includes(s.aspectRatio)?s.aspectRatio:'16:9';var buttons=s.recordingReady?'<button data-play="'+s.id+'" data-ratio="'+ratio+'">再生</button><button data-save="'+s.id+'">保存</button>':'';var status=s.recordingReady?'保存済み':s.recordingStatus==='uploading'?'保存処理中':'録画なし';return'<div class="history-item"><p>'+esc(s.prompt)+'</p><small>'+esc(date)+' ・ '+esc(ratio)+' ・ H3 Max Live ・ '+esc(status)+'</small><div>'+buttons+'</div></div>'}).join(''):'履歴はまだありません。';Array.prototype.forEach.call($('history').querySelectorAll('[data-play]'),function(b){b.onclick=function(){openRecording(b.dataset.play,false,b.dataset.ratio)}});Array.prototype.forEach.call($('history').querySelectorAll('[data-save]'),function(b){b.onclick=function(){openRecording(b.dataset.save,true)}})}catch(e){$('history').textContent='履歴を確認できませんでした。'}}
     async function restorePendingStart(){var pending=readPendingStart();if(!pending)return false;try{var status=await api('/api/h3-director/start-status?idempotencyKey='+encodeURIComponent(pending.idempotencyKey),{method:'GET'});if(status.resolved){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始結果を確認中です。新しい生成は停止しています。管理画面で確認してください。';return true}catch(e){if(e.code==='session_not_found'){clearPendingStart();return false}blocked=true;$('gate').className='gate show';$('gate').textContent='前回のライブ開始状態を確認できません。新しい生成は停止しています。';return true}}
 

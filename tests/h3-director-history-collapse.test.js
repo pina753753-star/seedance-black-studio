@@ -133,3 +133,109 @@ test('.msg.user / .msg.system の配置・色指定は無変更', () => {
   assert.match(page, /\.msg\.user\{align-self:flex-end;background:#151519\}/);
   assert.match(page, /\.msg\.system\{align-self:flex-start;color:#aaa;background:#080809\}/);
 });
+
+// ---------------------------------------------------------------
+// openRecording(): 履歴再生時のvideo要素リセットと読み込みエラー処理
+// (WebRTC MediaStream → 保存録画signed URLへの切り替え時の黒画面バグ対応)
+// ---------------------------------------------------------------
+
+function extractOpenRecordingSource() {
+  const startIndex = page.indexOf('async function openRecording(id,download,ratio){');
+  assert.ok(startIndex > 0, 'openRecording() not found in h3-director.html');
+  const braceStart = page.indexOf('{', startIndex);
+  let depth = 0;
+  for (let i = braceStart; i < page.length; i++) {
+    if (page[i] === '{') depth++;
+    else if (page[i] === '}') {
+      depth--;
+      if (depth === 0) return page.slice(startIndex, i + 1);
+    }
+  }
+  throw new Error('unbalanced braces while extracting openRecording() source');
+}
+
+test('openRecording(): 再生前にvideo要素をpause()する', () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /try\{videoEl\.pause\(\)\}catch\(e\)\{\}/);
+});
+
+test('openRecording(): srcObject=null / removeAttribute(\'src\') / load()でリセットする', () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /videoEl\.srcObject=null;/);
+  assert.match(src, /videoEl\.removeAttribute\('src'\);/);
+  const resetIdx = src.indexOf("videoEl.removeAttribute('src');");
+  const loadIdx = src.indexOf('try{videoEl.load()}catch(e){}');
+  assert.ok(resetIdx > 0 && loadIdx > resetIdx, 'load() must follow the src reset');
+});
+
+test('openRecording(): 新しいsigned URL設定後にもload()を呼ぶ', () => {
+  const src = extractOpenRecordingSource();
+  const srcAssignIdx = src.indexOf('videoEl.src=d.url;');
+  assert.ok(srcAssignIdx > 0, 'videoEl.src=d.url; not found');
+  const afterAssign = src.slice(srcAssignIdx);
+  assert.match(afterAssign, /videoEl\.load\(\);/);
+});
+
+test('openRecording(): canplay/errorリスナーを登録し、canplay後にplay()する', () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /videoEl\.addEventListener\('canplay',onCanPlay\);/);
+  assert.match(src, /videoEl\.addEventListener\('error',onPlaybackError\);/);
+  assert.match(src, /function onCanPlay\(\)\{/);
+  assert.match(src, /playPromise=videoEl\.play\(\);/);
+});
+
+test("openRecording(): error時に「保存した動画を再生できませんでした。」を表示する", () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /function onPlaybackError\(\)\{/);
+  assert.match(src, /notice\('保存した動画を再生できませんでした。'\);/);
+});
+
+test('openRecording(): Preview診断にhistory playback error / contentType / error codeを記録する', () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /diagnostic\(\s*'history playback error: code='\+code\+\s*' \/ contentType='\+\(d\.contentType\|\|'unknown'\)\s*\);/);
+  assert.match(src, /var code=videoEl\.error&&videoEl\.error\.code\s*\?videoEl\.error\.code\s*:'unknown';/);
+  assert.match(src, /diagnostic\(\s*'history playback ready: contentType='\+\s*\(d\.contentType\|\|'unknown'\)\s*\);/);
+});
+
+test('openRecording(): canplay/error発火は一度だけ処理し、リスナーを解除する(多重発火ガード)', () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /var playbackSettled=false;/);
+  assert.match(src, /if\(playbackSettled\)return;\s*playbackSettled=true;\s*cleanupPlaybackListeners\(\);/);
+  assert.match(src, /function cleanupPlaybackListeners\(\)\{\s*videoEl\.removeEventListener\('canplay',onCanPlay\);\s*videoEl\.removeEventListener\('error',onPlaybackError\);\s*\}/);
+});
+
+test('openRecording(): 自動再生拒否(play()のcatch)はファイル破損と区別し「再生ボタンを押してください。」を表示', () => {
+  const src = extractOpenRecordingSource();
+  const canPlayIdx = src.indexOf('function onCanPlay(){');
+  const nextFnIdx = src.indexOf('videoEl.addEventListener');
+  const canPlayBlock = src.slice(canPlayIdx, nextFnIdx);
+  assert.match(canPlayBlock, /playPromise\.catch\(function\(\)\{/);
+  assert.match(canPlayBlock, /notice\('再生ボタンを押してください。'\);/);
+  assert.doesNotMatch(canPlayBlock, /保存した動画を再生できませんでした。/);
+});
+
+test('openRecording(): download=trueの既存保存処理(署名URLへの直接リンクダウンロード)は無変更', () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /if\(download\)\{/);
+  assert.match(src, /a\.href=d\.url;/);
+  assert.match(src, /a\.download=d\.filename\|\|\('h3-director-'\+id\);/);
+  assert.match(src, /a\.target='_blank';/);
+  assert.match(src, /a\.rel='noopener';/);
+  assert.match(src, /document\.body\.appendChild\(a\);/);
+  assert.match(src, /a\.click\(\);/);
+  assert.match(src, /a\.remove\(\);/);
+  assert.match(src, /return;/);
+});
+
+test('openRecording(): live中は再生せず既存メッセージのみ表示する(ratio切替・video要素操作より前にreturn)', () => {
+  const src = extractOpenRecordingSource();
+  const liveIdx = src.indexOf('if(live){');
+  const videoElIdx = src.indexOf('var videoEl=$(\'video\');');
+  assert.ok(liveIdx > 0 && videoElIdx > liveIdx, 'live check must precede video element handling');
+  assert.match(src, /if\(live\)\{\s*notice\('ライブ終了後に履歴を再生できます。'\);\s*return;\s*\}/);
+});
+
+test('openRecording(): API呼び出し自体(recording-url)は無変更', () => {
+  const src = extractOpenRecordingSource();
+  assert.match(src, /api\(\s*'\/api\/h3-director\/recording-url\?sessionId='\+encodeURIComponent\(id\),\s*\{method:'GET'\}\s*\);/);
+});
