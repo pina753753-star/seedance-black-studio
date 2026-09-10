@@ -86,8 +86,12 @@ test('計測変数(liveStartRequestedAt/firstChunkAt/chunkPlaybackTotal/chunkReq
 test('start()の実処理直前で計測変数がリセットされる', () => {
   const idx = page.indexOf('liveStartRequestedAt=Date.now();');
   assert.ok(idx > 0, 'reset line not found');
-  const chunk = page.slice(idx, idx + 200);
+  const chunk = page.slice(idx, idx + 800);
   assert.match(chunk, /liveStartRequestedAt=Date\.now\(\);firstChunkAt=0;chunkPlaybackTotal=0;chunkRequestedTotal=0;diagnosticSummaryShown=false;/);
+  assert.match(chunk, /dataChannelOpenedAt=0;configuredAt=0;firstVideoTrackAt=0;recorderStartedAt=0;recorderStoppedAt=0;/);
+  assert.match(chunk, /lastHeartbeatAt=0;heartbeatCount=0;streamEndedReason='';lastSessionWallMs=0;chunkMetricsCount=0;/);
+  assert.match(chunk, /stopVideoDiagnostics\(\);/);
+  assert.match(chunk, /videoClockBaseWall=null;videoClockBaseMedia=null;videoClockBasePresentedFrames=null;/);
   // Reset happens right before the actual "starting" flag flips — i.e. right
   // before the real live-start processing begins, not before validation.
   assert.match(chunk, /starting=true;/);
@@ -97,11 +101,21 @@ test('start()の実処理直前で計測変数がリセットされる', () => {
 // session_info / configured diagnostics
 // ---------------------------------------------------------------
 
-test('session_infoメッセージからfps/chunk長/acceleration/continuationを診断表示する', () => {
-  assert.match(
-    page,
-    /if\(msg\.type==='session_info'\)\{\s*diagnostic\(\s*'session: fps='\+msg\.fps\+\s*' \/ defaultChunk='\+msg\.default_chunk_duration\+'s'\+\s*' \/ min='\+msg\.min_chunk_duration\+'s'\+\s*' \/ max='\+msg\.max_chunk_duration\+'s'\+\s*' \/ acceleration='\+msg\.default_acceleration\+\s*' \/ continuation='\+msg\.continuation_playback_seconds\+'s'\s*\);\s*\}/
-  );
+test('session_infoメッセージからfps/chunk長/acceleration/continuation/maxSession/limitScope/deck/expander/contextFramesを診断表示する', () => {
+  const idx = page.indexOf("if(msg.type==='session_info'){");
+  assert.ok(idx > 0, 'session_info handler not found');
+  const chunk = page.slice(idx, idx + 700);
+  assert.match(chunk, /'session: fps='\+msg\.fps\+/);
+  assert.match(chunk, /' \/ defaultChunk='\+msg\.default_chunk_duration\+'s'\+/);
+  assert.match(chunk, /' \/ min='\+msg\.min_chunk_duration\+'s'\+/);
+  assert.match(chunk, /' \/ max='\+msg\.max_chunk_duration\+'s'\+/);
+  assert.match(chunk, /' \/ acceleration='\+msg\.default_acceleration\+/);
+  assert.match(chunk, /' \/ continuation='\+msg\.continuation_playback_seconds\+'s'\+/);
+  assert.match(chunk, /' \/ maxSession='\+msg\.max_session_seconds\+/);
+  assert.match(chunk, /' \/ limitScope='\+msg\.session_limit_scope\+/);
+  assert.match(chunk, /' \/ deck='\+msg\.prompt_deck_size\+/);
+  assert.match(chunk, /' \/ expander='\+msg\.prompt_expander\+/);
+  assert.match(chunk, /' \/ contextFrames='\+msg\.continuation_context_frames/);
 });
 
 test('configuredメッセージのchunk_duration/acceleration/memory/resolution/ratioを診断表示する（既存の初期画像確認は維持）', () => {
@@ -131,11 +145,16 @@ test('chunkごとにrequested/playback累計を加算する', () => {
   assert.match(page, /chunkPlaybackTotal\+=Number\(msg\.playback_seconds\)\|\|0;/);
 });
 
-test('chunkごとにrequested/playback/generation/buffer/estimate/frames/routeを診断表示する', () => {
+test('chunkごとにrequested/playback/generation/buffer/estimate/frames/routeを診断表示する(prompt_version/buffer_depth_chunks/scheduling_lead/slack/dispatch.wall_msも存在時のみ追加)', () => {
   assert.match(
     page,
-    /diagnostic\(\s*'chunk #'\+msg\.chunk_index\+\s*': requested='\+msg\.requested_duration_seconds\+'s'\+\s*' \/ playback='\+Number\(msg\.playback_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ generation='\+Number\(msg\.generation_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ buffer='\+Number\(msg\.buffer_depth_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ estimate='\+Number\(msg\.next_generation_estimate_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ frames='\+msg\.generated_frame_count\+\s*' \/ route='\+msg\.route\s*\);/
+    /diagnostic\(\s*'chunk #'\+msg\.chunk_index\+\s*': requested='\+msg\.requested_duration_seconds\+'s'\+\s*' \/ playback='\+Number\(msg\.playback_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ generation='\+Number\(msg\.generation_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ buffer='\+Number\(msg\.buffer_depth_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ estimate='\+Number\(msg\.next_generation_estimate_seconds\|\|0\)\.toFixed\(2\)\+'s'\+\s*' \/ frames='\+msg\.generated_frame_count\+\s*' \/ route='\+msg\.route\+\s*chunkExtra\s*\);/
   );
+  assert.match(page, /if\(msg\.prompt_version!=null\)chunkExtra\+=' \/ promptVersion='\+msg\.prompt_version;/);
+  assert.match(page, /if\(msg\.buffer_depth_chunks!=null\)chunkExtra\+=' \/ bufferChunks='\+msg\.buffer_depth_chunks;/);
+  assert.match(page, /if\(msg\.scheduling_lead_ms!=null\)chunkExtra\+=' \/ lead='\+msg\.scheduling_lead_ms\+'ms';/);
+  assert.match(page, /if\(msg\.scheduling_slack_ms!=null\)chunkExtra\+=' \/ slack='\+msg\.scheduling_slack_ms\+'ms';/);
+  assert.match(page, /if\(msg\.dispatch&&typeof msg\.dispatch==='object'&&msg\.dispatch\.wall_ms!=null\)chunkExtra\+=' \/ dispatchWall='\+msg\.dispatch\.wall_ms\+'ms';/);
 });
 
 test('chunk受信のたびにrequested/playback累計を診断表示する', () => {
@@ -164,11 +183,34 @@ test('deadline_missedはchunk_index/late_by_seconds/behaviorを診断表示す�
 // summary on finish()
 // ---------------------------------------------------------------
 
-test('finish()はPreview限定・一度だけサマリーを表示する', () => {
-  assert.match(
-    page,
-    /async function finish\(message\)\{if\(!live&&!starting\)return;if\(!diagnosticSummaryShown\)\{diagnosticSummaryShown=true;diagnostic\('summary: firstChunk='\+\(firstChunkAt\?\(\(firstChunkAt-liveStartRequestedAt\)\/1000\)\.toFixed\(1\):'なし'\)\+'s \/ requested='\+chunkRequestedTotal\.toFixed\(2\)\+'s \/ playback='\+chunkPlaybackTotal\.toFixed\(2\)\+'s'\)\}/
-  );
+test('finish()はPreview限定・一度だけサマリーを表示する(stopRecording後・拡張フィールド付き)', () => {
+  const idx = page.indexOf('async function finish(message){');
+  assert.ok(idx > 0, 'finish() not found');
+  const chunk = page.slice(idx, idx + 2600);
+  assert.match(chunk, /if\(!live&&!starting\)return;/);
+  // The summary guard runs AFTER stopRecording() so recorderWall can be
+  // computed from the now-finalized recorderStoppedAt.
+  const stopIdx = chunk.indexOf('await stopRecording();');
+  const summaryIdx = chunk.indexOf('if(!diagnosticSummaryShown){');
+  assert.ok(stopIdx > 0 && summaryIdx > stopIdx, 'summary must run after stopRecording()');
+  assert.match(chunk, /diagnosticSummaryShown=true;/);
+  assert.match(chunk, /'summary: local='\+\(elapsedFromStart\(Date\.now\(\)\)\|\|0\)\.toFixed\(1\)\+'s'\+/);
+  assert.match(chunk, /' \/ dataChannel='\+/);
+  assert.match(chunk, /' \/ configured='\+/);
+  assert.match(chunk, /' \/ videoTrack='\+/);
+  assert.match(chunk, /' \/ firstChunk='\+/);
+  assert.match(chunk, /' \/ requested='\+chunkRequestedTotal\.toFixed\(2\)\+'s'\+/);
+  assert.match(chunk, /' \/ playback='\+chunkPlaybackTotal\.toFixed\(2\)\+'s'\+/);
+  assert.match(chunk, /' \/ recorderWall='\+recorderWall\+'s'\+/);
+  assert.match(chunk, /' \/ providerSessionWall='\+/);
+  assert.match(chunk, /' \/ heartbeats='\+heartbeatCount\+/);
+  assert.match(chunk, /' \/ streamReason='\+\(streamEndedReason\|\|'なし'\)\+/);
+  assert.match(chunk, /' \/ videoClockRatio='\+/);
+  assert.match(chunk, /' \/ videoMediaElapsed='\+/);
+  assert.match(chunk, /videoWallElapsed='\+/);
+  assert.match(chunk, /presentedFrames='\+/);
+  assert.match(chunk, /' \/ playbackRate='\+\$\('video'\)\.playbackRate\+/);
+  assert.match(chunk, /' \/ defaultPlaybackRate='\+\$\('video'\)\.defaultPlaybackRate\)/);
 });
 
 // ---------------------------------------------------------------

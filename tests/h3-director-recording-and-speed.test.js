@@ -50,15 +50,12 @@ function loadDirectorPrompt() {
 // A. Recording starts on first chunk, not on track/live-start
 // ---------------------------------------------------------------
 
-test('pc.ontrackからmaybeStartRecording()が削除されている（映像表示のみ維持）', () => {
-  assert.match(
-    page,
-    /pc\.ontrack=function\(event\)\{remoteStream\.addTrack\(event\.track\);\$\('empty'\)\.style\.display='none';\$\('video'\)\.play\(\)\.catch\(function\(\)\{notice\('映像をタップすると音声付きで再生できます。'\)\}\)\};/
-  );
-  assert.doesNotMatch(
-    page,
-    /pc\.ontrack=function\(event\)\{[^}]*maybeStartRecording/
-  );
+test('pc.ontrackからmaybeStartRecording()が削除されている（映像表示のみ維持、firstVideoTrackAt診断は追加）', () => {
+  const idx = page.indexOf('pc.ontrack=function(event){');
+  assert.ok(idx > 0, 'pc.ontrack not found');
+  const chunk = page.slice(idx, page.indexOf('pc.onconnectionstatechange='));
+  assert.match(chunk, /remoteStream\.addTrack\(event\.track\);\$\('empty'\)\.style\.display='none';\$\('video'\)\.play\(\)\.catch\(function\(\)\{notice\('映像をタップすると音声付きで再生できます。'\)\}\)/);
+  assert.doesNotMatch(chunk, /maybeStartRecording/);
 });
 
 test('Live開始成功直後からmaybeStartRecording()が削除されている（state(\'LIVE\')は維持）', () => {
@@ -123,7 +120,7 @@ test('directorPrompt: 空文字・空白のみは補助文だけのtrim済み文
 test('初期configureメッセージはdirectorPrompt(prompt)を使用する', () => {
   assert.match(
     page,
-    /var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:directorPrompt\(prompt\),resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
+    /var outgoingPrompt=directorPrompt\(prompt\);\s*var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
   );
 });
 
@@ -162,7 +159,7 @@ test('acceleration / chunk_duration などの未公開パラメータをClient�
   // configure/prompt messages sent to fal must not gain new fields.
   assert.match(
     page,
-    /var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:directorPrompt\(prompt\),resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
+    /var outgoingPrompt=directorPrompt\(prompt\);\s*var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
   );
   assert.match(
     page,

@@ -166,6 +166,14 @@
     var recorder=null,recordChunks=[],recordMime='',recordStartTimer=null,pendingRecording=null;
     var expiresAt=0,live=false,starting=false,blocked=false,heartbeatFailures=0,authToken='';
     var liveStartRequestedAt=0,firstChunkAt=0,chunkPlaybackTotal=0,chunkRequestedTotal=0,diagnosticSummaryShown=false;
+    var dataChannelOpenedAt=0,configuredAt=0,firstVideoTrackAt=0,recorderStartedAt=0,recorderStoppedAt=0;
+    var lastHeartbeatAt=0,heartbeatCount=0,streamEndedReason='',lastSessionWallMs=0,chunkMetricsCount=0;
+    // Speed-diagnosis only (video clock vs. WebRTC receive stats). Never
+    // reads/writes anything that affects billing, recording, or generation.
+    var diagnosticsGeneration=0,statsIntervalTimer=null;
+    var videoClockBaseWall=null,videoClockBaseMedia=null,videoClockBasePresentedFrames=null;
+    var videoClockBaseExpectedDisplayTime=null,videoClockBaseRtpTimestamp=null,videoClockLastLogAt=0;
+    var lastVideoClockRatio=null,lastVideoMediaElapsed=null,lastVideoWallElapsed=null,lastPresentedFrames=null;
     var pendingStartKey='h3_director_pending_start_v1';
     var imageUploadId=null,imageUploading=false,imageObjectUrl=null,sessionExpectsImage=false,initialImageUrlForConfigure=null;
 
@@ -194,6 +202,97 @@
       if(!isPreviewHost())return;
       log('[診断] '+text,'system');
     }
+    function elapsedFromStart(ts){
+      if(!ts||!liveStartRequestedAt)return null;
+      return (ts-liveStartRequestedAt)/1000;
+    }
+    function stopVideoDiagnostics(){
+      diagnosticsGeneration++;
+      if(statsIntervalTimer){clearInterval(statsIntervalTimer);statsIntervalTimer=null}
+    }
+    function startVideoClockDiagnostics(myGeneration){
+      var videoEl=$('video');
+      if(!videoEl||typeof videoEl.requestVideoFrameCallback!=='function'){
+        diagnostic('video clock unavailable');
+        return;
+      }
+      function onFrame(now,metadata){
+        if(myGeneration!==diagnosticsGeneration||!live)return;
+        try{
+          if(videoClockBaseWall===null){
+            videoClockBaseWall=performance.now();
+            videoClockBaseMedia=metadata.mediaTime!=null?metadata.mediaTime:null;
+            videoClockBasePresentedFrames=metadata.presentedFrames!=null?metadata.presentedFrames:null;
+            videoClockBaseExpectedDisplayTime=metadata.expectedDisplayTime!=null?metadata.expectedDisplayTime:null;
+            videoClockBaseRtpTimestamp=metadata.rtpTimestamp!=null?metadata.rtpTimestamp:null;
+            videoClockLastLogAt=videoClockBaseWall;
+          }
+          if(metadata.presentedFrames!=null)lastPresentedFrames=metadata.presentedFrames;
+          var nowWall=performance.now();
+          if(nowWall-videoClockLastLogAt>=5000){
+            videoClockLastLogAt=nowWall;
+            var wallElapsed=(nowWall-videoClockBaseWall)/1000;
+            var mediaElapsed=(metadata.mediaTime!=null&&videoClockBaseMedia!=null)?(metadata.mediaTime-videoClockBaseMedia):null;
+            lastVideoWallElapsed=wallElapsed;
+            lastVideoMediaElapsed=mediaElapsed;
+            lastVideoClockRatio=(mediaElapsed!=null&&wallElapsed>0)?(mediaElapsed/wallElapsed):null;
+            var presentationFps=(metadata.presentedFrames!=null&&videoClockBasePresentedFrames!=null&&wallElapsed>0)
+              ?((metadata.presentedFrames-videoClockBasePresentedFrames)/wallElapsed):null;
+            diagnostic(
+              'video clock: wall='+wallElapsed.toFixed(2)+'s'+
+              ' / media='+(mediaElapsed!=null?mediaElapsed.toFixed(2):'なし')+'s'+
+              ' / ratio='+(lastVideoClockRatio!=null?lastVideoClockRatio.toFixed(3):'なし')+
+              ' / presentedFrames='+(metadata.presentedFrames!=null?metadata.presentedFrames:'なし')+
+              ' / presentationFps='+(presentationFps!=null?presentationFps.toFixed(2):'なし')+
+              ' / rtpTimestamp='+(metadata.rtpTimestamp!=null?metadata.rtpTimestamp:'なし')
+            );
+          }
+        }catch(e){}
+        if(myGeneration===diagnosticsGeneration&&live){
+          try{videoEl.requestVideoFrameCallback(onFrame)}catch(e){}
+        }
+      }
+      try{videoEl.requestVideoFrameCallback(onFrame)}catch(e){}
+    }
+    function startWebrtcStatsDiagnostics(myGeneration){
+      if(!pc||typeof pc.getStats!=='function')return;
+      statsIntervalTimer=setInterval(function(){
+        if(myGeneration!==diagnosticsGeneration||!live||!pc)return;
+        pc.getStats().then(function(stats){
+          if(myGeneration!==diagnosticsGeneration||!live)return;
+          var videoTrackId=(remoteStream&&remoteStream.getVideoTracks()[0])?remoteStream.getVideoTracks()[0].id:null;
+          var inbound=null,byTrackId=null,byMaxFramesDecoded=null;
+          stats.forEach(function(report){
+            if(!report||report.type!=='inbound-rtp'||report.kind!=='video')return;
+            if(videoTrackId&&report.trackIdentifier===videoTrackId)byTrackId=report;
+            if(!byMaxFramesDecoded||(Number(report.framesDecoded||0)>Number(byMaxFramesDecoded.framesDecoded||0)))byMaxFramesDecoded=report;
+          });
+          inbound=byTrackId||byMaxFramesDecoded;
+          if(!inbound)return;
+          var codecId=inbound.codecId;
+          var codecMime=null;
+          if(codecId&&typeof stats.get==='function'){
+            var codecReport=stats.get(codecId);
+            if(codecReport&&codecReport.mimeType)codecMime=codecReport.mimeType;
+          }
+          var jitterBufferAvgMs=(inbound.jitterBufferDelay!=null&&inbound.jitterBufferEmittedCount)
+            ?(inbound.jitterBufferDelay/inbound.jitterBufferEmittedCount*1000):null;
+          var interFrameAvgMs=(inbound.totalInterFrameDelay!=null&&inbound.framesDecoded!=null)
+            ?(inbound.totalInterFrameDelay/Math.max(inbound.framesDecoded-1,1)*1000):null;
+          var parts=[];
+          if(inbound.framesPerSecond!=null)parts.push('fps='+inbound.framesPerSecond);
+          if(inbound.framesReceived!=null)parts.push('received='+inbound.framesReceived);
+          if(inbound.framesDecoded!=null)parts.push('decoded='+inbound.framesDecoded);
+          if(inbound.framesDropped!=null)parts.push('dropped='+inbound.framesDropped);
+          if(inbound.packetsLost!=null)parts.push('packetsLost='+inbound.packetsLost);
+          if(inbound.jitter!=null)parts.push('jitter='+inbound.jitter);
+          if(jitterBufferAvgMs!=null)parts.push('jitterBufferAvg='+jitterBufferAvgMs.toFixed(1)+'ms');
+          if(interFrameAvgMs!=null)parts.push('interFrameAvg='+interFrameAvgMs.toFixed(1)+'ms');
+          if(codecMime)parts.push('codec='+codecMime);
+          if(parts.length)diagnostic('webrtc video: '+parts.join(' / '));
+        }).catch(function(){});
+      },7000);
+    }
     function savePendingStart(value){try{sessionStorage.setItem(pendingStartKey,JSON.stringify(value))}catch(e){}}
     function readPendingStart(){try{var value=JSON.parse(sessionStorage.getItem(pendingStartKey)||'null');return value&&value.idempotencyKey?value:null}catch(e){return null}}
     function clearPendingStart(){try{sessionStorage.removeItem(pendingStartKey)}catch(e){}}
@@ -201,10 +300,14 @@
     function waitIce(peer){return new Promise(function(resolve,reject){if(peer.iceGatheringState==='complete')return resolve();var timeout=setTimeout(function(){cleanup();reject(new Error('接続情報を準備できませんでした。'))},12000);function done(){if(peer.iceGatheringState==='complete'){cleanup();resolve()}}function cleanup(){clearTimeout(timeout);peer.removeEventListener('icegatheringstatechange',done)}peer.addEventListener('icegatheringstatechange',done)})}
     function sendControl(message){if(!control||control.readyState!=='open')throw new Error('ライブ接続がまだ準備中です。');control.send(JSON.stringify(message))}
     function recordingMime(){var choices=['video/mp4;codecs=h264,aac','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];for(var i=0;i<choices.length;i++){if(MediaRecorder.isTypeSupported(choices[i]))return choices[i]}return''}
-    function maybeStartRecording(){clearTimeout(recordStartTimer);recordStartTimer=setTimeout(function(){if(!live||recorder||!remoteStream||!remoteStream.getVideoTracks().length)return;try{recordMime=recordingMime();var options={videoBitsPerSecond:3500000,audioBitsPerSecond:128000};if(recordMime)options.mimeType=recordMime;try{recorder=new MediaRecorder(remoteStream,options)}catch(_){recorder=recordMime?new MediaRecorder(remoteStream,{mimeType:recordMime}):new MediaRecorder(remoteStream)}recordChunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)recordChunks.push(e.data)};recorder.onerror=function(){log('録画処理でエラーが発生しました。')};recorder.start(1000);log('ライブ映像の録画を開始しました。')}catch(e){log('この端末ではライブ録画を開始できませんでした。')}},700)}
-    function stopRecording(){clearTimeout(recordStartTimer);return new Promise(function(resolve){if(!recorder||recorder.state==='inactive'){resolve(null);return}var current=recorder;current.addEventListener('stop',function(){var mime=String(current.mimeType||recordMime||'video/webm').split(';')[0];var blob=recordChunks.length?new Blob(recordChunks,{type:mime}):null;recorder=null;recordChunks=[];resolve(blob)},{once:true});try{current.stop()}catch(e){resolve(null)}})}
+    // recorderStartedAt/recorderStoppedAt below capture MediaRecorder wall-clock
+    // time (when start()/the 'stop' event actually fired), NOT the accurate
+    // in-file duration metadata of the resulting recording. They are diagnostic
+    // only and never used to alter recording/billing behavior.
+    function maybeStartRecording(){clearTimeout(recordStartTimer);recordStartTimer=setTimeout(function(){if(!live||recorder||!remoteStream||!remoteStream.getVideoTracks().length)return;try{recordMime=recordingMime();var options={videoBitsPerSecond:3500000,audioBitsPerSecond:128000};if(recordMime)options.mimeType=recordMime;try{recorder=new MediaRecorder(remoteStream,options)}catch(_){recorder=recordMime?new MediaRecorder(remoteStream,{mimeType:recordMime}):new MediaRecorder(remoteStream)}recordChunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)recordChunks.push(e.data)};recorder.onerror=function(){log('録画処理でエラーが発生しました。')};recorder.start(1000);recorderStartedAt=Date.now();diagnostic('recorder start: +'+(elapsedFromStart(recorderStartedAt)||0).toFixed(1)+'s / afterFirstChunk='+(firstChunkAt?((recorderStartedAt-firstChunkAt)/1000).toFixed(1):'なし')+'s');log('ライブ映像の録画を開始しました。')}catch(e){log('この端末ではライブ録画を開始できませんでした。')}},700)}
+    function stopRecording(){clearTimeout(recordStartTimer);return new Promise(function(resolve){if(!recorder||recorder.state==='inactive'){resolve(null);return}var current=recorder;var stopRequestedAt=Date.now();current.addEventListener('stop',function(){recorderStoppedAt=Date.now();var wall=recorderStartedAt?(recorderStoppedAt-recorderStartedAt)/1000:0;var mime=String(current.mimeType||recordMime||'video/webm').split(';')[0];var blob=recordChunks.length?new Blob(recordChunks,{type:mime}):null;diagnostic('recorder stop: wall='+wall.toFixed(2)+'s / chunks='+recordChunks.length+' / blobBytes='+(blob?blob.size:0)+' / stopEventDelay='+(recorderStoppedAt-stopRequestedAt)+'ms');recorder=null;recordChunks=[];resolve(blob)},{once:true});try{current.stop()}catch(e){resolve(null)}})}
     function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent='残り '+String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。')}
-    function cleanup(){live=false;starting=false;document.body.classList.remove('live-mode');clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
+    function cleanup(){stopVideoDiagnostics();live=false;starting=false;document.body.classList.remove('live-mode');clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
 
     function renderAccessGate(info){
       var messages=[];
@@ -246,9 +349,9 @@
 
     async function saveRecording(blob,targetSession){if(!blob||!blob.size||!targetSession)return;pendingRecording={blob:blob,sessionId:targetSession};$('retrySave').classList.remove('show');state('SAVING');log('録画を保存しています…');try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:targetSession})});var slot=await api('/api/h3-director/recording-upload-url',{method:'POST',body:JSON.stringify({sessionId:targetSession,contentType:blob.type||'video/webm',byteSize:blob.size})});var up=await supabaseClient.storage.from(slot.bucket).uploadToSignedUrl(slot.path,slot.token,blob,{contentType:blob.type||'video/webm',upsert:true});if(up&&up.error)throw new Error('録画ファイルを保存できませんでした。');await api('/api/h3-director/recording-complete',{method:'POST',body:JSON.stringify({sessionId:targetSession})});pendingRecording=null;state('SAVED');log('録画を履歴へ保存しました。');notice('録画を保存しました。');await loadHistory();setTimeout(function(){if(!live)state('OFFLINE')},1800)}catch(e){state('SAVE ERROR');$('retrySave').classList.add('show');log('録画の保存に失敗しました。再試行してください。');notice(e.message)}}
 
-    async function finish(message){if(!live&&!starting)return;if(!diagnosticSummaryShown){diagnosticSummaryShown=true;diagnostic('summary: firstChunk='+(firstChunkAt?((firstChunkAt-liveStartRequestedAt)/1000).toFixed(1):'なし')+'s / requested='+chunkRequestedTotal.toFixed(2)+'s / playback='+chunkPlaybackTotal.toFixed(2)+'s')}var endingSession=sessionId;live=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}var recording=await stopRecording();if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}cleanup();sessionId=null;if(message){log(message);notice(message)}if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()}
+    async function finish(message){if(!live&&!starting)return;var endingSession=sessionId;live=false;clearInterval(heartbeatTimer);clearInterval(countdownTimer);try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}var recording=await stopRecording();if(!diagnosticSummaryShown){diagnosticSummaryShown=true;var recorderWall=(recorderStartedAt&&recorderStoppedAt)?((recorderStoppedAt-recorderStartedAt)/1000).toFixed(1):'なし';diagnostic('summary: local='+(elapsedFromStart(Date.now())||0).toFixed(1)+'s'+' / dataChannel='+(elapsedFromStart(dataChannelOpenedAt)!=null?elapsedFromStart(dataChannelOpenedAt).toFixed(1):'なし')+'s'+' / configured='+(elapsedFromStart(configuredAt)!=null?elapsedFromStart(configuredAt).toFixed(1):'なし')+'s'+' / videoTrack='+(elapsedFromStart(firstVideoTrackAt)!=null?elapsedFromStart(firstVideoTrackAt).toFixed(1):'なし')+'s'+' / firstChunk='+(elapsedFromStart(firstChunkAt)!=null?elapsedFromStart(firstChunkAt).toFixed(1):'なし')+'s'+' / requested='+chunkRequestedTotal.toFixed(2)+'s'+' / playback='+chunkPlaybackTotal.toFixed(2)+'s'+' / recorderWall='+recorderWall+'s'+' / providerSessionWall='+(lastSessionWallMs?(lastSessionWallMs/1000).toFixed(2):'なし')+'s'+' / heartbeats='+heartbeatCount+' / streamReason='+(streamEndedReason||'なし')+' / videoClockRatio='+(lastVideoClockRatio!=null?lastVideoClockRatio.toFixed(3):'なし')+' / videoMediaElapsed='+(lastVideoMediaElapsed!=null?lastVideoMediaElapsed.toFixed(2):'なし')+'s / videoWallElapsed='+(lastVideoWallElapsed!=null?lastVideoWallElapsed.toFixed(2):'なし')+'s / presentedFrames='+(lastPresentedFrames!=null?lastPresentedFrames:'なし')+' / playbackRate='+$('video').playbackRate+' / defaultPlaybackRate='+$('video').defaultPlaybackRate)}if(endingSession){try{await api('/api/h3-director/end-session',{method:'POST',body:JSON.stringify({sessionId:endingSession}),keepalive:true})}catch(e){}}cleanup();sessionId=null;if(message){log(message);notice(message)}if(recording&&endingSession)await saveRecording(recording,endingSession);else await loadHistory()}
 
-    async function heartbeat(){if(!live||!sessionId)return;try{var data=await api('/api/h3-director/heartbeat',{method:'POST',body:JSON.stringify({sessionId:sessionId})});heartbeatFailures=0;if(!data.alive){await finish('ライブセッションが終了しました。')}}catch(e){heartbeatFailures++;if(e.code==='account_restricted'){await finish('アカウント状態の変更によりライブを終了しました。');return}if(heartbeatFailures>=3){await finish('接続を維持できなかったためライブを終了しました。自動再生成は行いません。')}}}
+    async function heartbeat(){if(!live||!sessionId)return;try{var data=await api('/api/h3-director/heartbeat',{method:'POST',body:JSON.stringify({sessionId:sessionId})});heartbeatFailures=0;heartbeatCount++;lastHeartbeatAt=Date.now();if(!data.alive){diagnostic('heartbeat end: reason='+(data.endReason||'unknown')+' / expired='+(data.expired===true)+' / remaining='+(data.remainingSeconds!=null?data.remainingSeconds:'なし')+' / +'+(elapsedFromStart(lastHeartbeatAt)||0).toFixed(1)+'s');await finish('ライブセッションが終了しました。')}else if(heartbeatCount%2===0){diagnostic('heartbeat #'+heartbeatCount+': alive=true / remaining='+data.remainingSeconds)}}catch(e){heartbeatFailures++;diagnostic('heartbeat error: code='+(e.code||'unknown')+' / failures='+heartbeatFailures);if(e.code==='account_restricted'){await finish('アカウント状態の変更によりライブを終了しました。');return}if(heartbeatFailures>=3){await finish('接続を維持できなかったためライブを終了しました。自動再生成は行いません。')}}}
 
     async function start(){
       var prompt=$('prompt').value.trim();if(!prompt||starting||live||imageUploading)return;
@@ -257,20 +360,41 @@
       var startImageUploadId=imageUploadId;
       sessionExpectsImage=!!startImageUploadId;initialImageUrlForConfigure=null;
       liveStartRequestedAt=Date.now();firstChunkAt=0;chunkPlaybackTotal=0;chunkRequestedTotal=0;diagnosticSummaryShown=false;
+      dataChannelOpenedAt=0;configuredAt=0;firstVideoTrackAt=0;recorderStartedAt=0;recorderStoppedAt=0;
+      lastHeartbeatAt=0;heartbeatCount=0;streamEndedReason='';lastSessionWallMs=0;chunkMetricsCount=0;
+      stopVideoDiagnostics();
+      videoClockBaseWall=null;videoClockBaseMedia=null;videoClockBasePresentedFrames=null;
+      videoClockBaseExpectedDisplayTime=null;videoClockBaseRtpTimestamp=null;videoClockLastLogAt=0;
+      lastVideoClockRatio=null;lastVideoMediaElapsed=null;lastVideoWallElapsed=null;lastPresentedFrames=null;
       starting=true;$('aspectRatio').disabled=true;$('action').disabled=true;$('action').textContent='接続を準備中…';$('action').classList.add('connecting');state('CONNECTING');log(prompt,'user');
       var idem=uuid();
       try{
         pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});remoteStream=new MediaStream();$('video').srcObject=remoteStream;
         pc.addTransceiver('video',{direction:'recvonly'});pc.addTransceiver('audio',{direction:'recvonly'});
-        pc.ontrack=function(event){remoteStream.addTrack(event.track);$('empty').style.display='none';$('video').play().catch(function(){notice('映像をタップすると音声付きで再生できます。')})};
-        pc.onconnectionstatechange=function(){if(!pc)return;if(['failed','closed'].includes(pc.connectionState)&&live)finish('WebRTC接続が終了しました。自動再生成は行いません。')};
+        pc.ontrack=function(event){
+          if(event.track&&event.track.kind==='video'&&!firstVideoTrackAt){
+            firstVideoTrackAt=Date.now();
+            diagnostic('first video track: +'+(elapsedFromStart(firstVideoTrackAt)||0).toFixed(1)+'s');
+          }
+          remoteStream.addTrack(event.track);$('empty').style.display='none';$('video').play().catch(function(){notice('映像をタップすると音声付きで再生できます。')})
+        };
+        pc.onconnectionstatechange=function(){
+          diagnostic('webrtc state: '+(pc?pc.connectionState:'unknown'));
+          if(!pc)return;if(['failed','closed'].includes(pc.connectionState)&&live)finish('WebRTC接続が終了しました。自動再生成は行いません。')
+        };
         control=pc.createDataChannel('fal',{ordered:true});
         control.onopen=function(){try{
-          var configureMsg={type:'configure',protocol_version:1,prompt_version:1,prompt:directorPrompt(prompt),resolution:'768p',aspect_ratio:aspectRatio,memory:12};
+          dataChannelOpenedAt=Date.now();
+          diagnostic('datachannel open: +'+(elapsedFromStart(dataChannelOpenedAt)||0).toFixed(1)+'s');
+          var outgoingPrompt=directorPrompt(prompt);
+          var configureMsg={type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12};
           if(initialImageUrlForConfigure)configureMsg.image_url=initialImageUrlForConfigure;
+          diagnostic('configure prompt chars: raw='+prompt.length+' / sent='+outgoingPrompt.length);
           sendControl(configureMsg);
           log('H3 Max Liveへ初期指示を送信しました。')
         }catch(e){notice(e.message)}};
+        control.onclose=function(){diagnostic('datachannel closed: +'+(elapsedFromStart(Date.now())||0).toFixed(1)+'s')};
+        control.onerror=function(){diagnostic('datachannel error: +'+(elapsedFromStart(Date.now())||0).toFixed(1)+'s')};
         control.onmessage=function(event){try{
           var msg=JSON.parse(event.data);
           if(msg.type==='session_info'){
@@ -280,10 +404,17 @@
               ' / min='+msg.min_chunk_duration+'s'+
               ' / max='+msg.max_chunk_duration+'s'+
               ' / acceleration='+msg.default_acceleration+
-              ' / continuation='+msg.continuation_playback_seconds+'s'
+              ' / continuation='+msg.continuation_playback_seconds+'s'+
+              ' / maxSession='+msg.max_session_seconds+
+              ' / limitScope='+msg.session_limit_scope+
+              ' / deck='+msg.prompt_deck_size+
+              ' / expander='+msg.prompt_expander+
+              ' / contextFrames='+msg.continuation_context_frames
             );
           }
           if(msg.type==='configured'){
+            configuredAt=Date.now();
+            diagnostic('configured at: +'+(elapsedFromStart(configuredAt)||0).toFixed(1)+'s');
             if(sessionExpectsImage&&msg.has_initial_image!==true){finish('添付画像を開始フレームとして確認できなかったため停止しました。');return}
             diagnostic(
               'configured: chunk='+msg.chunk_duration+'s'+
@@ -318,6 +449,12 @@
             }
             chunkRequestedTotal+=Number(msg.requested_duration_seconds)||0;
             chunkPlaybackTotal+=Number(msg.playback_seconds)||0;
+            var chunkExtra='';
+            if(msg.prompt_version!=null)chunkExtra+=' / promptVersion='+msg.prompt_version;
+            if(msg.buffer_depth_chunks!=null)chunkExtra+=' / bufferChunks='+msg.buffer_depth_chunks;
+            if(msg.scheduling_lead_ms!=null)chunkExtra+=' / lead='+msg.scheduling_lead_ms+'ms';
+            if(msg.scheduling_slack_ms!=null)chunkExtra+=' / slack='+msg.scheduling_slack_ms+'ms';
+            if(msg.dispatch&&typeof msg.dispatch==='object'&&msg.dispatch.wall_ms!=null)chunkExtra+=' / dispatchWall='+msg.dispatch.wall_ms+'ms';
             diagnostic(
               'chunk #'+msg.chunk_index+
               ': requested='+msg.requested_duration_seconds+'s'+
@@ -326,7 +463,8 @@
               ' / buffer='+Number(msg.buffer_depth_seconds||0).toFixed(2)+'s'+
               ' / estimate='+Number(msg.next_generation_estimate_seconds||0).toFixed(2)+'s'+
               ' / frames='+msg.generated_frame_count+
-              ' / route='+msg.route
+              ' / route='+msg.route+
+              chunkExtra
             );
             diagnostic(
               '累計: requested='+chunkRequestedTotal.toFixed(2)+'s'+
@@ -334,8 +472,32 @@
             );
             maybeStartRecording();
           }
+          if(msg.type==='chunk_metrics'){
+            chunkMetricsCount++;
+            diagnostic(
+              'chunk metrics #'+chunkMetricsCount+
+              ': ready='+msg.ready_ms+'ms'+
+              ' / interval='+msg.interval_ms+'ms'+
+              ' / route='+msg.route
+            );
+          }
+          if(msg.type==='session_metrics'){
+            lastSessionWallMs=Number(msg.session_wall_ms)||0;
+            diagnostic(
+              'session metrics: wall='+(lastSessionWallMs/1000).toFixed(2)+'s'+
+              ' / final='+(msg.final===true)+
+              ' / history='+msg.history_index+'/'+msg.history_count
+            );
+          }
           if(msg.type==='error')notice('H3 Max Live: '+(msg.error||'エラー'));
-          if(msg.type==='stream_exhausted')finish('ライブ生成が完了しました。')
+          if(msg.type==='stream_exhausted'){
+            streamEndedReason=String(msg.reason||'unknown');
+            diagnostic('stream exhausted: reason='+streamEndedReason+' / chunks='+Number(msg.chunks||0));
+            var exhaustedMessage=streamEndedReason==='session_limit'
+              ?'ライブ生成の上限に達しました。'
+              :'ライブ生成が終了しました。';
+            finish(exhaustedMessage);
+          }
         }catch(e){}};
         var offer=await pc.createOffer();await pc.setLocalDescription(offer);await waitIce(pc);
         var startBody={prompt:prompt,sdp:pc.localDescription.sdp,type:'offer',aspectRatio:aspectRatio};
@@ -352,7 +514,10 @@
         sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
         clearPendingStart();
         live=true;starting=false;heartbeatFailures=0;document.body.classList.add('live-mode');$('historyPanel').hidden=true;$('historyToggle').textContent='履歴を見る';$('historyToggle').setAttribute('aria-expanded','false');$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');
-        log('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。');updateTimer();countdownTimer=setInterval(updateTimer,250);await heartbeat();heartbeatTimer=setInterval(heartbeat,5000);
+        log('リアルタイム生成を開始しました。映像は数秒ずつ連続して届きます。');updateTimer();countdownTimer=setInterval(updateTimer,250);
+        diagnostic('video playback: rate='+$('video').playbackRate+' / default='+$('video').defaultPlaybackRate);
+        (function(myGeneration){startVideoClockDiagnostics(myGeneration);startWebrtcStatsDiagnostics(myGeneration)})(diagnosticsGeneration);
+        await heartbeat();heartbeatTimer=setInterval(heartbeat,5000);
       }catch(e){if(unknownStartError(e.code)){blocked=true;$('gate').className='gate show';$('gate').textContent='接続結果を安全に確認できないため、新しいライブ開始を停止しました。サポートへお問い合わせください。'}else{clearPendingStart()}starting=false;$('action').classList.remove('connecting');cleanup();sessionId=null;log('開始できませんでした: '+e.message);notice(e.message)}
     }
 
