@@ -8,46 +8,60 @@ const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'h3-director.html'), 'utf8');
 const ui = fs.readFileSync(path.join(__dirname, '..', 'h3-director-history-ui.js'), 'utf8');
 
-test('h3-director.html: 履歴専用UIスクリプトを読み込む', () => {
-  assert.match(html, /<script src="\.\/h3-director-history-ui\.js\?v=abc6a78"><\/script>/);
+test('h3-director.html: 履歴を見る/閉じるの折りたたみ構造を維持する', () => {
+  assert.match(html, /id="historyToggle"[^>]*aria-expanded="false"[^>]*aria-controls="historyPanel">履歴を見る<\/button>/);
+  assert.match(html, /<div class="history" id="historyPanel" hidden>/);
+  assert.match(html, /\$\('historyToggle'\)\.addEventListener\('click'/);
 });
 
-test('履歴再生: ライブ表示用#videoを使い回さず専用videoを生成する', () => {
-  assert.match(ui, /id="h3HistoryVideo" playsinline webkit-playsinline controls preload="metadata"/);
-  assert.match(ui, /player=overlay\.querySelector\('video'\)/);
+test('履歴UI: 固定全画面オーバーレイを作らない', () => {
+  assert.doesNotMatch(ui, /h3HistoryPlayer|h3-history-player|position:fixed!important/);
+  assert.doesNotMatch(ui, /document\.body\.classList\.add\('h3-history-open'\)/);
+});
+
+test('履歴UI: PinaStudio本体と同様にカード内へ動画枠と操作列を持つ', () => {
+  assert.match(ui, /className='h3-history-video-frame'/);
+  assert.match(ui, /<video playsinline webkit-playsinline controls preload="metadata"><\/video>/);
+  assert.match(ui, /actionHost\.classList\.add\('h3-history-actions'\)/);
+  assert.match(ui, /item\.insertBefore\(frame,actionHost\)/);
+});
+
+test('履歴UI: プロンプトはカード内2行で省略する', () => {
+  assert.match(ui, /-webkit-line-clamp:2/);
+  assert.match(ui, /white-space:normal/);
+});
+
+test('履歴再生: ライブ表示用#videoを使い回さない', () => {
   assert.doesNotMatch(ui, /getElementById\('video'\)/);
+  assert.doesNotMatch(ui, /querySelector\('#video'\)/);
+  assert.match(ui, /frame\.querySelector\('video'\)/);
 });
 
-test('履歴再生: 閉じる時はpause→src削除→loadで完全リセットする', () => {
-  const start = ui.indexOf('function closeOverlay(){');
-  assert.ok(start >= 0);
-  const end = ui.indexOf('async function playRecording', start);
-  const src = ui.slice(start, end);
-  const pause = src.indexOf('player.pause()');
-  const remove = src.indexOf("player.removeAttribute('src')");
-  const load = src.indexOf('player.load()');
-  assert.ok(pause >= 0 && remove > pause && load > remove);
+test('履歴再生: data-playをcaptureで処理し既存onclickを二重実行させない', () => {
+  assert.match(ui, /document\.addEventListener\('click',[\s\S]*?,true\);/);
+  assert.match(ui, /event\.stopImmediatePropagation\(\);[\s\S]*playRecording\(playButton\)/);
 });
 
-test('履歴再生: iPhoneでページ状態を崩す自動playを行わずcontrolsで明示再生する', () => {
-  const start = ui.indexOf('async function playRecording(sessionId){');
+test('履歴再生: signed URL取得後にカード内videoへ設定しcontrolsを維持する', () => {
+  const start = ui.indexOf('async function playRecording(button){');
   assert.ok(start >= 0);
   const end = ui.indexOf('async function saveRecordingFile', start);
   const src = ui.slice(start, end);
-  assert.match(src, /player\.controls=true;/);
-  assert.match(src, /showNotice\('再生ボタンを押してください。'\);/);
-  assert.doesNotMatch(src, /player\.play\(\)/);
+  assert.match(src, /var info=await recordingInfo\(button\.dataset\.play\|\|''\);/);
+  assert.match(src, /video\.src=info\.url;/);
+  assert.match(src, /video\.controls=true;/);
+  assert.match(src, /frame\.classList\.add\('ready'\)/);
 });
 
-test('履歴再生: オーバーレイは固定100%領域で元ページのvideo寸法に依存しない', () => {
-  assert.match(ui, /\.h3-history-player\{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;/);
-  assert.match(ui, /\.h3-history-player video\{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;/);
-  assert.doesNotMatch(ui, /100dvh/);
+test('履歴再生: 他の履歴動画は停止しカードをまたいだ多重再生を防ぐ', () => {
+  assert.match(ui, /function stopOtherHistoryVideos\(except\)/);
+  assert.match(ui, /document\.querySelectorAll\('#history \.h3-history-video-frame video'\)/);
+  assert.match(ui, /if\(video===except\)return;/);
+  assert.match(ui, /video\.pause\(\)/);
 });
 
-test('履歴再生: data-playクリックをcaptureで横取りし既存onclickを実行させない', () => {
-  assert.match(ui, /document\.addEventListener\('click',[\s\S]*?,true\);/);
-  assert.match(ui, /event\.stopImmediatePropagation\(\);[\s\S]*playRecording\(playButton\.dataset\.play\|\|''\)/);
+test('履歴UI: loadHistory後のDOM差し替えにもMutationObserverで再適用する', () => {
+  assert.match(ui, /new MutationObserver\(enhanceHistory\)\.observe\(historyRoot,\{childList:true,subtree:true\}\)/);
 });
 
 test('保存: signed URLをBlob取得してobject URLからdownloadする', () => {
