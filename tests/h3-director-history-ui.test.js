@@ -31,6 +31,31 @@ test('履歴UI: プロンプトはカード内2行で省略する', () => {
   assert.match(ui, /white-space:normal/);
 });
 
+test('履歴UI: 折りたたみを維持したまま開いた履歴の高さを広げる', () => {
+  assert.match(ui, /#historyPanel\.history\{max-height:min\(52vh,520px\);overflow:auto\}/);
+  assert.match(ui, /@media\(max-width:900px\)\{#historyPanel\.history\{max-height:min\(48vh,460px\)\}\}/);
+  assert.match(ui, /@media\(max-width:520px\)\{#historyPanel\.history\{max-height:46vh\}/);
+});
+
+test('料金UI: 表面の固定クレジット表記を料金?に置き換える', () => {
+  assert.match(ui, /text\.textContent='60秒 \/ 768p \/ 料金';/);
+  assert.match(ui, /class="h3-price-help-button"[^>]*>\?<\/button>/);
+  assert.match(ui, /aria-expanded="false"/);
+});
+
+test('料金UI: ?を押した時だけ課金タイミングと追加指示を説明する', () => {
+  assert.match(ui, /クレジットは「ライブ生成を開始」した時にだけ消費します。/);
+  assert.match(ui, /ライブ中の追加指示では、追加クレジットは消費しません。/);
+  assert.match(ui, /途中でライブを終了しても、消費したクレジットは返還されません。/);
+  assert.match(ui, /9\/14までセール期間中です。セール内容は料金ページをご確認ください。/);
+  assert.match(ui, /panel\.hidden=!willOpen;/);
+});
+
+test('料金UI: 既存の長いfootnoteを画面から隠して履歴を上へ詰める', () => {
+  assert.match(ui, /footnote\.classList\.add\('h3-price-footnote-hidden'\)/);
+  assert.match(ui, /\.composer>\.footnote\.h3-price-footnote-hidden\{display:none!important\}/);
+});
+
 test('履歴再生: ライブ表示用#videoを使い回さない', () => {
   assert.doesNotMatch(ui, /getElementById\('video'\)/);
   assert.doesNotMatch(ui, /querySelector\('#video'\)/);
@@ -98,5 +123,5 @@ test('録画形式: MP4非対応ならMediaRecorderを変更せずWebMフォー�
 });
 
 test('履歴UI: 生成開始API・credits・DB書き込みコードを持たない', () => {
-  assert.doesNotMatch(ui, /start-session|approve-prompt|recording-upload-url|recording-complete|440\s*credits|supabase\.from\(/);
+  assert.doesNotMatch(ui, /start-session|approve-prompt|recording-upload-url|recording-complete|supabase\.from\(/);
 });
