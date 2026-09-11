@@ -2,26 +2,17 @@
 
 // GET /api/h3-live/feed
 //
-// Lightweight projection for the broadcast-style screen in h3-live.html:
+// Lightweight projection for the H3 Max screen:
 //   - activeJob:   the caller's sole queued/submitting/processing job (if any)
 //   - onAir:       the caller's most recently completed job (if any)
-//   - eligibility: { planAllowed, creditCost, balance, hasEnoughCredits } — lets
-//                  the client pre-disable the "send" button (plan / credits) so
-//                  the common rejections never require a round-trip. This is a
-//                  UX hint only; api/h3-live/start.js still performs the
-//                  authoritative plan + balance + reserve/deduct checks.
-// Database read only; never calls fal.ai and never writes a balance. Sends a
-// weak ETag so the client poll costs almost nothing when nothing changed.
+//   - eligibility: { planAllowed, creditCost, balance, hasEnoughCredits }
+// Database read only; never calls fal.ai and never writes a balance.
 
 const { requireConfirmedAuth } = require('../_lib/confirmed-auth.js');
 const { serviceClient, sanitizeJob } = require('../_lib/h3-live-store.js');
 const { getH3LiveEntitlement } = require('../_lib/h3-live-entitlement.js');
-const { FEED_POLL_MS, CREDIT_COST } = require('../_lib/h3-live-config.js');
+const { FEED_POLL_MS, currentCreditCost } = require('../_lib/h3-live-config.js');
 
-// Effective credit balance, computed the SAME way deduct_h3_live_credits_atomic
-// does (20260831090000_create_h3_live_slice.sql): an expired subscription or
-// purchased pool counts as zero; free credits never expire. Read-only — this
-// never persists the zeroing the way the RPC does.
 function effectiveBalance(row) {
   if (!row || typeof row !== 'object') return null;
   const now = Date.now();
@@ -37,7 +28,6 @@ function effectiveBalance(row) {
 }
 
 const crypto = require('crypto');
-
 const ACTIVE = ['queued', 'submitting', 'processing'];
 
 module.exports = async function handler(req, res) {
@@ -81,27 +71,23 @@ module.exports = async function handler(req, res) {
   const activeJob = sanitizeJob(activeResult.data);
   const onAir = sanitizeJob(onAirResult.data);
 
-  // Eligibility hint. Fail OPEN: if the plan lookup errored or the balance row
-  // could not be read, do NOT pre-block the button (planAllowed:true /
-  // hasEnoughCredits:true) and let start.js return the real error. Only a
-  // definite "plan not eligible / expired" (entitlement.ok && !allowed) or a
-  // definite shortfall pre-disables it.
   if (balanceResult.error) {
     console.error('[h3-live/feed] balance read error:', balanceResult.error.message);
   }
   const balance = balanceResult.error ? null : effectiveBalance(balanceResult.data);
   const planAllowed = entitlement && entitlement.ok ? Boolean(entitlement.allowed) : true;
+  const creditCost = currentCreditCost();
   const eligibility = {
     planAllowed,
-    creditCost: CREDIT_COST,
+    creditCost,
     balance,
-    hasEnoughCredits: balance == null ? true : balance >= CREDIT_COST
+    hasEnoughCredits: balance == null ? true : balance >= creditCost
   };
 
   const etagBasis = JSON.stringify({
     a: activeResult.data ? [activeResult.data.id, activeResult.data.status, activeResult.data.updated_at] : null,
     o: onAirResult.data ? [onAirResult.data.id, onAirResult.data.completed_at] : null,
-    e: [planAllowed, balance]
+    e: [planAllowed, balance, creditCost]
   });
   const etag = 'W/"' + crypto.createHash('sha1').update(etagBasis).digest('hex') + '"';
 

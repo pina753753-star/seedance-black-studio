@@ -1,13 +1,11 @@
 'use strict';
 
-// Central configuration for the H3 Live slice.
+// Central configuration for the H3 Max queued-generation slice.
 //
-// Everything that is FIXED by product decision (15s / 768p / 110 credits /
-// eligible plans / cooldown) lives here as a constant so there is exactly one
-// place to change it. Everything that is ENVIRONMENT-specific (fal.ai
-// endpoint, model ids, credentials) is read from process.env with a safe
-// default and validated by requireProviderConfig(); a missing credential
-// fails closed rather than sending a broken request.
+// Everything that is FIXED by product decision (15s / 768p / pricing /
+// eligible plans / cooldown) lives here. Everything that is environment-
+// specific (fal.ai endpoint, model ids, credentials) is read from process.env
+// and validated by requireProviderConfig(); a missing credential fails closed.
 //
 // This module has no side effects and imports nothing from the Seedance,
 // billing, or watermark code.
@@ -17,12 +15,33 @@
 const DURATION_SECONDS = 15;         // fixed; sent to fal.ai as `duration`
 const RESOLUTION_DB = '768p';        // stored in h3_live_jobs.resolution
 const RESOLUTION_FAL = '768P';       // fal.ai `resolution` enum value
-const CREDIT_COST = 110;             // existing credits consumed per video
+
+// BETA launch pricing.
+// 2026-09-15 00:00 JST === 2026-09-14 15:00 UTC.
+// The database migration uses the same UTC instant and remains authoritative
+// for the amount stored on each job and actually deducted.
+const CREDIT_PRICE_SWITCH_AT = '2026-09-14T15:00:00.000Z';
+const CREDIT_COST_SALE = 60;
+const CREDIT_COST_STANDARD = 130;
+
+function currentCreditCost(at = Date.now()) {
+  const time = at instanceof Date
+    ? at.getTime()
+    : (typeof at === 'number' ? at : Date.parse(String(at || '')));
+  // Fail safe to the standard (higher) price if a caller supplies a bad date.
+  if (!Number.isFinite(time)) return CREDIT_COST_STANDARD;
+  return time < Date.parse(CREDIT_PRICE_SWITCH_AT) ? CREDIT_COST_SALE : CREDIT_COST_STANDARD;
+}
+
+// Backwards-compatible snapshot for older call sites. New user-facing code
+// should call currentCreditCost() per request so a warm serverless instance
+// cannot keep a stale price across the switch instant. The DB is authoritative.
+const CREDIT_COST = currentCreditCost();
 
 const INSTRUCTION_MIN_CHARS = 1;
 const INSTRUCTION_MAX_CHARS = 2000;
 
-// H3 Live eligibility. free / standard are NOT eligible. "Creator" and
+// H3 Max eligibility. free / standard are NOT eligible. "Creator" and
 // "quattro" are historical display names for the `team` plan; the canonical
 // DB slug is `team`, so no extra slug is needed here.
 const ALLOWED_PLANS = Object.freeze(['premium', 'scale', 'team', 'ultimate']);
@@ -39,32 +58,22 @@ const COOLDOWN_SECONDS = 10;
 const IMAGE_QUARANTINE_BUCKET = 'h3-live-image-quarantine';
 
 const IMAGE_ALLOWED_MIME = Object.freeze(['image/jpeg', 'image/png', 'image/webp']);
-const IMAGE_MAX_BYTES = 20 * 1024 * 1024;   // matches the bucket file_size_limit
+const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
 // Signed-URL lifetimes. The moderation URL only has to survive one OpenAI fetch;
 // the fal URL has to survive an unknown queue delay before fal downloads it.
-const IMAGE_MODERATION_SIGNED_URL_TTL_SECONDS = 300;      // 5 min
-const IMAGE_FAL_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;    // 24 h
+const IMAGE_MODERATION_SIGNED_URL_TTL_SECONDS = 300;
+const IMAGE_FAL_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
 
 // Abandoned uploads: absolute retention, then opportunistic sweep removes them.
-const IMAGE_UPLOAD_RETENTION_MS = 48 * 60 * 60 * 1000;    // 48 h
+const IMAGE_UPLOAD_RETENTION_MS = 48 * 60 * 60 * 1000;
 const IMAGE_CLEANUP_MAX_PER_RUN = 20;
 
-// Supabase Storage's createSignedUploadUrl() issues a token with a FIXED,
-// non-configurable ~2h expiry that cannot be shortened or revoked from the
-// SDK (confirmed via Supabase's own docs/community discussion, 2026-09-05:
-// https://supabase.com/docs/reference/javascript/storage-from-createsigneduploadurl,
-// https://github.com/orgs/supabase/discussions/15394). So a caller that
-// retained a previously issued upload slot's signed URL can still upload to
-// that exact object_path any time before this window elapses, even after
-// api/_lib/h3-live-image-store.js's createImageUploadSlot has replaced that
-// slot for the same user. This is why replacing a pending upload defers its
-// final deleted_at stamp by this long (see expirePendingUpload there) instead
-// of stamping it immediately: a later opportunistic sweep re-checks the path
-// once any retained token is guaranteed expired, catching an object
-// resurrected via a stale token rather than losing track of it forever
-// (found in review, PR #224 follow-up).
-const IMAGE_SIGNED_UPLOAD_URL_TTL_MS = 2 * 60 * 60 * 1000; // 2 h
+// Supabase Storage's createSignedUploadUrl() issues a token with a fixed,
+// non-configurable ~2h expiry. Replacing a pending upload therefore defers its
+// final deleted_at stamp by this long so a later sweep can catch an object
+// resurrected via a retained token.
+const IMAGE_SIGNED_UPLOAD_URL_TTL_MS = 2 * 60 * 60 * 1000;
 
 const INPUT_MODES = Object.freeze(['text', 'image']);
 
@@ -81,10 +90,6 @@ const FAL_QUEUE_BASE_URL = String(
   process.env.FAL_QUEUE_BASE_URL || 'https://queue.fal.run'
 ).replace(/\/+$/, '');
 
-// fal.ai model identifiers. Confirmed by the product owner:
-//   text -> minimax/h3-max/text-to-video
-//   image -> minimax/h3-max/image-to-video
-// Overridable by env in case fal.ai renames them.
 const FAL_MODEL_ID_TEXT = String(
   process.env.FAL_H3_MAX_TEXT_MODEL_ID || 'minimax/h3-max/text-to-video'
 ).trim();
@@ -92,7 +97,6 @@ const FAL_MODEL_ID_IMAGE = String(
   process.env.FAL_H3_MAX_IMAGE_MODEL_ID || 'minimax/h3-max/image-to-video'
 ).trim();
 
-// fal.ai authorization: `Authorization: Key <FAL_KEY>`.
 function falApiKey() {
   return String(process.env.FAL_KEY || process.env.FAL_API_KEY || '').trim();
 }
@@ -101,8 +105,6 @@ function openaiApiKey() {
   return String(process.env.OPENAI_API_KEY || '').trim();
 }
 
-// Returns { ok:true } only when every credential required to start a real
-// generation is present. Callers must fail closed (HTTP 503) when ok is false.
 function requireProviderConfig(mode = 'text') {
   const missing = [];
   if (!falApiKey()) missing.push('FAL_KEY');
@@ -113,7 +115,6 @@ function requireProviderConfig(mode = 'text') {
   return { ok: true };
 }
 
-// Moderation is a separate hard requirement (fail closed if unavailable).
 function requireModerationConfig() {
   return openaiApiKey() ? { ok: true } : { ok: false, missing: ['OPENAI_API_KEY'] };
 }
@@ -129,8 +130,6 @@ function parseHttpsUrl(value) {
   }
 }
 
-// A fal.ai queue URL (submit / status / response / cancel), e.g.
-// https://queue.fal.run/minimax/h3-max/requests/<id>/status
 function isTrustedFalQueueUrl(value) {
   const u = parseHttpsUrl(value);
   if (!u) return false;
@@ -138,7 +137,6 @@ function isTrustedFalQueueUrl(value) {
   return Boolean(base) && u.host === base.host;
 }
 
-// A fal.ai delivered asset URL, e.g. https://v3b.fal.media/files/b/....mp4
 function isTrustedFalOutputUrl(value) {
   const u = parseHttpsUrl(value);
   if (!u) return false;
@@ -149,7 +147,11 @@ module.exports = {
   DURATION_SECONDS,
   RESOLUTION_DB,
   RESOLUTION_FAL,
+  CREDIT_PRICE_SWITCH_AT,
+  CREDIT_COST_SALE,
+  CREDIT_COST_STANDARD,
   CREDIT_COST,
+  currentCreditCost,
   INSTRUCTION_MIN_CHARS,
   INSTRUCTION_MAX_CHARS,
   ALLOWED_PLANS,

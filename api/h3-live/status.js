@@ -2,19 +2,16 @@
 
 // GET /api/h3-live/status?jobId=<uuid>
 //
-// Refresh one H3 Live job the caller owns. Terminal jobs are returned straight
+// Refresh one H3 Max job the caller owns. Terminal jobs are returned straight
 // from the database. An active job polls fal.ai at most once per
 // STATUS_UPSTREAM_MIN_INTERVAL_MS, guarded by a conditional UPDATE so
 // concurrent polls cannot both hit the provider. A confirmed provider failure
-// refunds the 110 credits before the failure is exposed.
-//
-// Standalone: no Seedance / billing / watermark code involved. Credit refunds
-// go only through refund_h3_live_job_atomic.
+// refunds the exact credit_cost stored on the job before failure is exposed.
 
 const { requireConfirmedAuth } = require('../_lib/confirmed-auth.js');
 const { serviceClient, isUuid, sanitizeJob } = require('../_lib/h3-live-store.js');
 const { getJobStatus } = require('../_lib/h3-live-fal.js');
-const { STATUS_POLL_MS, STATUS_UPSTREAM_MIN_INTERVAL_MS, CREDIT_COST } = require('../_lib/h3-live-config.js');
+const { STATUS_POLL_MS, STATUS_UPSTREAM_MIN_INTERVAL_MS } = require('../_lib/h3-live-config.js');
 const {
   UPLOADS_TABLE,
   deleteUploadObject,
@@ -27,8 +24,6 @@ function pollHint(status) {
   return ACTIVE.includes(status) ? STATUS_POLL_MS : 0;
 }
 
-// Best-effort: once an image-mode job reaches a terminal state its quarantined
-// input frame is no longer needed. Never throws.
 async function cleanupJobImage(db, jobRow) {
   if (!jobRow || jobRow.input_mode !== 'image' || !jobRow.image_upload_id) return;
   try {
@@ -53,7 +48,6 @@ module.exports = async function handler(req, res) {
   const db = auth.supabase || serviceClient();
   if (!db) return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
 
-  // Opportunistic cleanup of abandoned image uploads (bounded, never throws).
   sweepStaleUploads(db).catch(() => {});
 
   const jobId = String(req.query.jobId || req.query.id || '').trim();
@@ -76,28 +70,21 @@ module.exports = async function handler(req, res) {
     return res.status(404).json({ ok: false, error: 'job_not_found', message: 'この生成を確認できません。' });
   }
 
-  // Terminal — no upstream call. Best-effort retry of the input-frame cleanup:
-  // an earlier terminating poll may have hit a transient storage error, and
-  // cleanupJobImage is a no-op once the frame is already gone. Fire-and-forget
-  // so it never delays or fails the response.
   if (!ACTIVE.includes(job.status)) {
     cleanupJobImage(db, job).catch(() => {});
     return res.status(200).json({ ok: true, job: sanitizeJob(job), nextPollAfterMs: 0 });
   }
 
-  // Nothing to poll yet (reserved / submitting without a request id).
   if (!job.provider_poll_url || !job.provider_response_url) {
     return res.status(200).json({ ok: true, job: sanitizeJob(job), nextPollAfterMs: STATUS_POLL_MS });
   }
 
-  // Throttle: skip the upstream call if we polled very recently.
   const nowMs = Date.now();
   const lastPolledMs = job.last_polled_at ? Date.parse(job.last_polled_at) : 0;
   if (Number.isFinite(lastPolledMs) && lastPolledMs > 0 && nowMs - lastPolledMs < STATUS_UPSTREAM_MIN_INTERVAL_MS) {
     return res.status(200).json({ ok: true, job: sanitizeJob(job), nextPollAfterMs: STATUS_POLL_MS });
   }
 
-  // Claim the poll. Only one caller wins per interval.
   const thresholdIso = JSON.stringify(new Date(nowMs - STATUS_UPSTREAM_MIN_INTERVAL_MS).toISOString());
   const { data: claimRows, error: claimError } = await db
     .from('h3_live_jobs')
@@ -116,8 +103,6 @@ module.exports = async function handler(req, res) {
   }
 
   if (!Array.isArray(claimRows) || claimRows.length !== 1) {
-    // Lost the claim (concurrent poll) or the claim UPDATE errored — return
-    // current state and let the client poll again.
     return res.status(200).json({ ok: true, job: sanitizeJob(job), nextPollAfterMs: STATUS_POLL_MS });
   }
 
@@ -127,7 +112,6 @@ module.exports = async function handler(req, res) {
   });
 
   if (!upstream.ok) {
-    // Transient — keep the client polling.
     return res.status(200).json({
       ok: true,
       job: sanitizeJob({ ...job, status: 'processing' }),
@@ -178,10 +162,6 @@ module.exports = async function handler(req, res) {
       finalRow = reselect.data || null;
     }
 
-    // Only treat this as done when the row is actually terminal. If the
-    // completed UPDATE errored or lost its claim and the row is still active,
-    // keep the client polling and leave the input frame in place rather than
-    // stranding an active job with a stopped client.
     const settled = Boolean(finalRow) && !ACTIVE.includes(finalRow.status);
     if (settled) await cleanupJobImage(db, finalRow);
 
@@ -192,7 +172,6 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  // upstream.state === 'failed' — refund before exposing the failure.
   let refund;
   try {
     const { data, error } = await db.rpc('refund_h3_live_job_atomic', {
@@ -207,8 +186,6 @@ module.exports = async function handler(req, res) {
 
   const refundConfirmed = ['refunded', 'already_refunded', 'no_charge_found', 'already_completed'].includes(refund?.code);
   if (!refundConfirmed) {
-    // Could not confirm the refund — keep the client polling rather than
-    // reporting an unrefunded failure.
     console.error('[h3-live/status] refund unconfirmed for jobId:', jobId, 'code:', refund?.code);
     return res.status(200).json({
       ok: true,
@@ -219,11 +196,13 @@ module.exports = async function handler(req, res) {
 
   const finalRow = (await db.from('h3_live_jobs').select('*').eq('id', jobId).maybeSingle()).data;
   await cleanupJobImage(db, finalRow);
+  const refunded = ['refunded', 'already_refunded'].includes(refund?.code);
+  const storedCreditCost = Number(finalRow?.credit_cost ?? job.credit_cost ?? 0);
   return res.status(200).json({
     ok: true,
     job: sanitizeJob(finalRow),
-    refunded: ['refunded', 'already_refunded'].includes(refund?.code),
-    creditRefunded: ['refunded', 'already_refunded'].includes(refund?.code) ? CREDIT_COST : 0,
+    refunded,
+    creditRefunded: refunded && Number.isFinite(storedCreditCost) ? storedCreditCost : 0,
     nextPollAfterMs: 0
   });
 };
