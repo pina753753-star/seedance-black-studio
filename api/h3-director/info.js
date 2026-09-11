@@ -3,9 +3,9 @@
 const { requireConfirmedAuth } = require('../_lib/confirmed-auth.js');
 const { checkDirectorEnabled, getDirectorEntitlement } = require('../_lib/h3-director-store.js');
 const {
-  ALLOWED_PLANS, CREDIT_COST, DURATION_SECONDS, RESOLUTION,
+  ALLOWED_PLANS, DURATION_SECONDS, RESOLUTION,
   DEFAULT_ASPECT_RATIO, ALLOWED_ASPECT_RATIOS,
-  HEARTBEAT_INTERVAL_MS
+  HEARTBEAT_INTERVAL_MS, currentCreditCost
 } = require('../_lib/h3-director-config.js');
 
 module.exports = async function handler(req, res) {
@@ -22,11 +22,8 @@ module.exports = async function handler(req, res) {
     return res.status(503).json({ ok: false, error: 'entitlement_unavailable' });
   }
 
-  // Same Preview-only relaxation as start-session.js / image-upload-url.js:
-  // report "enabled" to the UI on Preview even while the kill switch is OFF,
-  // so the gate does not block a one-time real-device test. The actual
-  // authorization decision is still made server-side in start-session.js.
   const isVercelPreview = process.env.VERCEL_ENV === 'preview';
+  const creditCost = currentCreditCost();
 
   return res.status(200).json({
     ok: true,
@@ -40,7 +37,7 @@ module.exports = async function handler(req, res) {
       resolution: RESOLUTION,
       aspectRatio: DEFAULT_ASPECT_RATIO,
       allowedAspectRatios: ALLOWED_ASPECT_RATIOS,
-      creditCost: CREDIT_COST,
+      creditCost,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS
     }
   });
