@@ -4,6 +4,7 @@
   if(!/\/h3-director\.html(?:$|[?#])/.test(location.pathname+location.search))return;
 
   var supabaseClient=typeof window.flowvidSupabaseClient==='function'?window.flowvidSupabaseClient():null;
+  var directorInfo=null;
 
   // H3 Max Live本体は最初に video/mp4;codecs=h264,aac を試すが、
   // Safari系では「video/mp4」や avc1/mp4a だけを対応形式として返す場合がある。
@@ -62,6 +63,19 @@
     }
   }
 
+  async function fetchDirectorInfo(){
+    var token=await authToken();
+    if(!token)return null;
+    try{
+      var response=await fetch('/api/h3-director/info',{method:'GET',cache:'no-store',headers:{Authorization:'Bearer '+token}});
+      if(!response.ok)return null;
+      var data=await response.json();
+      return data&&data.ok?data:null;
+    }catch(e){
+      return null;
+    }
+  }
+
   function showNotice(text){
     var notice=document.getElementById('notice');
     if(!notice)return;
@@ -111,11 +125,27 @@
       '.h3-price-help-panel b{display:block;margin-bottom:4px;color:#fff;font-size:11px}',
       '.h3-price-help-panel p{margin:0 0 4px}',
       '.h3-price-help-panel p:last-child{margin-bottom:0;color:#aebcff}',
+      '.h3-current-price{color:#fff!important;font-weight:900}',
+      '.h3-beta-badge{display:inline-flex;align-items:center;margin-left:7px;padding:3px 7px;border:1px solid rgba(255,255,255,.2);border-radius:999px;font-size:9px;font-style:normal;letter-spacing:.12em;color:#fff;background:rgba(255,255,255,.08);vertical-align:middle}',
       '.composer>.footnote.h3-price-footnote-hidden{display:none!important}',
       '@media(max-width:900px){#historyPanel.history{max-height:min(48vh,460px)}}',
       '@media(max-width:520px){#historyPanel.history{max-height:46vh}#history .history-item{padding:9px}#history .h3-history-video-frame.portrait{max-height:280px;min-width:158px}.h3-price-help-panel{right:-4px}}'
     ].join('');
     document.head.appendChild(style);
+  }
+
+  function installBetaLabels(){
+    installHistoryStyle();
+    var brand=document.querySelector('header .brand');
+    if(brand&&!brand.querySelector('.h3-beta-badge')){
+      var badge=document.createElement('em');
+      badge.className='h3-beta-badge';
+      badge.textContent='BETA';
+      brand.appendChild(badge);
+    }
+    var links=document.querySelectorAll('.model-switch a');
+    if(links[0])links[0].textContent='H3 Max BETA';
+    if(links[1])links[1].textContent='H3 Max Live BETA';
   }
 
   function installPricingHelp(){
@@ -132,7 +162,7 @@
 
       var help=document.createElement('span');
       help.className='h3-price-help';
-      help.innerHTML='<button type="button" class="h3-price-help-button" aria-label="料金について" aria-expanded="false">?</button><div class="h3-price-help-panel" role="dialog" aria-label="H3 Max Liveの料金説明" hidden><b>H3 Max Liveの料金</b><p>クレジットは「ライブ生成を開始」した時にだけ消費します。</p><p>ライブ中の追加指示では、追加クレジットは消費しません。</p><p>途中でライブを終了しても、消費したクレジットは返還されません。</p><p>9/14までセール期間中です。セール内容は料金ページをご確認ください。</p></div>';
+      help.innerHTML='<button type="button" class="h3-price-help-button" aria-label="料金について" aria-expanded="false">?</button><div class="h3-price-help-panel" role="dialog" aria-label="H3 Max Liveの料金説明" hidden><b>H3 Max Live BETAの料金</b><p class="h3-current-price">現在の料金を確認中…</p><p>クレジットは「ライブ生成を開始」した時にだけ消費します。</p><p>ライブ中の追加指示では、追加クレジットは消費しません。</p><p>途中でライブを終了しても、消費したクレジットは返還されません。</p><p>9/14まではBETAセール価格、9/15から通常価格です。</p></div>';
       text.appendChild(help);
 
       var button=help.querySelector('.h3-price-help-button');
@@ -160,6 +190,45 @@
     }
 
     if(footnote)footnote.classList.add('h3-price-footnote-hidden');
+  }
+
+  function applyDynamicPrice(info){
+    if(!info||!info.fixed)return;
+    directorInfo=info;
+    var cost=Number(info.fixed.creditCost||0);
+    var line=document.querySelector('.h3-current-price');
+    if(line&&cost>0)line.textContent='現在 '+cost+'クレジット / ライブ開始';
+
+    // h3-director.html legacy markup still contains a 440-credit client-side
+    // pre-gate. During the sale that can falsely block a user who has enough
+    // for the server-authoritative current price. Clear only that specific
+    // false-positive gate; every real start still goes through the API + DB
+    // checks, so this never weakens plan/account/content safety or billing.
+    var enough=cost>0&&Number(info.balance)>=cost;
+    var allowed=info.enabled&&info.eligible&&info.accountStatus==='active'&&enough;
+    var gate=document.getElementById('gate');
+    if(allowed&&gate&&/ライブ開始には440クレジット必要です/.test(gate.textContent||'')){
+      gate.className='gate';
+      gate.innerHTML='';
+    }
+
+    var prompt=document.getElementById('prompt');
+    var action=document.getElementById('action');
+    if(!prompt||!action||prompt.dataset.h3DynamicPriceGate==='1')return;
+    prompt.dataset.h3DynamicPriceGate='1';
+    prompt.addEventListener('input',function(){
+      if(!directorInfo||!directorInfo.fixed)return;
+      var price=Number(directorInfo.fixed.creditCost||0);
+      var canUse=directorInfo.enabled&&directorInfo.eligible&&directorInfo.accountStatus==='active'&&Number(directorInfo.balance)>=price;
+      if(canUse&&this.value.trim()&&!action.classList.contains('connecting'))action.disabled=false;
+    });
+  }
+
+  async function syncDirectorBetaState(){
+    installBetaLabels();
+    installPricingHelp();
+    var info=await fetchDirectorInfo();
+    if(info)applyDynamicPrice(info);
   }
 
   function stopOtherHistoryVideos(except){
@@ -257,9 +326,7 @@
       var firstPlay;
       try{firstPlay=video.play()}catch(e){firstPlay=null}
       if(firstPlay&&typeof firstPlay.catch==='function'){
-        firstPlay.catch(function(){
-          showNotice('動画内の再生ボタンを押してください。');
-        });
+        firstPlay.catch(function(){showNotice('動画内の再生ボタンを押してください。')});
       }
     }catch(e){
       button.disabled=false;
@@ -320,19 +387,24 @@
     }
   },true);
 
+  installBetaLabels();
   installPricingHelp();
 
   var historyRoot=document.getElementById('history');
   if(historyRoot){
     enhanceHistory();
     new MutationObserver(enhanceHistory).observe(historyRoot,{childList:true,subtree:true});
-  }else if(document.readyState==='loading'){
+  }
+
+  if(document.readyState==='loading'){
     document.addEventListener('DOMContentLoaded',function(){
-      installPricingHelp();
+      syncDirectorBetaState();
       historyRoot=document.getElementById('history');
       if(!historyRoot)return;
       enhanceHistory();
       new MutationObserver(enhanceHistory).observe(historyRoot,{childList:true,subtree:true});
     },{once:true});
+  }else{
+    syncDirectorBetaState();
   }
 })();
