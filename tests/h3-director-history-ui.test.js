@@ -43,12 +43,33 @@ test('料金UI: 表面の固定クレジット表記を料金?に置き換える
   assert.match(ui, /aria-expanded="false"/);
 });
 
-test('料金UI: ?を押した時だけ課金タイミングと追加指示を説明する', () => {
+test('料金UI: ?を押した時だけBETA料金と追加指示を説明する', () => {
+  assert.match(ui, /H3 Max Live BETAの料金/);
   assert.match(ui, /クレジットは「ライブ生成を開始」した時にだけ消費します。/);
   assert.match(ui, /ライブ中の追加指示では、追加クレジットは消費しません。/);
   assert.match(ui, /途中でライブを終了しても、消費したクレジットは返還されません。/);
-  assert.match(ui, /9\/14までセール期間中です。セール内容は料金ページをご確認ください。/);
+  assert.match(ui, /9\/14まではBETAセール価格、9\/15から通常価格です。/);
   assert.match(ui, /panel\.hidden=!willOpen;/);
+});
+
+test('料金UI: current priceは認証済みinfo APIのserver値を使う', () => {
+  assert.match(ui, /fetch\('\/api\/h3-director\/info'/);
+  assert.match(ui, /var cost=Number\(info\.fixed\.creditCost\|\|0\)/);
+  assert.match(ui, /現在 '\+cost\+'クレジット \/ ライブ開始/);
+});
+
+test('料金UI: sale中に旧440クレジットUIゲートだけを解除しserver gateは維持する', () => {
+  assert.match(ui, /\/ライブ開始には440クレジット必要です\//);
+  assert.match(ui, /var enough=cost>0&&Number\(info\.balance\)>=cost/);
+  assert.match(ui, /info\.enabled&&info\.eligible&&info\.accountStatus==='active'&&enough/);
+  assert.match(ui, /gate\.className='gate'/);
+  assert.doesNotMatch(ui, /start-session|approve-prompt/);
+});
+
+test('BETA UI: H3 MaxとH3 Max Liveのモデル切替にBETA表記を出す', () => {
+  assert.match(ui, /links\[0\]\.textContent='H3 Max BETA'/);
+  assert.match(ui, /links\[1\]\.textContent='H3 Max Live BETA'/);
+  assert.match(ui, /badge\.textContent='BETA'/);
 });
 
 test('料金UI: 既存の長いfootnoteを画面から隠して履歴を上へ詰める', () => {
