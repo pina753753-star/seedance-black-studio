@@ -35,9 +35,11 @@ test('DB migration: JSと同じUTC切替時刻を使う', () => {
   assert.match(migration, /when now\(\) < timestamptz '2026-09-14 15:00:00\+00' then 110/);
 });
 
-test('DB migration: H3 Maxの保存価格60/130だけを許可する', () => {
-  assert.match(migration, /h3_live_jobs_credit_cost_check[\s\S]*credit_cost in \(60, 130\)/);
+test('DB migration: H3 Maxの新価格60/130と旧110-credit履歴を共存させる', () => {
+  assert.match(migration, /h3_live_jobs_credit_cost_check[\s\S]*credit_cost in \(60, 110, 130\)/);
   assert.match(migration, /v_credit_cost := public\.h3_max_credit_cost\(\)/);
+  assert.match(migration, /if v_credit_cost not in \(60, 130\)/);
+  assert.match(migration, /if v_job\.credit_cost not in \(60, 110, 130\)/);
   assert.match(migration, /'fal', 15, '768p', v_credit_cost/);
   assert.match(migration, /v_remaining := v_job\.credit_cost/);
   assert.match(migration, /'required', v_job\.credit_cost/);
