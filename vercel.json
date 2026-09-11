@@ -11,6 +11,10 @@
       "dest": "/api/seedance-status?_r=sb"
     },
     {
+      "src": "/h3-live.html",
+      "dest": "/h3-max-beta.html"
+    },
+    {
       "handle": "filesystem"
     },
     {
