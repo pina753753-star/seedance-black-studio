@@ -1,14 +1,34 @@
 'use strict';
 
-// H3 Max Director is a separate WebRTC product from the existing queued
-// H3 Live feature. Keep its product and provider settings isolated so a
+// H3 Max Live (Director) is a separate WebRTC product from the queued
+// H3 Max feature. Keep its product and provider settings isolated so a
 // Director rollout cannot change Seedance or api/h3-live/* behavior.
 
 const DURATION_SECONDS = 60;
 const RESOLUTION = '768p';
 const DEFAULT_ASPECT_RATIO = '16:9';
 const ALLOWED_ASPECT_RATIOS = Object.freeze(['16:9', '9:16']);
-const CREDIT_COST = 440;
+
+// BETA launch pricing.
+// 2026-09-15 00:00 JST === 2026-09-14 15:00 UTC.
+// The database migration uses the same UTC instant and remains authoritative
+// for the amount stored on each session and actually deducted.
+const CREDIT_PRICE_SWITCH_AT = '2026-09-14T15:00:00.000Z';
+const CREDIT_COST_SALE = 110;
+const CREDIT_COST_STANDARD = 440;
+
+function currentCreditCost(at = Date.now()) {
+  const time = at instanceof Date
+    ? at.getTime()
+    : (typeof at === 'number' ? at : Date.parse(String(at || '')));
+  if (!Number.isFinite(time)) return CREDIT_COST_STANDARD;
+  return time < Date.parse(CREDIT_PRICE_SWITCH_AT) ? CREDIT_COST_SALE : CREDIT_COST_STANDARD;
+}
+
+// Backwards-compatible snapshot for older call sites. New user-facing code
+// should call currentCreditCost() per request. The DB is authoritative.
+const CREDIT_COST = currentCreditCost();
+
 const PROMPT_MAX_CHARS = 2000;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const SESSION_CREATE_TIMEOUT_MS = 45000;
@@ -51,7 +71,11 @@ module.exports = {
   RESOLUTION,
   DEFAULT_ASPECT_RATIO,
   ALLOWED_ASPECT_RATIOS,
+  CREDIT_PRICE_SWITCH_AT,
+  CREDIT_COST_SALE,
+  CREDIT_COST_STANDARD,
   CREDIT_COST,
+  currentCreditCost,
   PROMPT_MAX_CHARS,
   HEARTBEAT_INTERVAL_MS,
   SESSION_CREATE_TIMEOUT_MS,
