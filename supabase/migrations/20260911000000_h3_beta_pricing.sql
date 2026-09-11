@@ -10,7 +10,8 @@
 -- Every job/session stores the price selected at reservation time in
 -- credit_cost. Deduct/refund logic ALWAYS uses that stored value, never the
 -- current wall-clock price. This makes idempotent replays and refunds safe even
--- if they happen across the cutoff.
+-- if they happen across the cutoff. Historical H3 Max jobs charged at the old
+-- fixed 110-credit price remain valid and refundable.
 
 begin;
 
@@ -43,12 +44,13 @@ revoke all on function public.h3_max_live_credit_cost() from public, anon, authe
 grant execute on function public.h3_max_credit_cost() to service_role;
 grant execute on function public.h3_max_live_credit_cost() to service_role;
 
--- Keep historical rows valid while allowing both BETA prices.
+-- Keep historical rows valid while allowing the two new BETA prices.
+-- 110 is legacy H3 Max only; new reservations never select it.
 alter table public.h3_live_jobs
   drop constraint if exists h3_live_jobs_credit_cost_check;
 alter table public.h3_live_jobs
   add constraint h3_live_jobs_credit_cost_check
-  check (credit_cost in (60, 130));
+  check (credit_cost in (60, 110, 130));
 alter table public.h3_live_jobs
   alter column credit_cost set default public.h3_max_credit_cost();
 
@@ -247,7 +249,7 @@ begin
   if v_job.user_id <> p_user_id then
     return jsonb_build_object('ok', false, 'code', 'job_owner_mismatch');
   end if;
-  if v_job.credit_cost not in (60, 130) then
+  if v_job.credit_cost not in (60, 110, 130) then
     raise exception 'h3_live_credit_cost_mismatch' using errcode = 'check_violation';
   end if;
 
@@ -408,7 +410,7 @@ begin
   if not found then
     return jsonb_build_object('ok', false, 'code', 'job_not_found');
   end if;
-  if v_job.credit_cost not in (60, 130) then
+  if v_job.credit_cost not in (60, 110, 130) then
     raise exception 'h3_live_credit_cost_mismatch' using errcode = 'check_violation';
   end if;
   if v_job.status = 'completed' then
