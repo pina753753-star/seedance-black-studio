@@ -50,6 +50,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { isUuid, sanitizeJob } = require('../_lib/h3-live-store.js');
 const { UPLOADS_TABLE, deleteUploadObject } = require('../_lib/h3-live-image-store.js');
+const { deleteJobReferenceImages } = require('../_lib/h3-max-reference-image-store.js');
 const { CREDIT_COST } = require('../_lib/h3-live-config.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
@@ -113,7 +114,7 @@ function toStuckJob(r, reason) {
     id: r.id,
     userId: r.user_id,
     status: r.status,
-    inputMode: r.input_mode === 'image' ? 'image' : 'text',
+    inputMode: ['image', 'reference', 'storyboard'].includes(r.input_mode) ? r.input_mode : 'text',
     charged: Boolean(r.charged_at),
     providerRequestId: r.provider_request_id || null,
     reason,
@@ -196,6 +197,13 @@ async function settleReleasedJob(db, jobId, jobRow, extraBody = {}) {
         .maybeSingle();
       if (uploadRow) await deleteUploadObject(db, uploadRow);
     } catch (_) { /* best effort */ }
+  }
+
+  // Best-effort: drop ALL bound reference/storyboard images for this job.
+  // Independent of the single-image cleanup above — never touches
+  // h3_live_image_uploads.
+  if (jobRow && (jobRow.input_mode === 'reference' || jobRow.input_mode === 'storyboard')) {
+    try { await deleteJobReferenceImages(db, jobId); } catch (_) { /* best effort */ }
   }
 
   const reselect = await db.from('h3_live_jobs').select('*').eq('id', jobId).maybeSingle();

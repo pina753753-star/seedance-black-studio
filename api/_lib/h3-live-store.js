@@ -56,7 +56,7 @@ function sanitizeJob(row) {
     id: row.id,
     status: row.status,
     instruction: row.instruction,
-    inputMode: row.input_mode === 'image' ? 'image' : 'text',
+    inputMode: ['image', 'reference', 'storyboard'].includes(row.input_mode) ? row.input_mode : 'text',
     providerStatus: row.provider_status || null,
     durationSeconds: row.duration_seconds,
     resolution: row.resolution,

@@ -36,8 +36,8 @@ const {
 } = require('../_lib/h3-live-store.js');
 const { getH3LiveEntitlement } = require('../_lib/h3-live-entitlement.js');
 const { moderateH3LiveInstruction } = require('../_lib/h3-live-moderation.js');
-const { moderateH3LiveImageInput } = require('../_lib/h3-live-image-moderation.js');
-const { submitTextJob, submitImageJob } = require('../_lib/h3-live-fal.js');
+const { moderateH3LiveImageInput, moderateH3LiveImageOnly } = require('../_lib/h3-live-image-moderation.js');
+const { submitTextJob, submitImageJob, submitReferenceJob } = require('../_lib/h3-live-fal.js');
 const {
   getUploadRow,
   downloadAndValidate,
@@ -47,6 +47,18 @@ const {
   deleteUploadObject,
   sweepStaleUploads
 } = require('../_lib/h3-live-image-store.js');
+// Independent multi-image ("reference" / "storyboard") helper — separate
+// bucket/table from h3-live-image-store.js above; the single-image mode's
+// import block is untouched.
+const {
+  getUploadRowsOrdered: getReferenceUploadRowsOrdered,
+  downloadAndValidate: downloadAndValidateReference,
+  createModerationSignedUrl: createReferenceModerationSignedUrl,
+  createFalSignedUrl: createReferenceFalSignedUrl,
+  markModeration: markReferenceModeration,
+  deleteJobReferenceImages,
+  sweepStaleUploads: sweepStaleReferenceUploads
+} = require('../_lib/h3-max-reference-image-store.js');
 const {
   INSTRUCTION_MIN_CHARS,
   INSTRUCTION_MAX_CHARS,
@@ -54,6 +66,10 @@ const {
   STATUS_POLL_MS,
   FAL_MODEL_ID_TEXT,
   FAL_MODEL_ID_IMAGE,
+  FAL_MODEL_ID_REFERENCE,
+  REFERENCE_INPUT_MODES,
+  REFERENCE_MIN_IMAGES,
+  REFERENCE_MAX_IMAGES,
   requireProviderConfig,
   requireModerationConfig
 } = require('../_lib/h3-live-config.js');
@@ -112,8 +128,8 @@ module.exports = async function handler(req, res) {
       endpoint: '/api/h3-live/start',
       method: 'POST',
       note: 'POST only. Authorization: Bearer <supabase-jwt> and Idempotency-Key: <uuid> required.',
-      models: { text: FAL_MODEL_ID_TEXT, image: FAL_MODEL_ID_IMAGE },
-      modes: ['text', 'image'],
+      models: { text: FAL_MODEL_ID_TEXT, image: FAL_MODEL_ID_IMAGE, reference: FAL_MODEL_ID_REFERENCE, storyboard: FAL_MODEL_ID_REFERENCE },
+      modes: ['text', 'image', 'reference', 'storyboard'],
       fixed: { durationSeconds: 15, resolution: '768p', creditCost: CREDIT_COST }
     });
   }
@@ -127,6 +143,7 @@ module.exports = async function handler(req, res) {
 
   // Opportunistic cleanup of abandoned image uploads (bounded, never throws).
   sweepStaleUploads(db).catch(() => {});
+  sweepStaleReferenceUploads(db).catch(() => {});
 
   // Kill switch — checked before any validation, DB write, or provider call.
   const control = await checkH3LiveEnabled(db);
@@ -160,7 +177,16 @@ module.exports = async function handler(req, res) {
 
   // Input mode. 'image' also needs a valid uploadId naming an
   // h3_live_image_uploads row this user created via /api/h3-live/image-upload-url.
-  const mode = body.mode === 'image' ? 'image' : 'text';
+  // 'reference' / 'storyboard' need an ORDERED array of 1-9 uploadIds naming
+  // h3_max_reference_uploads rows this user created via
+  // /api/h3-live/reference-image-upload-url — a completely separate registry
+  // from the single-image mode above.
+  const mode = body.mode === 'image'
+    ? 'image'
+    : REFERENCE_INPUT_MODES.includes(body.mode)
+      ? body.mode
+      : 'text';
+  const isReferenceMode = REFERENCE_INPUT_MODES.includes(mode);
   const uploadId = mode === 'image' ? String(body.uploadId || '').trim() : null;
   if (mode === 'image' && !isUuid(uploadId)) {
     return res.status(400).json({
@@ -168,6 +194,21 @@ module.exports = async function handler(req, res) {
       error: 'invalid_upload_id',
       message: '添付画像を確認できませんでした。画像を選び直してお試しください。'
     });
+  }
+
+  const rawUploadIds = isReferenceMode && Array.isArray(body.uploadIds) ? body.uploadIds : [];
+  const uploadIds = rawUploadIds.map((v) => String(v || '').trim());
+  if (isReferenceMode) {
+    const withinRange = uploadIds.length >= REFERENCE_MIN_IMAGES && uploadIds.length <= REFERENCE_MAX_IMAGES;
+    const allUuid = uploadIds.every((id) => isUuid(id));
+    const noDuplicates = new Set(uploadIds).size === uploadIds.length;
+    if (!withinRange || !allUuid || !noDuplicates) {
+      return res.status(400).json({
+        ok: false,
+        error: 'invalid_upload_ids',
+        message: `画像は1〜${REFERENCE_MAX_IMAGES}枚、重複なく選択してください。`
+      });
+    }
   }
 
   // Plan eligibility (Premium / Scale / Team / Ultimate, unexpired).
@@ -327,6 +368,161 @@ module.exports = async function handler(req, res) {
         contentType: imageContentType
       });
     }
+  } else if (isReferenceMode) {
+    // Reference / storyboard: 1-9 independent uploads, ALL of which must
+    // resolve, byte-validate, and pass moderation before anything is charged.
+    // A single bad/unusable image blocks the whole request — no partial
+    // charge, no partial fal call.
+    const resolved = await getReferenceUploadRowsOrdered(db, uploadIds, user.id);
+    if (!resolved.ok) {
+      return res.status(500).json({
+        ok: false,
+        error: resolved.error,
+        message: '添付画像を確認できませんでした。画像を選び直してお試しください。'
+      });
+    }
+    const rows = resolved.rows;
+    if (rows.some((r) => !r)) {
+      return res.status(404).json({
+        ok: false,
+        error: 'upload_not_found',
+        message: '添付画像を確認できませんでした。画像を選び直してお試しください。'
+      });
+    }
+
+    // Any of THIS user's frames may already be bound to a job. Same
+    // idempotent-replay allowance as the single-image path: acceptable only
+    // when it is this caller's own job for this exact idempotency key and
+    // still resumable, and ONLY if every named upload agrees on that same
+    // job (a caller cannot mix frames from two different prior jobs).
+    let boundToOwnReplay = false;
+    let boundJobCharged = false;
+    const boundJobIds = new Set(rows.map((r) => r.job_id).filter(Boolean));
+    if (boundJobIds.size > 0) {
+      if (boundJobIds.size === 1 && rows.every((r) => r.job_id)) {
+        const boundJob = await fetchJob(db, [...boundJobIds][0]);
+        boundToOwnReplay = Boolean(
+          boundJob &&
+          boundJob.user_id === user.id &&
+          String(boundJob.idempotency_key || '').toLowerCase() === idemKey.toLowerCase() &&
+          ['queued', 'submitting', 'processing'].includes(boundJob.status)
+        );
+        boundJobCharged = boundToOwnReplay && Boolean(boundJob.charged_at);
+      }
+      if (!boundToOwnReplay) {
+        return res.status(409).json({
+          ok: false,
+          error: 'image_not_usable',
+          message: 'この画像は使用できません。画像を選び直してお試しください。'
+        });
+      }
+    }
+
+    const anyUnusable = rows.some((r) =>
+      r.user_id !== user.id || r.deleted_at || r.superseded_at || r.moderation_status === 'blocked'
+    );
+    if (anyUnusable && !boundJobCharged) {
+      return res.status(409).json({
+        ok: false,
+        error: 'image_not_usable',
+        message: 'この画像は使用できません。画像を選び直してお試しください。'
+      });
+    }
+
+    // Same replay guard as the single-image path: a charged replay was
+    // already validated + moderated on its first attempt and cannot have had
+    // its images swapped since (each is bound). Skip re-download/re-moderate
+    // to avoid 422-ing an already-charged request.
+    //
+    // Order for reference/storyboard (deliberately different from the
+    // single-image path's moderateH3LiveImageInput(), which pairs each image
+    // with the full instruction): validate + moderate every image FIRST,
+    // using moderateH3LiveImageOnly() (image-only, no text call) so a
+    // safe-image + NG-instruction case never marks the image itself
+    // 'blocked'. Only once every image has passed is the shared instruction
+    // text moderated ONCE via moderateH3LiveInstruction() — not once per
+    // image — before falling through to reserve.
+    if (!boundJobCharged) {
+      for (const row of rows) {
+        const validated = await downloadAndValidateReference(db, row);
+        if (!validated.ok) {
+          const map = { image_too_large: 413, unsupported_image_type: 415, quarantine_object_not_found: 404, empty_object: 400 };
+          return res.status(map[validated.error] || 400).json({
+            ok: false,
+            error: validated.error,
+            message: '添付画像を読み込めませんでした。別の画像でお試しください。'
+          });
+        }
+
+        const signed = await createReferenceModerationSignedUrl(db, row);
+        if (!signed.ok) {
+          console.error('[h3-live/start] reference moderation signed URL failed:', signed.error);
+          return res.status(503).json(CONTENT_SAFETY_UNAVAILABLE);
+        }
+
+        const imageModeration = await moderateH3LiveImageOnly({
+          imageUrl: signed.signedUrl
+        });
+
+        if (!imageModeration.ok) {
+          console.error('[h3-live/start] reference image moderation unavailable:', imageModeration.reason);
+          return res.status(503).json(CONTENT_SAFETY_UNAVAILABLE);
+        }
+        if (!imageModeration.allow) {
+          console.warn(
+            '[h3-live/start] reference image blocked; categories:', imageModeration.categories || []
+          );
+          await markReferenceModeration(db, row.id, 'blocked', {
+            detail: { source: 'image', categories: imageModeration.categories || [] },
+            byteSize: validated.buffer.length,
+            contentType: validated.contentType
+          });
+          try {
+            await db.from('moderation_blocks').insert({
+              user_id: user.id,
+              mode: 'h3_max_reference_image_input',
+              categories: imageModeration.categories || [],
+              reason: 'h3_max_reference_image_flagged',
+              classification: {
+                source: 'image',
+                matchedCategories: imageModeration.categories || []
+              },
+              prompt: ''
+            });
+          } catch (logError) {
+            console.error('[h3-live/start] moderation_blocks insert failed:', logError?.message || logError);
+          }
+          return res.status(422).json({
+            ok: false,
+            error: 'content_policy_violation',
+            message: '添付画像が生成AIのコンテンツポリシーに抵触したため開始できませんでした。別の画像でお試しください。'
+          });
+        }
+
+        await markReferenceModeration(db, row.id, 'passed', {
+          detail: null,
+          byteSize: validated.buffer.length,
+          contentType: validated.contentType
+        });
+      }
+
+      // All images passed — moderate the shared instruction ONCE. NG here
+      // must NOT flip any already-'passed' image row back to 'blocked' (the
+      // images themselves were clean); it just blocks this request.
+      const textModeration = await moderateH3LiveInstruction(instruction);
+      if (!textModeration.ok) {
+        console.error('[h3-live/start] reference instruction moderation unavailable:', textModeration.reason);
+        return res.status(503).json(CONTENT_SAFETY_UNAVAILABLE);
+      }
+      if (!textModeration.allow) {
+        console.warn('[h3-live/start] reference instruction blocked; categories:', textModeration.categories || []);
+        return res.status(422).json({
+          ok: false,
+          error: 'content_policy_violation',
+          message: '入力内容が生成AIのコンテンツポリシーに抵触したため開始できませんでした。内容を変更してお試しください。'
+        });
+      }
+    }
   } else {
     // Text mode: instruction-only moderation (any flagged category blocks).
     const moderation = await moderateH3LiveInstruction(instruction);
@@ -356,15 +552,26 @@ module.exports = async function handler(req, res) {
   }
 
   // ---- Reserve ----
+  // Reference/storyboard use a SEPARATE reservation RPC
+  // (reserve_h3_reference_job_atomic) — reserve_h3_live_job_atomic (text/
+  // image) is called unchanged for those two modes only.
   let reservation;
   try {
-    const { data, error } = await db.rpc('reserve_h3_live_job_atomic', {
-      p_user_id: user.id,
-      p_idempotency_key: idemKey,
-      p_instruction: instruction,
-      p_input_mode: mode,
-      p_image_upload_id: mode === 'image' ? uploadId : null
-    });
+    const { data, error } = isReferenceMode
+      ? await db.rpc('reserve_h3_reference_job_atomic', {
+          p_user_id: user.id,
+          p_idempotency_key: idemKey,
+          p_instruction: instruction,
+          p_mode: mode,
+          p_upload_ids: uploadIds
+        })
+      : await db.rpc('reserve_h3_live_job_atomic', {
+          p_user_id: user.id,
+          p_idempotency_key: idemKey,
+          p_instruction: instruction,
+          p_input_mode: mode,
+          p_image_upload_id: mode === 'image' ? uploadId : null
+        });
     if (error) {
       console.error('[h3-live/start] reserve RPC error:', error.message);
       return res.status(500).json({ ok: false, error: 'reservation_failed', message: '開始に失敗しました。もう一度お試しください。' });
@@ -413,13 +620,23 @@ module.exports = async function handler(req, res) {
     });
   }
   if (reservationCode === 'image_not_usable') {
-    // The frame was consumed, deleted, or bound to another job between
-    // moderation and reserve.
-    if (imageUploadRow) await deleteUploadObject(db, imageUploadRow).catch(() => {});
+    // The frame(s) were consumed, deleted, or bound to another job between
+    // moderation and reserve. Single-image mode drops its one frame (as
+    // before); reference/storyboard leaves all named uploads untouched so
+    // the user can retry with a corrected set rather than losing every image
+    // over one bad one.
+    if (mode === 'image' && imageUploadRow) await deleteUploadObject(db, imageUploadRow).catch(() => {});
     return res.status(409).json({
       ok: false,
       error: 'image_not_usable',
       message: 'この画像は使用できません。画像を選び直してお試しください。'
+    });
+  }
+  if (reservationCode === 'invalid_upload_ids') {
+    return res.status(400).json({
+      ok: false,
+      error: 'invalid_upload_ids',
+      message: `画像は1〜${REFERENCE_MAX_IMAGES}枚、重複なく選択してください。`
     });
   }
 
@@ -556,6 +773,7 @@ module.exports = async function handler(req, res) {
   if (!controlRecheck.ok) {
     const r = await refundJob(db, jobId, 'disabled_after_charge', 'H3 Live disabled before submission');
     if (mode === 'image' && imageUploadRow) await deleteUploadObject(db, imageUploadRow).catch(() => {});
+    if (isReferenceMode) await deleteJobReferenceImages(db, jobId).catch(() => {});
     if (!r.confirmed) {
       // Do NOT tell the user "disabled" (a clean outcome) while the charge is
       // still outstanding and unrefunded.
@@ -600,6 +818,40 @@ module.exports = async function handler(req, res) {
         : { ok: false, error: 'refund_state_uncertain', message: REFUND_UNCONFIRMED_MESSAGE, jobId });
     }
     submission = await submitImageJob({ instruction, imageUrl: falSigned.signedUrl });
+  } else if (isReferenceMode) {
+    // Sign every bound image's fal-facing URL. The charge is already
+    // committed at this point (same as image mode above), so a signing
+    // failure here is a post-charge error: refund, then report.
+    const referenceRows = await getReferenceUploadRowsOrdered(db, uploadIds, user.id);
+    const signedUrls = [];
+    let signFailed = false;
+    if (referenceRows.ok) {
+      for (const row of referenceRows.rows) {
+        if (!row) { signFailed = true; break; }
+        const signed = await createReferenceFalSignedUrl(db, row);
+        if (!signed.ok) { signFailed = true; break; }
+        signedUrls.push(signed.signedUrl);
+      }
+    } else {
+      signFailed = true;
+    }
+
+    if (signFailed || signedUrls.length !== uploadIds.length) {
+      console.error('[h3-live/start] reference fal signed URL failed. jobId:', jobId);
+      const r = await refundJob(db, jobId, 'image_url_sign_failed', 'reference image signing failed');
+      await deleteJobReferenceImages(db, jobId).catch(() => {});
+      return res.status(r.confirmed ? 502 : 503).json(r.confirmed
+        ? {
+            ok: false,
+            error: 'image_url_sign_failed',
+            message: '生成の開始に失敗しました。' + (r.refunded ? 'クレジットは返還しました。' : ''),
+            refunded: r.refunded,
+            creditRefunded: r.refunded ? deduction.deducted : 0
+          }
+        : { ok: false, error: 'refund_state_uncertain', message: REFUND_UNCONFIRMED_MESSAGE, jobId });
+    }
+
+    submission = await submitReferenceJob({ instruction, imageUrls: signedUrls, mode });
   } else {
     submission = await submitTextJob({ instruction });
   }
@@ -631,6 +883,7 @@ module.exports = async function handler(req, res) {
     // failure once the refund is confirmed.
     const r = await refundJob(db, jobId, `fal_${submission.category}`, submission.detail);
     if (mode === 'image' && imageUploadRow) await deleteUploadObject(db, imageUploadRow).catch(() => {});
+    if (isReferenceMode) await deleteJobReferenceImages(db, jobId).catch(() => {});
     if (!r.confirmed) {
       console.error('[h3-live/start] provider-rejection refund unconfirmed. jobId:', jobId, 'category:', submission.category, 'code:', r.code);
       return res.status(503).json({

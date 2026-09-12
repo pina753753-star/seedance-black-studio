@@ -25,6 +25,7 @@ const {
   FAL_QUEUE_BASE_URL,
   FAL_MODEL_ID_TEXT,
   FAL_MODEL_ID_IMAGE,
+  FAL_MODEL_ID_REFERENCE,
   falApiKey,
   isTrustedFalQueueUrl,
   isTrustedFalOutputUrl
@@ -92,6 +93,41 @@ function buildH3MaxImageInput(instruction, imageUrl) {
     resolution: RESOLUTION_FAL,
     enable_safety_checker: true,
     prompt_expansion_mode: 'balanced'
+  };
+}
+
+// Build the fal.ai input payload for "reference" mode: 1-9 reference images,
+// order not semantically meaningful beyond the "Image N" labels a user might
+// reference in their own prompt text. <-- SINGLE POINT OF CHANGE if fal.ai's
+// reference-to-video field names differ from this draft; verify against
+// fal.ai docs before real use.
+function buildH3MaxReferenceInput(instruction, imageUrls) {
+  return {
+    prompt: String(instruction || '').trim(),
+    reference_image_urls: (Array.isArray(imageUrls) ? imageUrls : []).map((u) => String(u || '').trim()),
+    duration: DURATION_SECONDS,
+    resolution: RESOLUTION_FAL,
+    enable_safety_checker: true,
+    prompt_expansion_mode: 'balanced'
+  };
+}
+
+// "storyboard" mode reuses the exact same reference-to-video model and input
+// shape, but the image ORDER is meant as a time-ordered hint. A short,
+// fixed, system-side sentence is appended (never inserted mid-prompt, never
+// replacing any of the user's own wording) so the model has SOME signal that
+// order = time, without rewriting the user's intent. Kept deliberately short
+// — this is a hint, not a scene-by-scene rewrite, and the product copy
+// (h3-max-beta.html) already tells the user not to expect a guaranteed
+// cut-by-cut result.
+const STORYBOARD_ORDER_HINT =
+  ' (添付画像はImage 1から順に時間的な流れの参考として使用してください。)';
+
+function buildH3MaxStoryboardInput(instruction, imageUrls) {
+  const base = buildH3MaxReferenceInput(instruction, imageUrls);
+  return {
+    ...base,
+    prompt: `${base.prompt}${STORYBOARD_ORDER_HINT}`
   };
 }
 
@@ -187,6 +223,27 @@ async function submitImageJob({ instruction, imageUrl }) {
   return submitToFalQueue({
     modelId: FAL_MODEL_ID_IMAGE,
     input: buildH3MaxImageInput(instruction, url)
+  });
+}
+
+// Submit a "reference" or "storyboard" (1-9 images) + instruction -> video
+// generation. mode selects which system-side hint (if any) is appended;
+// imageUrls must all be https URLs fal can fetch (short-lived Supabase
+// signed URLs, same pattern as submitImageJob).
+async function submitReferenceJob({ instruction, imageUrls, mode }) {
+  const urls = (Array.isArray(imageUrls) ? imageUrls : []).map((u) => String(u || '').trim());
+  if (urls.length < 1 || urls.length > 9) {
+    return { ok: false, category: 'invalid_input', httpStatus: 0, detail: 'reference image count must be 1-9' };
+  }
+  if (urls.some((u) => !/^https:\/\//i.test(u))) {
+    return { ok: false, category: 'invalid_input', httpStatus: 0, detail: 'missing or non-https reference image url' };
+  }
+  const input = mode === 'storyboard'
+    ? buildH3MaxStoryboardInput(instruction, urls)
+    : buildH3MaxReferenceInput(instruction, urls);
+  return submitToFalQueue({
+    modelId: FAL_MODEL_ID_REFERENCE,
+    input
   });
 }
 
@@ -314,7 +371,16 @@ async function getJobStatus({ statusUrl, responseUrl }) {
 module.exports = {
   submitTextJob,
   submitImageJob,
+  submitReferenceJob,
   getJobStatus,
   // exported for tests
-  _internals: { buildH3MaxInput, buildH3MaxImageInput, classifyProviderError, extractVideoUrl, isAuthLikeFailure }
+  _internals: {
+    buildH3MaxInput,
+    buildH3MaxImageInput,
+    buildH3MaxReferenceInput,
+    buildH3MaxStoryboardInput,
+    classifyProviderError,
+    extractVideoUrl,
+    isAuthLikeFailure
+  }
 };

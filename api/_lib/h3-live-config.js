@@ -77,6 +77,13 @@ const IMAGE_SIGNED_UPLOAD_URL_TTL_MS = 2 * 60 * 60 * 1000;
 
 const INPUT_MODES = Object.freeze(['text', 'image']);
 
+// ---- Multi-image input (reference / storyboard) ----
+// Independent of the single-image mode above: h3-max-reference-image-store.js
+// / h3_max_reference_uploads / the 'h3-max-reference-image-quarantine' bucket.
+const REFERENCE_INPUT_MODES = Object.freeze(['reference', 'storyboard']);
+const REFERENCE_MIN_IMAGES = 1;
+const REFERENCE_MAX_IMAGES = 9;
+
 // Client poll cadence hints returned to h3-live.html.
 const FEED_POLL_MS = 1000;
 const STATUS_POLL_MS = 2000;
@@ -96,6 +103,9 @@ const FAL_MODEL_ID_TEXT = String(
 const FAL_MODEL_ID_IMAGE = String(
   process.env.FAL_H3_MAX_IMAGE_MODEL_ID || 'minimax/h3-max/image-to-video'
 ).trim();
+const FAL_MODEL_ID_REFERENCE = String(
+  process.env.FAL_H3_MAX_REFERENCE_MODEL_ID || 'minimax/h3-max/reference-to-video'
+).trim();
 
 function falApiKey() {
   return String(process.env.FAL_KEY || process.env.FAL_API_KEY || '').trim();
@@ -110,6 +120,9 @@ function requireProviderConfig(mode = 'text') {
   if (!falApiKey()) missing.push('FAL_KEY');
   if (!FAL_MODEL_ID_TEXT) missing.push('FAL_H3_MAX_TEXT_MODEL_ID');
   if (mode === 'image' && !FAL_MODEL_ID_IMAGE) missing.push('FAL_H3_MAX_IMAGE_MODEL_ID');
+  if ((mode === 'reference' || mode === 'storyboard') && !FAL_MODEL_ID_REFERENCE) {
+    missing.push('FAL_H3_MAX_REFERENCE_MODEL_ID');
+  }
   if (!/^https:\/\/[a-z0-9.-]+$/i.test(FAL_QUEUE_BASE_URL)) missing.push('FAL_QUEUE_BASE_URL');
   if (missing.length) return { ok: false, missing };
   return { ok: true };
@@ -165,12 +178,16 @@ module.exports = {
   IMAGE_CLEANUP_MAX_PER_RUN,
   IMAGE_SIGNED_UPLOAD_URL_TTL_MS,
   INPUT_MODES,
+  REFERENCE_INPUT_MODES,
+  REFERENCE_MIN_IMAGES,
+  REFERENCE_MAX_IMAGES,
   FEED_POLL_MS,
   STATUS_POLL_MS,
   STATUS_UPSTREAM_MIN_INTERVAL_MS,
   FAL_QUEUE_BASE_URL,
   FAL_MODEL_ID_TEXT,
   FAL_MODEL_ID_IMAGE,
+  FAL_MODEL_ID_REFERENCE,
   falApiKey,
   openaiApiKey,
   requireProviderConfig,
