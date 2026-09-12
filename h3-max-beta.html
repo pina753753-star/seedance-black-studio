@@ -13,7 +13,17 @@
     *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:'Noto Sans JP',system-ui,sans-serif}body{min-height:100dvh;display:flex;flex-direction:column}button,textarea{font:inherit}button{cursor:pointer}a{color:inherit}
     header{height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line);background:#070708;position:sticky;top:0;z-index:30}.brand{font-size:13px;font-weight:900;letter-spacing:.16em;white-space:nowrap}.beta{display:inline-flex;margin-left:6px;padding:3px 7px;border:1px solid rgba(255,255,255,.2);border-radius:999px;font-size:9px;letter-spacing:.12em;background:rgba(255,255,255,.07)}.switch{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}.switch a{padding:7px 10px;color:var(--muted);text-decoration:none;font-size:11px;white-space:nowrap}.switch a.on{background:#fff;color:#090909;font-weight:900}.spacer{flex:1}.chip,.close{border:1px solid var(--line);border-radius:999px;padding:7px 11px;font-size:11px;background:#0c0c0d;text-decoration:none;white-space:nowrap}.chip{color:var(--muted)}.chip b{color:#fff}
     main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 390px;min-height:0}.stage-wrap{padding:22px;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,#171719 0,#090909 54%,#050505 100%)}.stage-card{width:100%;max-width:1080px}.stage{position:relative;width:100%;aspect-ratio:16/9;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#000;box-shadow:0 28px 90px #000}.stage video{width:100%;height:100%;object-fit:contain;background:#000;display:block}.empty{position:absolute;inset:0;display:grid;place-content:center;gap:8px;text-align:center;color:var(--muted);padding:24px}.empty b{color:#ddd;letter-spacing:.18em;font-size:15px}.generating{position:absolute;inset:0;display:none;place-content:center;text-align:center;gap:10px;background:rgba(0,0,0,.72)}.generating.show{display:grid}.spinner{width:54px;height:54px;border:3px solid rgba(255,255,255,.18);border-top-color:#fff;border-radius:50%;animation:spin .9s linear infinite;margin:auto}@keyframes spin{to{transform:rotate(360deg)}}.stage-actions{display:flex;justify-content:flex-end;margin-top:10px;gap:8px}.ghost{border:1px solid var(--line);background:#101012;color:#fff;border-radius:10px;padding:9px 12px;font-size:11px;font-weight:700}.ghost:disabled{opacity:.45}.notice{margin-top:10px;min-height:20px;color:var(--muted);font-size:11.5px;text-align:center}.notice.bad{color:#ff9aac}
-    aside{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}.composer{padding:14px;display:grid;gap:11px}.section-title{font-size:11px;color:#8d8d92;letter-spacing:.13em;font-weight:900}.gate{display:none;border:1px solid var(--line);border-radius:12px;background:#111;padding:11px 12px;font-size:11.5px;line-height:1.65}.gate.show{display:block}.modes{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;justify-self:start}.modes button{border:0;background:transparent;color:var(--muted);padding:8px 13px;font-size:11px;font-weight:700}.modes button.on{background:#fff;color:#090909}.drop{display:none;border:1px dashed rgba(255,255,255,.22);border-radius:12px;padding:16px;text-align:center;color:var(--muted);font-size:11.5px;line-height:1.6;background:#080808}.drop.show{display:block}.drop.drag{border-color:#fff;color:#fff}.thumb{display:none;align-items:center;gap:9px;border:1px solid var(--line);border-radius:12px;padding:8px;background:#080808}.thumb.show{display:flex}.thumb img{width:52px;height:52px;object-fit:cover;border-radius:9px;background:#000}.thumb .name{flex:1;min-width:0;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.thumb button{border:1px solid var(--line);background:#141416;color:#fff;border-radius:9px;padding:7px 9px}.prompt{width:100%;min-height:150px;max-height:320px;resize:vertical;border:1px solid var(--line);border-radius:14px;background:#020202;color:#fff;padding:13px;outline:none;font-size:14px;line-height:1.65}.prompt:focus{border-color:rgba(255,255,255,.45)}.meta-row{display:flex;gap:10px;align-items:center}.price{flex:1;color:var(--muted);font-size:11px;line-height:1.55}.price-help{position:relative;display:inline-flex}.q{width:20px;height:20px;border:1px solid var(--line);border-radius:50%;background:#111;color:#fff;font-size:11px;display:grid;place-items:center;padding:0}.help{position:absolute;right:0;bottom:28px;width:min(290px,calc(100vw - 32px));background:#111;border:1px solid var(--line);border-radius:11px;padding:11px;box-shadow:0 16px 40px #000;font-size:10.5px;line-height:1.65;z-index:50}.help[hidden]{display:none}.send{border:0;border-radius:12px;background:#fff;color:#090909;padding:13px 15px;font-weight:900;font-size:14px}.send:disabled{opacity:.42;cursor:not-allowed}.rights{font-size:10.5px;line-height:1.6;color:#707075}.rights a{color:#bdbdc3}
+    aside{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}.composer{padding:14px;display:grid;gap:11px}.section-title{font-size:11px;color:#8d8d92;letter-spacing:.13em;font-weight:900}.gate{display:none;border:1px solid var(--line);border-radius:12px;background:#111;padding:11px 12px;font-size:11.5px;line-height:1.65}.gate.show{display:block}.modes{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;justify-self:start}.modes button{border:0;background:transparent;color:var(--muted);padding:8px 13px;font-size:11px;font-weight:700}.modes button.on{background:#fff;color:#090909}.drop{display:none;border:1px dashed rgba(255,255,255,.22);border-radius:12px;padding:16px;text-align:center;color:var(--muted);font-size:11.5px;line-height:1.6;background:#080808}.drop.show{display:block}.drop.drag{border-color:#fff;color:#fff}.thumb{display:none;align-items:center;gap:9px;border:1px solid var(--line);border-radius:12px;padding:8px;background:#080808}.thumb.show{display:flex}.thumb img{width:52px;height:52px;object-fit:cover;border-radius:9px;background:#000}.thumb .name{flex:1;min-width:0;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.thumb button{border:1px solid var(--line);background:#141416;color:#fff;border-radius:9px;padding:7px 9px}
+    .refnote{display:none;font-size:10.5px;line-height:1.6;color:var(--muted);background:#0c0c0e;border:1px solid var(--line);border-radius:10px;padding:8px 10px}.refnote.show{display:block}
+    .refgrid{display:none;grid-template-columns:repeat(3,1fr);gap:8px}.refgrid.show{display:grid}
+    .refslot{position:relative;aspect-ratio:1/1;border:1px dashed rgba(255,255,255,.22);border-radius:11px;overflow:hidden;background:#080808;display:grid;place-items:center}
+    .refslot.filled{border-style:solid;border-color:var(--line)}
+    .refslot img{width:100%;height:100%;object-fit:cover;display:block}
+    .refslot .num{position:absolute;top:4px;left:4px;background:rgba(0,0,0,.72);color:#fff;font-size:9.5px;font-weight:900;border-radius:6px;padding:2px 5px;line-height:1}
+    .refslot .refop{position:absolute;bottom:4px;display:flex;gap:3px}
+    .refslot .refop button{border:0;background:rgba(0,0,0,.72);color:#fff;border-radius:6px;padding:2px 5px;font-size:9.5px;line-height:1.4}
+    .refslot .addlabel{color:var(--muted);font-size:10px;text-align:center;padding:6px}
+    .refadd-btn{grid-column:1/-1;border:1px dashed rgba(255,255,255,.22);background:transparent;color:var(--muted);border-radius:11px;padding:10px;font-size:11.5px}.prompt{width:100%;min-height:150px;max-height:320px;resize:vertical;border:1px solid var(--line);border-radius:14px;background:#020202;color:#fff;padding:13px;outline:none;font-size:14px;line-height:1.65}.prompt:focus{border-color:rgba(255,255,255,.45)}.meta-row{display:flex;gap:10px;align-items:center}.price{flex:1;color:var(--muted);font-size:11px;line-height:1.55}.price-help{position:relative;display:inline-flex}.q{width:20px;height:20px;border:1px solid var(--line);border-radius:50%;background:#111;color:#fff;font-size:11px;display:grid;place-items:center;padding:0}.help{position:absolute;right:0;bottom:28px;width:min(290px,calc(100vw - 32px));background:#111;border:1px solid var(--line);border-radius:11px;padding:11px;box-shadow:0 16px 40px #000;font-size:10.5px;line-height:1.65;z-index:50}.help[hidden]{display:none}.send{border:0;border-radius:12px;background:#fff;color:#090909;padding:13px 15px;font-weight:900;font-size:14px}.send:disabled{opacity:.42;cursor:not-allowed}.rights{font-size:10.5px;line-height:1.6;color:#707075}.rights a{color:#bdbdc3}
     .history-wrap{border-top:1px solid var(--line);margin-top:auto}.history-toggle{width:100%;border:0;background:#0b0b0d;color:#aaa;text-align:left;padding:13px 14px;font-size:11px;font-weight:700}.history{padding:12px 14px;max-height:min(52vh,520px);overflow:auto;display:grid;gap:10px}.history[hidden]{display:none}.history-card{border:1px solid var(--line);border-radius:12px;background:#070708;padding:10px;display:grid;gap:8px}.history-card .prompt-text{font-size:11.5px;line-height:1.5;color:#d8d8dc;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.history-card small{color:#777;font-size:10px}.history-video{aspect-ratio:16/9;border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#000;display:grid;place-items:center;color:#666;font-size:10.5px}.history-video video{width:100%;height:100%;object-fit:contain;background:#000}.history-actions{display:flex;gap:7px}.history-actions button{flex:1;border:1px solid var(--line);background:#151519;color:#fff;border-radius:9px;min-height:36px;font-size:10.5px;font-weight:700}.status{font-weight:900}.status.failed{color:#ff9aac}.status.completed{color:#ddd}.status.processing,.status.submitting,.status.queued{color:#aaa}
     @media(max-width:930px){main{grid-template-columns:1fr}.stage-wrap{padding:12px}aside{border-left:0;border-top:1px solid var(--line)}.prompt{min-height:130px}.history{max-height:46vh}}@media(max-width:620px){header{gap:7px;padding:0 9px}.brand{display:none}.switch a{padding:6px 8px;font-size:10px}.chip{display:none}.close{padding:6px 9px}.stage-actions{padding:0 2px}.composer{padding:12px}}
   </style>
@@ -42,10 +52,13 @@
       <div class="composer">
         <div class="section-title">H3 MAX BETA</div>
         <div class="gate" id="gate"></div>
-        <div class="modes" id="modes"><button type="button" data-mode="text" class="on">テキスト</button><button type="button" data-mode="image">画像 + テキスト</button></div>
+        <div class="modes" id="modes"><button type="button" data-mode="text" class="on">テキスト</button><button type="button" data-mode="image">画像から</button><button type="button" data-mode="reference">リファレンス</button><button type="button" data-mode="storyboard">絵コンテ</button></div>
         <div class="drop" id="drop">画像をドラッグ＆ドロップ、またはクリックして選択<br>JPEG / PNG / WebP・20MBまで</div>
         <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
         <div class="thumb" id="thumb"><img id="thumbImg" alt=""><span class="name" id="thumbName"></span><button id="thumbRemove" type="button">削除</button></div>
+        <div class="refnote" id="refNote" hidden>画像の並び順をシーンの流れとして使用します。</div>
+        <div class="refgrid" id="refGrid" hidden></div>
+        <input id="refFileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
         <textarea class="prompt" id="prompt" maxlength="2000" placeholder="生成したい動画を詳しく入力…\n例：夕暮れの海辺を走る白い馬。カメラは低い位置から横移動で追いかける。"></textarea>
         <div class="meta-row"><div class="price" id="priceText">15秒 / 768p / 料金を確認中…</div><span class="price-help"><button class="q" id="priceHelpBtn" type="button" aria-expanded="false">?</button><span class="help" id="priceHelp" hidden>9/14まではBETAセール価格、9/15から通常価格です。生成開始時に表示中のクレジット数を消費します。</span></span></div>
         <button class="send" id="send" type="button" disabled>生成する</button>
@@ -65,9 +78,49 @@
     'use strict';
     var $=function(id){return document.getElementById(id)};
     var client=typeof window.flowvidSupabaseClient==='function'?window.flowvidSupabaseClient():null;
-    var state={mode:'text',uploadId:null,uploadBusy:false,thumbUrl:null,activeJobId:null,statusTimer:null,feedTimer:null,sending:false,planAllowed:true,hasEnough:true,balance:null,creditCost:null,currentVideoUrl:null,currentJobId:null};
+    var state={mode:'text',uploadId:null,uploadBusy:false,thumbUrl:null,activeJobId:null,statusTimer:null,feedTimer:null,sending:false,planAllowed:true,hasEnough:true,balance:null,creditCost:null,currentVideoUrl:null,currentJobId:null,refImages:[]};
     var IMAGE_MIME=['image/jpeg','image/png','image/webp'];
     var IMAGE_MAX=20*1024*1024;
+    var REF_MAX_IMAGES=9;
+    var REF_LONG_EDGE=1024;
+
+    function isMultiMode(){return state.mode==='reference'||state.mode==='storyboard'}
+
+    // Resize (never re-encode-after-upload — the file returned here is
+    // exactly what gets uploaded, moderated, and sent to fal). Long edge is
+    // capped at REF_LONG_EDGE; the original mime type is preserved (JPEG/PNG/
+    // WebP) so PNG/WebP transparency is not forced into JPEG. If the image is
+    // already within the cap, or canvas re-encoding is unavailable/fails, the
+    // ORIGINAL file is returned unchanged rather than risking a corrupted
+    // re-encode.
+    function resizeReferenceImage(file){
+      return new Promise(function(resolve){
+        try{
+          var img=new Image();
+          var url=URL.createObjectURL(file);
+          img.onload=function(){
+            try{
+              URL.revokeObjectURL(url);
+              var w=img.naturalWidth,h=img.naturalHeight;
+              if(!w||!h||Math.max(w,h)<=REF_LONG_EDGE){resolve(file);return}
+              var scale=REF_LONG_EDGE/Math.max(w,h);
+              var cw=Math.max(1,Math.round(w*scale)),ch=Math.max(1,Math.round(h*scale));
+              var canvas=document.createElement('canvas');
+              canvas.width=cw;canvas.height=ch;
+              var ctx=canvas.getContext('2d');
+              if(!ctx){resolve(file);return}
+              ctx.drawImage(img,0,0,cw,ch);
+              canvas.toBlob(function(blob){
+                if(!blob){resolve(file);return}
+                resolve(new File([blob],file.name||'image',{type:file.type||blob.type}));
+              },file.type||'image/jpeg',0.92);
+            }catch(e){resolve(file)}
+          };
+          img.onerror=function(){try{URL.revokeObjectURL(url)}catch(e){}resolve(file)};
+          img.src=url;
+        }catch(e){resolve(file)}
+      });
+    }
 
     function uuid(){
       if(window.crypto&&crypto.randomUUID)return crypto.randomUUID();
@@ -79,20 +132,131 @@
     function notice(text,bad){var n=$('notice');n.textContent=text||'';n.className='notice'+(bad?' bad':'')}
     function setGenerating(on,text){$('generating').classList.toggle('show',!!on);if(text)$('genText').textContent=text}
     function setStage(url,jobId){state.currentVideoUrl=url||null;state.currentJobId=jobId||null;var v=$('stageVideo');if(!url){try{v.pause()}catch(e){}v.removeAttribute('src');v.hidden=true;$('stageEmpty').style.display='grid';$('saveCurrent').disabled=true;return}if(v.src!==url)v.src=url;v.hidden=false;$('stageEmpty').style.display='none';$('saveCurrent').disabled=false;v.load();v.play().catch(function(){})}
-    function refreshSend(){var text=$('prompt').value.trim();var imageReady=state.mode!=='image'||(state.uploadId&&!state.uploadBusy);$('send').disabled=state.sending||!!state.activeJobId||!state.planAllowed||!state.hasEnough||!text||!imageReady}
+    function refreshSend(){
+      var text=$('prompt').value.trim();
+      var imageReady=state.mode!=='image'||(state.uploadId&&!state.uploadBusy);
+      var refReady=!isMultiMode()||(state.refImages.length>=1&&state.refImages.every(function(e){return e&&e.uploadId&&!e.busy}));
+      $('send').disabled=state.sending||!!state.activeJobId||!state.planAllowed||!state.hasEnough||!text||!imageReady||!refReady;
+    }
     function applyEligibility(e){if(!e)return;state.planAllowed=e.planAllowed!==false;state.hasEnough=e.hasEnoughCredits!==false;state.balance=typeof e.balance==='number'?e.balance:null;state.creditCost=typeof e.creditCost==='number'?e.creditCost:state.creditCost;if(state.balance!=null)$('balanceChip').innerHTML='残高 <b>'+state.balance+'</b>';if(state.creditCost)$('priceText').textContent='15秒 / 768p / 1本 '+state.creditCost+' クレジット';var msgs=[];if(!state.planAllowed)msgs.push('H3 Max BETA は Premium 以上の有効なプランで利用できます。');if(state.planAllowed&&state.hasEnough===false)msgs.push('クレジットが不足しています。必要: '+state.creditCost+' / 残高: '+(state.balance==null?'–':state.balance));$('gate').className=msgs.length?'gate show':'gate';$('gate').innerHTML=msgs.join('<br>');refreshSend()}
-    function setMode(mode){state.mode=mode==='image'?'image':'text';Array.prototype.forEach.call($('modes').querySelectorAll('button'),function(b){b.classList.toggle('on',b.dataset.mode===state.mode)});var img=state.mode==='image';$('drop').classList.toggle('show',img&&!state.uploadId);$('rights').hidden=!img;if(!img)clearImage();refreshSend()}
+    function setMode(mode){
+      state.mode=['image','reference','storyboard'].indexOf(mode)>=0?mode:'text';
+      Array.prototype.forEach.call($('modes').querySelectorAll('button'),function(b){b.classList.toggle('on',b.dataset.mode===state.mode)});
+      var img=state.mode==='image';
+      var multi=isMultiMode();
+      $('drop').classList.toggle('show',img&&!state.uploadId);
+      $('refGrid').classList.toggle('show',multi);
+      $('refGrid').hidden=!multi;
+      $('refNote').classList.toggle('show',state.mode==='storyboard');
+      $('refNote').hidden=state.mode!=='storyboard';
+      $('rights').hidden=!(img||multi);
+      if(!img)clearImage();
+      if(!multi)clearReferenceImages();
+      if(multi)renderRefGrid();
+      refreshSend();
+    }
+
+    function clearReferenceImages(){state.refImages=[];renderRefGrid()}
+
+    function renderRefGrid(){
+      var root=$('refGrid');
+      var html='';
+      for(var i=0;i<REF_MAX_IMAGES;i++){
+        var entry=state.refImages[i];
+        if(entry){
+          html+='<div class="refslot filled"><span class="num">Image '+(i+1)+'</span>'+
+            (entry.busy?'<span class="addlabel">アップロード中…</span>':'<img src="'+esc(entry.thumbUrl)+'" alt="">')+
+            '<div class="refop">'+
+            (i>0?'<button type="button" data-ref-up="'+i+'">↑</button>':'')+
+            (i<state.refImages.length-1?'<button type="button" data-ref-down="'+i+'">↓</button>':'')+
+            '<button type="button" data-ref-remove="'+i+'">×</button>'+
+            '</div></div>';
+        }
+      }
+      if(state.refImages.length<REF_MAX_IMAGES){
+        html+='<button type="button" class="refadd-btn" id="refAddBtn">＋ 画像を追加（'+state.refImages.length+'/'+REF_MAX_IMAGES+'枚）</button>';
+      }
+      root.innerHTML=html;
+      var addBtn=$('refAddBtn');
+      if(addBtn)addBtn.addEventListener('click',function(){$('refFileInput').click()});
+      refreshSend();
+    }
+
+    async function addReferenceImages(files){
+      var list=Array.prototype.slice.call(files||[]);
+      for(var i=0;i<list.length;i++){
+        if(state.refImages.length>=REF_MAX_IMAGES){notice('画像は最大'+REF_MAX_IMAGES+'枚までです。',true);break}
+        var file=list[i];
+        if(IMAGE_MIME.indexOf(file.type)<0){notice('JPEG / PNG / WebP の画像を選択してください。',true);continue}
+        if(file.size>IMAGE_MAX){notice('画像は20MB以下にしてください。',true);continue}
+        var slot=state.refImages.length+1;
+        var entry={uploadId:null,thumbUrl:null,busy:true};
+        state.refImages.push(entry);
+        renderRefGrid();
+        try{
+          var resized=await resizeReferenceImage(file);
+          entry.thumbUrl=URL.createObjectURL(resized);
+          var slotData=await api('/api/h3-live/reference-image-upload-url',{method:'POST',body:JSON.stringify({contentType:resized.type||file.type,byteSize:resized.size,slot:slot,filename:file.name||'frame'})});
+          var up=await client.storage.from(slotData.bucket||'h3-max-reference-image-quarantine').uploadToSignedUrl(slotData.path,slotData.token,resized,{contentType:resized.type||file.type});
+          if(up&&up.error)throw up.error;
+          entry.uploadId=slotData.uploadId;
+          entry.busy=false;
+          renderRefGrid();
+        }catch(e){
+          var idx=state.refImages.indexOf(entry);
+          if(idx>=0)state.refImages.splice(idx,1);
+          notice(e.message||'画像アップロードに失敗しました。',true);
+          renderRefGrid();
+        }
+      }
+    }
+
+    function removeReferenceImage(index){
+      var entry=state.refImages[index];
+      if(entry&&entry.thumbUrl){try{URL.revokeObjectURL(entry.thumbUrl)}catch(e){}}
+      state.refImages.splice(index,1);
+      renderRefGrid();
+    }
+
+    function moveReferenceImage(index,delta){
+      var target=index+delta;
+      if(target<0||target>=state.refImages.length)return;
+      var tmp=state.refImages[index];
+      state.refImages[index]=state.refImages[target];
+      state.refImages[target]=tmp;
+      renderRefGrid();
+    }
     function clearImage(){state.uploadId=null;state.uploadBusy=false;if(state.thumbUrl){try{URL.revokeObjectURL(state.thumbUrl)}catch(e){}state.thumbUrl=null}$('thumb').className='thumb';$('thumbImg').removeAttribute('src');$('thumbName').textContent='';$('fileInput').value='';if(state.mode==='image')$('drop').classList.add('show');refreshSend()}
     async function uploadImage(file){if(!file)return;if(IMAGE_MIME.indexOf(file.type)<0){notice('JPEG / PNG / WebP の画像を選択してください。',true);return}if(file.size>IMAGE_MAX){notice('画像は20MB以下にしてください。',true);return}clearImage();state.uploadBusy=true;state.thumbUrl=URL.createObjectURL(file);$('thumbImg').src=state.thumbUrl;$('thumbName').textContent=file.name||'image';$('thumb').className='thumb show';$('drop').classList.remove('show');refreshSend();try{var slot=await api('/api/h3-live/image-upload-url',{method:'POST',body:JSON.stringify({contentType:file.type,byteSize:file.size,filename:file.name||'frame'})});var up=await client.storage.from(slot.bucket||'h3-live-image-quarantine').uploadToSignedUrl(slot.path,slot.token,file,{contentType:file.type});if(up&&up.error)throw up.error;state.uploadId=slot.uploadId;state.uploadBusy=false;notice('画像を追加しました。');refreshSend()}catch(e){clearImage();notice(e.message||'画像アップロードに失敗しました。',true)}}
     function statusLabel(job){var m={queued:'受付',submitting:'送信中',processing:'生成中',completed:'完成',failed:'失敗'};return m[job.status]||job.status}
-    function renderHistory(jobs){var root=$('history');if(!jobs.length){root.innerHTML='<div style="color:#777;font-size:11px">履歴はまだありません。</div>';return}root.innerHTML=jobs.map(function(job){var date=job.createdAt?new Date(job.createdAt).toLocaleString('ja-JP'):'';var video=job.status==='completed'&&job.videoUrl?'<div class="history-video"><video controls playsinline preload="metadata" src="'+esc(job.videoUrl)+'"></video></div>':'<div class="history-video">'+esc(statusLabel(job))+'</div>';var actions=job.videoUrl?'<div class="history-actions"><button type="button" data-save-url="'+esc(job.videoUrl)+'" data-job-id="'+esc(job.id)+'">ファイルに保存</button></div>':'';return'<article class="history-card"><div class="prompt-text">'+esc(job.instruction)+'</div><small>'+esc(date)+' ・ '+esc(job.inputMode==='image'?'画像+テキスト':'テキスト')+' ・ '+esc(job.creditCost)+' credits ・ <span class="status '+esc(job.status)+'">'+esc(statusLabel(job))+'</span>'+(job.refunded?' ・ 返還済み':'')+'</small>'+video+actions+'</article>'}).join('')}
+    function renderHistory(jobs){var root=$('history');if(!jobs.length){root.innerHTML='<div style="color:#777;font-size:11px">履歴はまだありません。</div>';return}root.innerHTML=jobs.map(function(job){var date=job.createdAt?new Date(job.createdAt).toLocaleString('ja-JP'):'';var video=job.status==='completed'&&job.videoUrl?'<div class="history-video"><video controls playsinline preload="metadata" src="'+esc(job.videoUrl)+'"></video></div>':'<div class="history-video">'+esc(statusLabel(job))+'</div>';var actions=job.videoUrl?'<div class="history-actions"><button type="button" data-save-url="'+esc(job.videoUrl)+'" data-job-id="'+esc(job.id)+'">ファイルに保存</button></div>':'';return'<article class="history-card"><div class="prompt-text">'+esc(job.instruction)+'</div><small>'+esc(date)+' ・ '+esc(job.inputMode==='image'?'画像から':job.inputMode==='reference'?'リファレンス':job.inputMode==='storyboard'?'絵コンテ':'テキスト')+' ・ '+esc(job.creditCost)+' credits ・ <span class="status '+esc(job.status)+'">'+esc(statusLabel(job))+'</span>'+(job.refunded?' ・ 返還済み':'')+'</small>'+video+actions+'</article>'}).join('')}
     async function loadHistory(){try{var d=await api('/api/h3-live/jobs?limit=10');renderHistory(d.jobs||[])}catch(e){$('history').textContent='履歴を確認できませんでした。'}}
     async function saveFile(url,jobId,button){if(!url)return;var old=button&&button.textContent;if(button){button.disabled=true;button.textContent='保存中…'}try{var res=await fetch(url,{cache:'no-store'});if(!res.ok)throw new Error('動画ファイルを取得できませんでした。');var blob=await res.blob();if(!blob.size)throw new Error('動画ファイルが空です。');var objectUrl=URL.createObjectURL(blob);var a=document.createElement('a');a.href=objectUrl;a.download='h3-max-'+(jobId||Date.now())+(blob.type&&blob.type.indexOf('mp4')>=0?'.mp4':'.mp4');document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(objectUrl);a.remove()},1500);if(button)button.textContent='保存済み';setTimeout(function(){if(button){button.disabled=false;button.textContent=old}},1500)}catch(e){if(button){button.disabled=false;button.textContent=old}notice(e.message||'保存できませんでした。',true)}}
     function stopStatus(){if(state.statusTimer){clearTimeout(state.statusTimer);state.statusTimer=null}}
     function scheduleStatus(ms){stopStatus();state.statusTimer=setTimeout(pollStatus,Math.max(1200,ms||2000))}
     async function pollStatus(){if(!state.activeJobId)return;var id=state.activeJobId;try{var d=await api('/api/h3-live/status?jobId='+encodeURIComponent(id));var job=d.job;if(!job){scheduleStatus(2500);return}if(['queued','submitting','processing'].indexOf(job.status)>=0){setGenerating(true,job.status==='processing'?'映像を生成しています…':'送信しています…');scheduleStatus(d.nextPollAfterMs||2000);return}state.activeJobId=null;state.sending=false;setGenerating(false);if(job.status==='completed'&&job.videoUrl){setStage(job.videoUrl,job.id);notice('映像が完成しました。')}else if(job.status==='failed'){notice('生成に失敗しました。'+(job.refunded?' クレジットは返還されました。':''),true)}clearImage();await refreshFeed();await loadHistory();refreshSend()}catch(e){scheduleStatus(3000)}}
     async function refreshFeed(){try{var d=await api('/api/h3-live/feed');applyEligibility(d.eligibility);if(!state.activeJobId&&d.activeJob&&['queued','submitting','processing'].indexOf(d.activeJob.status)>=0){state.activeJobId=d.activeJob.id;setGenerating(true,'映像を生成しています…');scheduleStatus(1200)}else if(!state.activeJobId&&d.onAir&&d.onAir.videoUrl&&!state.currentVideoUrl){setStage(d.onAir.videoUrl,d.onAir.id)}}catch(e){if(e.status===503){$('gate').className='gate show';$('gate').textContent='H3 Max BETA は現在利用できません。'} }clearTimeout(state.feedTimer);state.feedTimer=setTimeout(refreshFeed,4000)}
-    async function send(){if(state.sending||state.activeJobId)return;var text=$('prompt').value.trim();if(!text)return;if(state.mode==='image'&&!state.uploadId){notice('先に画像を追加してください。',true);return}state.sending=true;refreshSend();setGenerating(true,'送信しています…');notice('');var idem=uuid();try{var body=state.mode==='image'?{instruction:text,mode:'image',uploadId:state.uploadId}:{instruction:text};var d=await api('/api/h3-live/start',{method:'POST',headers:{'Idempotency-Key':idem},body:JSON.stringify(body)});var job=d.job;if(job&&['queued','submitting','processing'].indexOf(job.status)>=0){state.activeJobId=job.id;$('prompt').value='';clearImage();setGenerating(true,'映像を生成しています…');scheduleStatus(d.nextPollAfterMs||1600)}else if(job&&job.status==='completed'){state.sending=false;setGenerating(false);setStage(job.videoUrl,job.id);$('prompt').value='';clearImage();await loadHistory()}else{state.sending=false;setGenerating(false)}await refreshFeed();refreshSend()}catch(e){state.sending=false;setGenerating(false);notice(e.message||'生成を開始できませんでした。',true);await refreshFeed();refreshSend()}}
+    async function send(){
+      if(state.sending||state.activeJobId)return;
+      var text=$('prompt').value.trim();if(!text)return;
+      if(state.mode==='image'&&!state.uploadId){notice('先に画像を追加してください。',true);return}
+      if(isMultiMode()&&(!state.refImages.length||state.refImages.some(function(e){return!e||!e.uploadId||e.busy}))){notice('先に画像を追加してください。',true);return}
+      state.sending=true;refreshSend();setGenerating(true,'送信しています…');notice('');
+      var idem=uuid();
+      function resetInputs(){$('prompt').value='';clearImage();clearReferenceImages()}
+      try{
+        var body;
+        if(state.mode==='image'){body={instruction:text,mode:'image',uploadId:state.uploadId}}
+        else if(isMultiMode()){body={instruction:text,mode:state.mode,uploadIds:state.refImages.map(function(e){return e.uploadId})}}
+        else{body={instruction:text}}
+        var d=await api('/api/h3-live/start',{method:'POST',headers:{'Idempotency-Key':idem},body:JSON.stringify(body)});
+        var job=d.job;
+        if(job&&['queued','submitting','processing'].indexOf(job.status)>=0){state.activeJobId=job.id;resetInputs();setGenerating(true,'映像を生成しています…');scheduleStatus(d.nextPollAfterMs||1600)}
+        else if(job&&job.status==='completed'){state.sending=false;setGenerating(false);setStage(job.videoUrl,job.id);resetInputs();await loadHistory()}
+        else{state.sending=false;setGenerating(false)}
+        await refreshFeed();refreshSend()
+      }catch(e){state.sending=false;setGenerating(false);notice(e.message||'生成を開始できませんでした。',true);await refreshFeed();refreshSend()}
+    }
 
     $('prompt').addEventListener('input',refreshSend);
     $('modes').addEventListener('click',function(e){var b=e.target.closest('[data-mode]');if(b)setMode(b.dataset.mode)});
@@ -102,6 +266,12 @@
     $('drop').addEventListener('drop',function(e){e.preventDefault();this.classList.remove('drag');var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];if(f)uploadImage(f)});
     $('fileInput').addEventListener('change',function(){var f=this.files&&this.files[0];if(f)uploadImage(f)});
     $('thumbRemove').addEventListener('click',clearImage);
+    $('refFileInput').addEventListener('change',function(){var files=this.files;if(files&&files.length)addReferenceImages(files);this.value=''});
+    $('refGrid').addEventListener('click',function(e){
+      var up=e.target.closest('[data-ref-up]');if(up){moveReferenceImage(Number(up.dataset.refUp),-1);return}
+      var down=e.target.closest('[data-ref-down]');if(down){moveReferenceImage(Number(down.dataset.refDown),1);return}
+      var rm=e.target.closest('[data-ref-remove]');if(rm){removeReferenceImage(Number(rm.dataset.refRemove));return}
+    });
     $('send').addEventListener('click',send);
     $('saveCurrent').addEventListener('click',function(){saveFile(state.currentVideoUrl,state.currentJobId,this)});
     $('historyToggle').addEventListener('click',function(){var open=$('history').hidden;$('history').hidden=!open;this.textContent=open?'履歴を閉じる':'履歴を見る';this.setAttribute('aria-expanded',open?'true':'false');if(open)loadHistory()});

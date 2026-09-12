@@ -134,4 +134,42 @@ async function moderateH3LiveImageInput({ instruction, imageUrl } = {}, options 
   return { ok: true, allow: true };
 }
 
-module.exports = { moderateH3LiveImageInput };
+// Image-only moderation (no instruction/text check at all). Added for H3 Max
+// "reference" / "storyboard" (1-9 images): those modes moderate each image
+// individually via this function, then moderate the shared instruction text
+// ONCE via moderateH3LiveInstruction() (api/_lib/h3-live-moderation.js) after
+// every image has passed — instead of repeating a text check per image the
+// way moderateH3LiveImageInput() above does for the single-image mode.
+// moderateH3LiveImageInput() itself is unchanged; this is a pure addition
+// that reuses the same moderateOne() request helper.
+//
+// Contract:
+//   moderateH3LiveImageOnly({ imageUrl })
+//     -> { ok:true,  allow:true }
+//     -> { ok:true,  allow:false, source:'image', categories:[...] }
+//     -> { ok:false, reason }                       check unavailable
+async function moderateH3LiveImageOnly({ imageUrl } = {}, options = {}) {
+  const apiKey = openaiApiKey();
+  if (!apiKey) return { ok: false, reason: 'missing_api_key' };
+
+  const url = String(imageUrl || '').trim();
+  if (!/^https:\/\//i.test(url)) return { ok: false, reason: 'invalid_image_url' };
+
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs))
+    ? Math.max(1000, Number(options.timeoutMs))
+    : DEFAULT_TIMEOUT_MS;
+
+  const imageResult = await moderateOne(
+    [{ type: 'image_url', image_url: { url } }],
+    apiKey,
+    timeoutMs
+  );
+  if (!imageResult.ok) return { ok: false, reason: `image_${imageResult.reason}` };
+  if (imageResult.flagged) {
+    return { ok: true, allow: false, source: 'image', categories: imageResult.categories };
+  }
+
+  return { ok: true, allow: true };
+}
+
+module.exports = { moderateH3LiveImageInput, moderateH3LiveImageOnly };
