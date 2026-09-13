@@ -65,7 +65,6 @@ const {
   CREDIT_COST,
   STATUS_POLL_MS,
   FAL_MODEL_ID_TEXT,
-  FAL_MODEL_ID_IMAGE,
   FAL_MODEL_ID_REFERENCE,
   REFERENCE_INPUT_MODES,
   REFERENCE_MIN_IMAGES,
@@ -128,7 +127,7 @@ module.exports = async function handler(req, res) {
       endpoint: '/api/h3-live/start',
       method: 'POST',
       note: 'POST only. Authorization: Bearer <supabase-jwt> and Idempotency-Key: <uuid> required.',
-      models: { text: FAL_MODEL_ID_TEXT, image: FAL_MODEL_ID_IMAGE, reference: FAL_MODEL_ID_REFERENCE, storyboard: FAL_MODEL_ID_REFERENCE },
+      models: { text: FAL_MODEL_ID_TEXT, image: FAL_MODEL_ID_REFERENCE, reference: FAL_MODEL_ID_REFERENCE, storyboard: FAL_MODEL_ID_REFERENCE },
       modes: ['text', 'image', 'reference', 'storyboard'],
       fixed: { durationSeconds: 15, resolution: '768p', creditCost: CREDIT_COST }
     });
@@ -768,7 +767,9 @@ module.exports = async function handler(req, res) {
   }
 
   const creditBalance = Number(deduction.new_balance);
-  const providerModelId = mode === 'image' ? FAL_MODEL_ID_IMAGE : FAL_MODEL_ID_TEXT;
+  const providerModelId = mode === 'text'
+    ? FAL_MODEL_ID_TEXT
+    : FAL_MODEL_ID_REFERENCE;
 
   // Move queued -> submitting and record the provider model id.
   await db.from('h3_live_jobs')

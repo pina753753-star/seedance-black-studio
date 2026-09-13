@@ -24,7 +24,6 @@ const {
   RESOLUTION_FAL,
   FAL_QUEUE_BASE_URL,
   FAL_MODEL_ID_TEXT,
-  FAL_MODEL_ID_IMAGE,
   FAL_MODEL_ID_REFERENCE,
   falApiKey,
   isTrustedFalQueueUrl,
@@ -84,7 +83,8 @@ function buildH3MaxInput(instruction) {
 const H3_IMAGE_FIDELITY_MARKER = '[Pina Studio H3 image fidelity requirements]';
 
 const H3_IMAGE_FIDELITY_GUIDANCE = `${H3_IMAGE_FIDELITY_MARKER}
-Use the supplied image as the authoritative visual reference for the subject and the starting frame.
+Image 1 is the authoritative visual reference for the main subject.
+Keep the main subject consistent with Image 1 throughout the entire video.
 Preserve the same character or subject identity throughout the entire video, including the face, facial features, hairstyle, hair color, outfit, costume details, accessories, body proportions, distinctive markings, and overall color palette.
 Do not redesign, replace, restyle, age, de-age, gender-swap, or morph the subject into a different person or character unless the user explicitly requests that transformation.
 Maintain strong temporal consistency of the face, hair, clothing, hands, body, and distinctive visual details across frames.
@@ -101,14 +101,16 @@ function buildH3MaxImagePrompt(instruction) {
   return `${originalPrompt}\n\n${H3_IMAGE_FIDELITY_GUIDANCE}`;
 }
 
-// Build the fal.ai input payload for an image (first frame) + instruction.
-// No aspect_ratio: minimax/h3-max/image-to-video derives the output aspect
-// ratio from the supplied image. imageUrl must be an https URL fal can fetch
-// (api/h3-live/start.js passes a short-lived Supabase signed URL).
+// Build the fal.ai input payload for a single subject reference image +
+// instruction. Sent to the reference-to-video model (FAL_MODEL_ID_REFERENCE)
+// as a single-element reference_image_urls array — NOT image_url/first-frame
+// — so the model treats the supplied image as a subject/style reference
+// rather than a literal starting frame. imageUrl must be an https URL fal
+// can fetch (api/h3-live/start.js passes a short-lived Supabase signed URL).
 function buildH3MaxImageInput(instruction, imageUrl) {
   return {
     prompt: buildH3MaxImagePrompt(instruction),
-    image_url: String(imageUrl || '').trim(),
+    reference_image_urls: [String(imageUrl || '').trim()],
     duration: DURATION_SECONDS,
     resolution: RESOLUTION_FAL,
     enable_safety_checker: true,
@@ -234,14 +236,16 @@ async function submitTextJob({ instruction }) {
   });
 }
 
-// Submit an image (first frame) + instruction -> video generation.
+// Submit a single subject reference image + instruction -> video generation.
+// Routed to the reference-to-video model so the supplied image is treated as
+// a subject reference (identity to keep), not a literal first frame.
 async function submitImageJob({ instruction, imageUrl }) {
   const url = String(imageUrl || '').trim();
   if (!/^https:\/\//i.test(url)) {
     return { ok: false, category: 'invalid_input', httpStatus: 0, detail: 'missing or non-https image_url' };
   }
   return submitToFalQueue({
-    modelId: FAL_MODEL_ID_IMAGE,
+    modelId: FAL_MODEL_ID_REFERENCE,
     input: buildH3MaxImageInput(instruction, url)
   });
 }
