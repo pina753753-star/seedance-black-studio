@@ -64,6 +64,7 @@ function countingResolveDecision(result) {
   let calls = 0;
   const fn = async (prompt, moderation, options) => {
     calls += 1;
+    fn.lastPrompt = prompt;
     fn.lastModeration = moderation;
     return result;
   };
@@ -257,6 +258,10 @@ test('15. reference/storyboard image-only: violence-only時だけsecondaryへ進
   assert.equal(resolveDecision.callCount(), 1);
   // instruction is passed through as the `prompt` arg to resolveDecision,
   // and the image URL context comes from flaggedImageUrls/reviewImageUrls.
+  assert.equal(
+    resolveDecision.lastPrompt,
+    '架空アクションの指示'
+  );
   assert.deepEqual(resolveDecision.lastModeration.flaggedImageUrls, [IMAGE_URL]);
   assert.deepEqual(resolveDecision.lastModeration.reviewImageUrls, [IMAGE_URL]);
   assert.deepEqual(resolveDecision.lastModeration.categoryAppliedInputTypes, { violence: ['image'] });
