@@ -8,10 +8,20 @@ const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'h3-max-beta.html'), 'utf8');
 const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
 
-test('H3 Max: BETA表記を出しチャットUI/PREVIEW表記を使わない', () => {
-  assert.match(html, /H3 MAX <span class="beta">BETA<\/span>/);
-  assert.match(html, />H3 Max BETA<\/a>/);
-  assert.match(html, />H3 Max Live BETA<\/a>/);
+test('H3 Max: ユーザー向け表示にBETA表記を出さず、チャットUI/PREVIEW表記も使わない', () => {
+  assert.match(html, /<title>H3 Max \| Pina Studio<\/title>/);
+  assert.match(html, /<span class="brand">H3 MAX<\/span>/);
+  assert.match(html, />H3 Max<\/a>/);
+  assert.match(html, />H3 Max Live<\/a>/);
+  assert.match(html, /<div class="empty" id="stageEmpty"><b>H3 MAX<\/b>/);
+  assert.match(html, /<div class="section-title">H3 MAX<\/div>/);
+  assert.doesNotMatch(html, /BETAセール価格/);
+  assert.match(html, /9\/14まではセール価格、9\/15から通常価格です。/);
+  // ファイル名(h3-max-beta.html)自体の "beta" 表記は対象外。ユーザー向け表示に大文字の
+  // BETA が残っていないことだけを確認する。
+  const bodyMatch = html.match(/<body>[\s\S]*<\/body>/);
+  assert.ok(bodyMatch, 'body content not found');
+  assert.doesNotMatch(bodyMatch[0], /BETA/);
   assert.doesNotMatch(html, /生成チャット/);
   assert.doesNotMatch(html, />PREVIEW</);
 });

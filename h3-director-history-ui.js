@@ -126,7 +126,6 @@
       '.h3-price-help-panel p{margin:0 0 4px}',
       '.h3-price-help-panel p:last-child{margin-bottom:0;color:#aebcff}',
       '.h3-current-price{color:#fff!important;font-weight:900}',
-      '.h3-beta-badge{display:inline-flex;align-items:center;margin-left:7px;padding:3px 7px;border:1px solid rgba(255,255,255,.2);border-radius:999px;font-size:9px;font-style:normal;letter-spacing:.12em;color:#fff;background:rgba(255,255,255,.08);vertical-align:middle}',
       '.composer>.footnote.h3-price-footnote-hidden{display:none!important}',
       '@media(max-width:900px){#historyPanel.history{max-height:min(48vh,460px)}}',
       '@media(max-width:520px){#historyPanel.history{max-height:46vh}#history .history-item{padding:9px}#history .h3-history-video-frame.portrait{max-height:280px;min-width:158px}.h3-price-help-panel{right:-4px}}'
@@ -136,16 +135,9 @@
 
   function installBetaLabels(){
     installHistoryStyle();
-    var brand=document.querySelector('header .brand');
-    if(brand&&!brand.querySelector('.h3-beta-badge')){
-      var badge=document.createElement('em');
-      badge.className='h3-beta-badge';
-      badge.textContent='BETA';
-      brand.appendChild(badge);
-    }
     var links=document.querySelectorAll('.model-switch a');
-    if(links[0])links[0].textContent='H3 Max BETA';
-    if(links[1])links[1].textContent='H3 Max Live BETA';
+    if(links[0])links[0].textContent='H3 Max';
+    if(links[1])links[1].textContent='H3 Max Live';
   }
 
   function installPricingHelp(){
@@ -162,7 +154,7 @@
 
       var help=document.createElement('span');
       help.className='h3-price-help';
-      help.innerHTML='<button type="button" class="h3-price-help-button" aria-label="料金について" aria-expanded="false">?</button><div class="h3-price-help-panel" role="dialog" aria-label="H3 Max Liveの料金説明" hidden><b>H3 Max Live BETAの料金</b><p class="h3-current-price">現在の料金を確認中…</p><p>クレジットは「ライブ生成を開始」した時にだけ消費します。</p><p>ライブ中の追加指示では、追加クレジットは消費しません。</p><p>途中でライブを終了しても、消費したクレジットは返還されません。</p><p>9/14まではBETAセール価格、9/15から通常価格です。</p></div>';
+      help.innerHTML='<button type="button" class="h3-price-help-button" aria-label="料金について" aria-expanded="false">?</button><div class="h3-price-help-panel" role="dialog" aria-label="H3 Max Liveの料金説明" hidden><b>H3 Max Liveの料金</b><p class="h3-current-price">現在の料金を確認中…</p><p>クレジットは「ライブ生成を開始」した時にだけ消費します。</p><p>ライブ中の追加指示では、追加クレジットは消費しません。</p><p>途中でライブを終了しても、消費したクレジットは返還されません。</p><p>9/14まではセール価格、9/15から通常価格です。</p></div>';
       text.appendChild(help);
 
       var button=help.querySelector('.h3-price-help-button');
