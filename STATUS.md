@@ -1,6 +1,85 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-09-08)
+# FlowVid Studio 完成までの全体像(最終更新: 2026-09-14)
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
+
+## 2026年9月13日〜14日 作業ログ
+
+### H3 Max / H3 Max Live 改善
+
+- PR #234:
+  - H3 MaxのBETA表示をメニュー内だけに整理。
+  - mainへマージ済み。
+  - merge commit: `07e054475b6d88ed3848d906a5f8575c2b141cf6`
+- PR #235:
+  - H3のモデレーションで、一般的なアニメ戦闘表現が過剰に弾かれる問題を調整。
+  - 未成年に見えるキャラクターの性的描写、実在人物へのなりすまし、児童の性的搾取につながる表現の禁止は維持。
+  - mainへマージ済み。
+  - merge commit: `f70892d76f45a213be5480ed134fa6ed34ca7d22`
+- PR #236:
+  - H3の画像入力時のプロンプト忠実度を改善。
+  - mainへマージ済み。
+  - merge commit: `7b9600fc3aba220d9b7246e4283fe0f4966679bc`
+- PR #237:
+  - H3 Maxの画像1枚入力を reference-to-video 経路へ変更し、参照画像の被写体維持を改善。
+  - mainへマージ済み。
+  - merge commit: `fb673436582057154497786382e0a7a6e490b1b9`
+- PR #238:
+  - H3 Maxの動きの強さと、単一画像入力時の被写体同一性を改善。
+  - H3 Max LiveおよびSeedanceの生成ロジックには変更なし。
+  - mainへマージ済み。
+  - merge commit: `5ab88820c71ee3147812bd6c92c4606d647bc1af`
+- PR #238反映時点でVercel Production deployment READYを確認。
+- H3関連の実生成テストは、追加のcredits消費を避けるため実施していない。
+
+### Seedance 生成失敗カードUI改善
+
+- 本番でSeedance 2.0 / image_to_video生成がprovider側の音声著作権制限でfailedになった際、生成中カードが画面から消え、ユーザーが失敗理由や返金状態を確認しづらい問題を確認。
+- 該当タスクは245クレジット消費後、failed確定と同時に245クレジット全額返金されており、課金・返金処理自体は正常だった。
+- PR #239でUIのみ修正。
+  - failedカードを即時削除せず3分間保持。
+  - ユーザーが「閉じる」ボタンで手動削除可能。
+  - 手動削除時は3分自動削除timerも解除。
+  - 同一taskIdに削除timerが重複登録されないようにした。
+  - queued / processing / completed の既存挙動は変更していない。
+- 変更ファイル:
+  - `generate-prod.html`
+  - `tests/pending-tasks-failed-card-retention.test.js`
+- テスト:
+  - failedカード保持テスト 15/15 成功
+  - 関連回帰 60/60 成功
+  - `git diff --check` clean
+- Seedance生成API、provider routing、OpenRouter / WaveSpeed、credits控除、refund処理、Supabase / DB / Storage、H3 Max / H3 Max Liveは変更していない。
+- PR #239:
+  - mainへマージ済み。
+  - merge commit: `ee603998a847d4dae8fa398c3feaad3dc539f6ba`
+
+### 調査で確認したSeedanceの品質差
+
+- 2026-09-13に品質比較を行い、今回低品質に見えた生成は以下だった。
+  - model: `bytedance/seedance-2.0`
+  - mode: `image_to_video`
+  - provider: `openrouter`
+  - resolution: `720p`
+  - duration: 15秒
+- 過去に高品質だった比較対象は以下だった。
+  - model: `bytedance/seedance-2.5`
+  - mode: `reference_to_video`
+  - provider: `wavespeed`
+  - resolution: `720p`
+  - duration: 30秒
+- 同じSeedanceの同条件で急に品質低下したとは断定できず、モデル・provider・mode・durationが異なるため、条件を揃えた比較が必要。
+- この比較のための追加実生成はcredits消費を伴うため実施していない。
+
+### 未実施・残確認
+
+- PR #239 merge後のProduction deployment完了確認。
+- `pinastudio.jp` で、生成失敗時に
+  - 失敗理由が表示される
+  - 返金済み表示が残る
+  - 3分後に自動で消える
+  - 「閉じる」で即時削除できる
+  ことの本番画面確認。
+- H3 / Seedanceの品質比較を行う場合は、モデル・provider・mode・durationを揃え、実生成前にcredits消費の承認を得る。
 
 ## 2026年9月8日 作業ログ(PR #225でmain反映済み)
 
