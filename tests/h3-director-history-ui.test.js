@@ -43,12 +43,14 @@ test('料金UI: 表面の固定クレジット表記を料金?に置き換える
   assert.match(ui, /aria-expanded="false"/);
 });
 
-test('料金UI: ?を押した時だけBETA料金と追加指示を説明する', () => {
-  assert.match(ui, /H3 Max Live BETAの料金/);
+test('料金UI: ?を押した時だけ料金と追加指示を説明する', () => {
+  assert.match(ui, /H3 Max Liveの料金/);
+  assert.doesNotMatch(ui, /H3 Max Live BETAの料金/);
   assert.match(ui, /クレジットは「ライブ生成を開始」した時にだけ消費します。/);
   assert.match(ui, /ライブ中の追加指示では、追加クレジットは消費しません。/);
   assert.match(ui, /途中でライブを終了しても、消費したクレジットは返還されません。/);
-  assert.match(ui, /9\/14まではBETAセール価格、9\/15から通常価格です。/);
+  assert.match(ui, /9\/14まではセール価格、9\/15から通常価格です。/);
+  assert.doesNotMatch(ui, /BETAセール価格/);
   assert.match(ui, /panel\.hidden=!willOpen;/);
 });
 
@@ -66,10 +68,13 @@ test('料金UI: sale中に旧440クレジットUIゲートだけを解除しserv
   assert.doesNotMatch(ui, /start-session|approve-prompt/);
 });
 
-test('BETA UI: H3 MaxとH3 Max Liveのモデル切替にBETA表記を出す', () => {
-  assert.match(ui, /links\[0\]\.textContent='H3 Max BETA'/);
-  assert.match(ui, /links\[1\]\.textContent='H3 Max Live BETA'/);
-  assert.match(ui, /badge\.textContent='BETA'/);
+test('モデル切替UI: H3 MaxとH3 Max Liveの表記にBETAを出さない', () => {
+  assert.match(ui, /links\[0\]\.textContent='H3 Max'/);
+  assert.match(ui, /links\[1\]\.textContent='H3 Max Live'/);
+  assert.doesNotMatch(ui, /'H3 Max BETA'/);
+  assert.doesNotMatch(ui, /'H3 Max Live BETA'/);
+  assert.doesNotMatch(ui, /\.h3-beta-badge/);
+  assert.doesNotMatch(ui, /badge\.textContent='BETA'/);
 });
 
 test('料金UI: 既存の長いfootnoteを画面から隠して履歴を上へ詰める', () => {
