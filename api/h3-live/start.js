@@ -306,8 +306,10 @@ module.exports = async function handler(req, res) {
       }
       imageContentType = validated.contentType;
 
-      // Always re-moderate the frame + instruction (any flagged category
-      // blocks). Running it on every attempt closes the window between a prior
+      // Always re-moderate the frame + instruction (violence-only flags get a
+      // secondary fictional-action review; any other flagged category still
+      // blocks immediately). Running it on every attempt closes the window
+      // between a prior
       // "passed" verdict and this reservation; a retry is rare so the extra
       // moderation call is negligible. Nothing has been charged at this point
       // (moderation precedes reserve for a fresh job, and an uncharged replay
@@ -332,12 +334,17 @@ module.exports = async function handler(req, res) {
           '[h3-live/start] image input blocked; source:', imageModeration.source,
           'categories:', imageModeration.categories || []
         );
-        await markModeration(db, imageUploadRow.id, 'blocked', {
-          categories: imageModeration.categories || [],
-          byteSize: validated.buffer.length,
-          contentType: imageContentType
-        });
-        await deleteUploadObject(db, imageUploadRow);
+        // Only an image-side block invalidates the uploaded image itself; a
+        // text-side block leaves the image row/object untouched so the user
+        // can fix just the instruction and resubmit with the same image.
+        if (imageModeration.source === 'image') {
+          await markModeration(db, imageUploadRow.id, 'blocked', {
+            categories: imageModeration.categories || [],
+            byteSize: validated.buffer.length,
+            contentType: imageContentType
+          });
+          await deleteUploadObject(db, imageUploadRow);
+        }
         try {
           await db.from('moderation_blocks').insert({
             user_id: user.id,
@@ -461,7 +468,8 @@ module.exports = async function handler(req, res) {
         }
 
         const imageModeration = await moderateH3LiveImageOnly({
-          imageUrl: signed.signedUrl
+          imageUrl: signed.signedUrl,
+          instruction
         });
 
         if (!imageModeration.ok) {
@@ -524,7 +532,8 @@ module.exports = async function handler(req, res) {
       }
     }
   } else {
-    // Text mode: instruction-only moderation (any flagged category blocks).
+    // Text mode: instruction-only moderation (violence-only flags get a
+    // secondary fictional-action review; any other flagged category blocks).
     const moderation = await moderateH3LiveInstruction(instruction);
     if (!moderation.ok) {
       console.error('[h3-live/start] moderation unavailable:', moderation.reason);
