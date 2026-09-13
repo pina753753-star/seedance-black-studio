@@ -66,12 +66,35 @@ async function falFetch(url, init) {
   }
 }
 
+const H3_MOTION_MARKER = '[Pina Studio H3 motion requirements]';
+
+const H3_MOTION_GUIDANCE = `${H3_MOTION_MARKER}
+Follow the user's requested motion speed, action timing, pauses, and slow-motion instructions literally.
+For motion whose speed is not specified, use natural real-time speed rather than slow motion.
+Do not introduce slow motion, floaty movement, graceful lingering, or pose holds unless the user explicitly requests them.
+When the user requests fast, rapid, energetic, sharp, or high-speed action, execute it at clearly fast real-time speed with sharp acceleration and immediate follow-through.
+Do not smooth fast action into slow, balletic, or pose-heavy movement.
+If the user requests slow motion only for a specific moment, limit slow motion to that moment and immediately return to the requested normal or fast speed afterward.
+Do not accelerate movement that the user explicitly asks to be slow.
+Keep consecutive actions continuous and do not insert unrequested pauses between them.
+Prioritize the user's requested action timing over generic cinematic smoothness.`;
+
+function buildH3MaxMotionPrompt(instruction) {
+  const originalPrompt = String(instruction || '').trim();
+
+  if (!originalPrompt || originalPrompt.includes(H3_MOTION_MARKER)) {
+    return originalPrompt;
+  }
+
+  return `${originalPrompt}\n\n${H3_MOTION_GUIDANCE}`;
+}
+
 // Build the fal.ai input payload for a text instruction. The 15s duration is
 // referenced here (and in buildH3MaxImageInput) and nowhere else. <-- SINGLE
 // POINT OF CHANGE if fal.ai rejects 15s for minimax/h3-max.
 function buildH3MaxInput(instruction) {
   return {
-    prompt: String(instruction || '').trim(),
+    prompt: buildH3MaxMotionPrompt(instruction),
     duration: DURATION_SECONDS,
     resolution: RESOLUTION_FAL,
     aspect_ratio: ASPECT_RATIO,
@@ -85,6 +108,9 @@ const H3_IMAGE_FIDELITY_MARKER = '[Pina Studio H3 image fidelity requirements]';
 const H3_IMAGE_FIDELITY_GUIDANCE = `${H3_IMAGE_FIDELITY_MARKER}
 Image 1 is the authoritative visual reference for the main subject.
 Keep the main subject consistent with Image 1 throughout the entire video.
+Treat Image 1 as a subject-identity reference, not merely as a style reference.
+The generated main subject must remain recognizably the same individual or character as Image 1 across all shots and camera angles.
+When Image 1 does not show the full body or every angle, infer unseen details conservatively while preserving all visible identity-defining features and costume design.
 Preserve the same character or subject identity throughout the entire video, including the face, facial features, hairstyle, hair color, outfit, costume details, accessories, body proportions, distinctive markings, and overall color palette.
 Do not redesign, replace, restyle, age, de-age, gender-swap, or morph the subject into a different person or character unless the user explicitly requests that transformation.
 Maintain strong temporal consistency of the face, hair, clothing, hands, body, and distinctive visual details across frames.
@@ -95,10 +121,18 @@ Preserve the supplied subject's identity while fully applying any scene, lightin
 
 function buildH3MaxImagePrompt(instruction) {
   const originalPrompt = String(instruction || '').trim();
-  if (!originalPrompt || originalPrompt.includes(H3_IMAGE_FIDELITY_MARKER)) {
+
+  if (!originalPrompt) {
     return originalPrompt;
   }
-  return `${originalPrompt}\n\n${H3_IMAGE_FIDELITY_GUIDANCE}`;
+
+  const motionPrompt = buildH3MaxMotionPrompt(originalPrompt);
+
+  if (motionPrompt.includes(H3_IMAGE_FIDELITY_MARKER)) {
+    return motionPrompt;
+  }
+
+  return `${motionPrompt}\n\n${H3_IMAGE_FIDELITY_GUIDANCE}`;
 }
 
 // Build the fal.ai input payload for a single subject reference image +
@@ -125,7 +159,7 @@ function buildH3MaxImageInput(instruction, imageUrl) {
 // fal.ai docs before real use.
 function buildH3MaxReferenceInput(instruction, imageUrls) {
   return {
-    prompt: String(instruction || '').trim(),
+    prompt: buildH3MaxMotionPrompt(instruction),
     reference_image_urls: (Array.isArray(imageUrls) ? imageUrls : []).map((u) => String(u || '').trim()),
     duration: DURATION_SECONDS,
     resolution: RESOLUTION_FAL,
@@ -414,5 +448,8 @@ module.exports._test = {
   buildH3MaxImagePrompt,
   buildH3MaxImageInput,
   H3_IMAGE_FIDELITY_MARKER,
-  H3_IMAGE_FIDELITY_GUIDANCE
+  H3_IMAGE_FIDELITY_GUIDANCE,
+  buildH3MaxMotionPrompt,
+  H3_MOTION_MARKER,
+  H3_MOTION_GUIDANCE
 };
