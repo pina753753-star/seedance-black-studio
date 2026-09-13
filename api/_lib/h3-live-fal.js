@@ -81,13 +81,33 @@ function buildH3MaxInput(instruction) {
   };
 }
 
+const H3_IMAGE_FIDELITY_MARKER = '[Pina Studio H3 image fidelity requirements]';
+
+const H3_IMAGE_FIDELITY_GUIDANCE = `${H3_IMAGE_FIDELITY_MARKER}
+Use the supplied image as the authoritative visual reference for the subject and the starting frame.
+Preserve the same character or subject identity throughout the entire video, including the face, facial features, hairstyle, hair color, outfit, costume details, accessories, body proportions, distinctive markings, and overall color palette.
+Do not redesign, replace, restyle, age, de-age, gender-swap, or morph the subject into a different person or character unless the user explicitly requests that transformation.
+Maintain strong temporal consistency of the face, hair, clothing, hands, body, and distinctive visual details across frames.
+Follow the user's requested action, motion, camera direction, environment, and pacing as literally as possible.
+Preserve the user's requested motion speed and intensity. When the user requests energetic action such as fighting, dancing, running, dodging, spinning, weapon action, or rapid movement, do not reinterpret it as slow motion, a static pose, or a gentle performance unless the user explicitly asks for slow or restrained movement.
+Do not replace the user's requested action with unrelated cinematic movement.
+Preserve the supplied subject's identity while fully applying any scene, lighting, camera, environment, or background changes explicitly requested by the user. Do not alter the subject's identity or appearance merely to satisfy those scene changes.`;
+
+function buildH3MaxImagePrompt(instruction) {
+  const originalPrompt = String(instruction || '').trim();
+  if (!originalPrompt || originalPrompt.includes(H3_IMAGE_FIDELITY_MARKER)) {
+    return originalPrompt;
+  }
+  return `${originalPrompt}\n\n${H3_IMAGE_FIDELITY_GUIDANCE}`;
+}
+
 // Build the fal.ai input payload for an image (first frame) + instruction.
 // No aspect_ratio: minimax/h3-max/image-to-video derives the output aspect
 // ratio from the supplied image. imageUrl must be an https URL fal can fetch
 // (api/h3-live/start.js passes a short-lived Supabase signed URL).
 function buildH3MaxImageInput(instruction, imageUrl) {
   return {
-    prompt: String(instruction || '').trim(),
+    prompt: buildH3MaxImagePrompt(instruction),
     image_url: String(imageUrl || '').trim(),
     duration: DURATION_SECONDS,
     resolution: RESOLUTION_FAL,
@@ -383,4 +403,12 @@ module.exports = {
     extractVideoUrl,
     isAuthLikeFailure
   }
+};
+
+module.exports._test = {
+  ...(module.exports._test || {}),
+  buildH3MaxImagePrompt,
+  buildH3MaxImageInput,
+  H3_IMAGE_FIDELITY_MARKER,
+  H3_IMAGE_FIDELITY_GUIDANCE
 };
