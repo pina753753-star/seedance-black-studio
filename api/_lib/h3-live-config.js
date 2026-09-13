@@ -119,8 +119,10 @@ function requireProviderConfig(mode = 'text') {
   const missing = [];
   if (!falApiKey()) missing.push('FAL_KEY');
   if (!FAL_MODEL_ID_TEXT) missing.push('FAL_H3_MAX_TEXT_MODEL_ID');
-  if (mode === 'image' && !FAL_MODEL_ID_IMAGE) missing.push('FAL_H3_MAX_IMAGE_MODEL_ID');
-  if ((mode === 'reference' || mode === 'storyboard') && !FAL_MODEL_ID_REFERENCE) {
+  if (
+    (mode === 'image' || mode === 'reference' || mode === 'storyboard') &&
+    !FAL_MODEL_ID_REFERENCE
+  ) {
     missing.push('FAL_H3_MAX_REFERENCE_MODEL_ID');
   }
   if (!/^https:\/\/[a-z0-9.-]+$/i.test(FAL_QUEUE_BASE_URL)) missing.push('FAL_QUEUE_BASE_URL');

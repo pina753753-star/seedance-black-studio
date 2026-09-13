@@ -32,6 +32,8 @@ test('H3 image prompt explicitly preserves subject identity and appearance', () 
   assert.match(built, /color palette/i);
   assert.match(built, /Do not redesign/i);
   assert.match(built, /different person or character/i);
+  assert.match(built, /Image 1 is the authoritative visual reference for the main subject/i);
+  assert.match(built, /Keep the main subject consistent with Image 1 throughout the entire video/i);
 });
 
 test('H3 image prompt explicitly prioritizes requested action and motion speed', () => {
@@ -63,7 +65,8 @@ test('H3 image input keeps existing provider parameters unchanged', () => {
     imageUrl
   );
 
-  assert.equal(input.image_url, imageUrl);
+  assert.deepEqual(input.reference_image_urls, [imageUrl]);
+  assert.equal(Object.prototype.hasOwnProperty.call(input, 'image_url'), false);
   assert.equal(input.duration, 15);
   assert.equal(input.resolution, '768P');
   assert.equal(input.enable_safety_checker, true);
@@ -107,5 +110,65 @@ test('H3 text/reference/storyboard builders are not modified by the image fideli
   assert.match(
     src,
     /function buildH3MaxStoryboardInput\(instruction, imageUrls\)/
+  );
+});
+
+test('H3 single-image submission uses the reference-to-video model', () => {
+  const fs = require('fs');
+  const path = require('path');
+
+  const falSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'api', '_lib', 'h3-live-fal.js'),
+    'utf8'
+  );
+
+  assert.match(
+    falSrc,
+    /async function submitImageJob[\s\S]*?modelId:\s*FAL_MODEL_ID_REFERENCE/
+  );
+
+  assert.doesNotMatch(
+    falSrc,
+    /async function submitImageJob[\s\S]*?modelId:\s*FAL_MODEL_ID_IMAGE/
+  );
+});
+
+test('H3 provider model metadata matches actual routing', () => {
+  const fs = require('fs');
+  const path = require('path');
+
+  const startSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'api', 'h3-live', 'start.js'),
+    'utf8'
+  );
+
+  assert.match(
+    startSrc,
+    /const providerModelId = mode === 'text'[\s\S]*?\?\s*FAL_MODEL_ID_TEXT[\s\S]*?:\s*FAL_MODEL_ID_REFERENCE/
+  );
+
+  assert.match(
+    startSrc,
+    /models:\s*\{\s*text:\s*FAL_MODEL_ID_TEXT,\s*image:\s*FAL_MODEL_ID_REFERENCE,/
+  );
+
+  assert.doesNotMatch(
+    startSrc,
+    /models:\s*\{\s*text:\s*FAL_MODEL_ID_TEXT,\s*image:\s*FAL_MODEL_ID_IMAGE,/
+  );
+});
+
+test('H3 image mode requires the reference model configuration', () => {
+  const fs = require('fs');
+  const path = require('path');
+
+  const configSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'api', '_lib', 'h3-live-config.js'),
+    'utf8'
+  );
+
+  assert.match(
+    configSrc,
+    /mode === 'image'[\s\S]*?FAL_MODEL_ID_REFERENCE/
   );
 });
