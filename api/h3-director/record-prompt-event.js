@@ -65,4 +65,3 @@ module.exports = async function handler(req, res) {
     currentStatus: result?.current_status || null
   });
 };
-
