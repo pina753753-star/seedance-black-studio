@@ -77,7 +77,8 @@ Do not smooth fast action into slow, balletic, or pose-heavy movement.
 If the user requests slow motion only for a specific moment, limit slow motion to that moment and immediately return to the requested normal or fast speed afterward.
 Do not accelerate movement that the user explicitly asks to be slow.
 Keep consecutive actions continuous and do not insert unrequested pauses between them.
-Prioritize the user's requested action timing over generic cinematic smoothness.`;
+Prioritize the user's requested action timing over generic cinematic smoothness.
+Do not add music, background music, score, or soundtrack that the user did not explicitly request. Preserve any requested dialogue or sound effects.`;
 
 function buildH3MaxMotionPrompt(instruction) {
   const originalPrompt = String(instruction || '').trim();
@@ -117,7 +118,8 @@ Maintain strong temporal consistency of the face, hair, clothing, hands, body, a
 Follow the user's requested action, motion, camera direction, environment, and pacing as literally as possible.
 Preserve the user's requested motion speed and intensity. When the user requests energetic action such as fighting, dancing, running, dodging, spinning, weapon action, or rapid movement, do not reinterpret it as slow motion, a static pose, or a gentle performance unless the user explicitly asks for slow or restrained movement.
 Do not replace the user's requested action with unrelated cinematic movement.
-Preserve the supplied subject's identity while fully applying any scene, lighting, camera, environment, or background changes explicitly requested by the user. Do not alter the subject's identity or appearance merely to satisfy those scene changes.`;
+Preserve the supplied subject's identity while fully applying any scene, lighting, camera, environment, or background changes explicitly requested by the user. Do not alter the subject's identity or appearance merely to satisfy those scene changes.
+Do not add music, background music, score, or soundtrack that the user did not explicitly request. Preserve any requested dialogue or sound effects.`;
 
 function buildH3MaxImagePrompt(instruction) {
   const originalPrompt = String(instruction || '').trim();
