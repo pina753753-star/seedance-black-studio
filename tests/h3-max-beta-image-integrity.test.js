@@ -91,16 +91,21 @@ test('IMAGE_RELIANT_PHRASE(実行テスト): 添付画像系の言い回しに�
   const src = html.slice(start, end + 1);
   const regex = new Function(`${src}\nreturn IMAGE_RELIANT_PHRASE;`)();
 
-  assert.ok(regex.test('添付画像の人物'));
-  assert.ok(regex.test('添付した画像を使って'));
-  assert.ok(regex.test('参照画像の人物'));
+  // 過去の実際の事故で使用された文章そのもの(一般化した短文へ置き換えない)。
+  assert.ok(regex.test('添付画像の女性を主人公にしてください'));
+  assert.ok(regex.test('参照画像の振り返りに近い顔のアップ'));
+
+  assert.ok(regex.test('添付画像のキャラクター'));
+  assert.ok(regex.test('参照画像の服装を維持'));
+  assert.ok(regex.test('この画像の男性'));
+  assert.ok(regex.test('画像1の髪型'));
+  assert.ok(regex.test('画像１の髪型')); // 全角数字
+  assert.ok(regex.test('Image 1の人物'));
   assert.ok(regex.test('参照画像を使って'));
   assert.ok(regex.test('参照画像を基準に'));
-  assert.ok(regex.test('この画像の人物'));
+  assert.ok(regex.test('参照画像から始める'));
+  assert.ok(regex.test('添付した画像を使って'));
   assert.ok(regex.test('この画像を使って'));
-  assert.ok(regex.test('画像1の人物'));
-  assert.ok(regex.test('画像１の人物')); // 全角数字
-  assert.ok(regex.test('Image 1の人物'));
 });
 
 test('IMAGE_RELIANT_PHRASE(実行テスト): 単なる言及・否定表現にはマッチしない(過剰検知しない)', () => {
@@ -109,15 +114,36 @@ test('IMAGE_RELIANT_PHRASE(実行テスト): 単なる言及・否定表現に�
   const src = html.slice(start, end + 1);
   const regex = new Function(`${src}\nreturn IMAGE_RELIANT_PHRASE;`)();
 
-  // 「〜について説明する」のような単なる言及は、対象語句の後に「の人物」
-  // 「を使って」等の肯定的な使用表現が続かないため一致しない。
+  // 「〜について説明する」のような単なる言及や、「を使わない」等の否定は、
+  // 画像との所有・参照関係を示す後続表現(の/を/から/と同じ/に写る・に映る)
+  // が続かないため一致しない。
   assert.ok(!regex.test('この画像生成AIについて説明する'));
   assert.ok(!regex.test('参照画像について説明する'));
   assert.ok(!regex.test('参照画像を使わない'));
+  assert.ok(!regex.test('この画像は不要'));
   assert.ok(!regex.test('画像なしで生成する'));
   assert.ok(!regex.test('画像という文字を表示する'));
   assert.ok(!regex.test('夕暮れの海辺を走る白い馬。カメラは低い位置から横移動で追いかける。'));
   assert.ok(!regex.test('通常のテキストプロンプトです。'));
+});
+
+// クライアント側とサーバー側の正規表現が将来ずれないよう、source/flagsが
+// 完全一致することを機械的に確認する(手作業でのコメント同期に頼らない)。
+test('IMAGE_RELIANT_PHRASE: h3-max-beta.htmlとapi/h3-live/start.jsで完全に同一の正規表現である', () => {
+  const start = html.indexOf('var IMAGE_RELIANT_PHRASE=');
+  const end = html.indexOf(';', start);
+  const clientSrc = html.slice(start, end + 1);
+  const clientRegex = new Function(`${clientSrc}\nreturn IMAGE_RELIANT_PHRASE;`)();
+
+  const serverJs = fs.readFileSync(path.join(__dirname, '..', 'api', 'h3-live', 'start.js'), 'utf8');
+  const serverStart = serverJs.indexOf('const IMAGE_RELIANT_PHRASE =');
+  assert.ok(serverStart > -1, 'IMAGE_RELIANT_PHRASE not found in api/h3-live/start.js');
+  const serverEnd = serverJs.indexOf(';', serverStart);
+  const serverSrc = serverJs.slice(serverStart, serverEnd + 1).replace('const IMAGE_RELIANT_PHRASE =', 'var IMAGE_RELIANT_PHRASE=');
+  const serverRegex = new Function(`${serverSrc}\nreturn IMAGE_RELIANT_PHRASE;`)();
+
+  assert.equal(clientRegex.source, serverRegex.source, 'regex source (pattern) must match exactly');
+  assert.equal(clientRegex.flags, serverRegex.flags, 'regex flags must match exactly');
 });
 
 test('send(): textImpliesImageWithoutAttachment時はconfirmで続行させず、notice()で停止する(生成事故防止)', () => {
