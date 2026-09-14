@@ -45,9 +45,6 @@ create table public.h3_director_prompt_commands (
 create index if not exists h3_director_prompt_commands_user_created_idx
   on public.h3_director_prompt_commands (user_id, created_at desc, command_id desc);
 
-create index if not exists h3_director_prompt_commands_session_version_idx
-  on public.h3_director_prompt_commands (session_id, prompt_version);
-
 alter table public.h3_director_prompt_commands enable row level security;
 revoke all on table public.h3_director_prompt_commands from public, anon, authenticated;
 grant select, insert, update on table public.h3_director_prompt_commands to service_role;

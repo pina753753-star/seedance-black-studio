@@ -71,6 +71,7 @@ test('migration adds isolated command and append-only event tables', () => {
   assert.match(migration, /create table public\.h3_director_prompt_command_events/);
   assert.match(migration, /unique \(session_id, prompt_version\)/);
   assert.match(migration, /unique \(command_id, event_type\)/);
+  assert.doesNotMatch(migration, /h3_director_prompt_commands_session_version_idx/);
   assert.doesNotMatch(migration, /alter table public\.h3_director_sessions\s+(add|drop|alter)/i);
 });
 
