@@ -190,6 +190,9 @@
     var lastVideoClockRatio=null,lastVideoMediaElapsed=null,lastVideoWallElapsed=null,lastPresentedFrames=null;
     var pendingStartKey='h3_director_pending_start_v1';
     var imageUploadId=null,imageUploading=false,imageObjectUrl=null,sessionExpectsImage=false,initialImageUrlForConfigure=null;
+    // Additional-prompt audit state only. Keys are provider prompt_version
+    // values; initial prompt_version=1 is not part of this ledger.
+    var promptCommands=Object.create(null);
 
     function log(text,kind){var el=document.createElement('div');el.className='msg '+(kind||'system');el.textContent=text;$('log').appendChild(el);$('log').scrollTop=$('log').scrollHeight}
     function esc(text){return String(text==null?'':text).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -199,6 +202,39 @@
     async function token(){if(!supabaseClient)return'';var r=await supabaseClient.auth.getSession();authToken=(r&&r.data&&r.data.session&&r.data.session.access_token)||'';return authToken}
     async function api(path,options){var t=await token();if(!t)throw new Error('ログインが必要です。');var opts=options||{};var headers=Object.assign({'Authorization':'Bearer '+t},opts.headers||{});if(opts.body)headers['Content-Type']='application/json';var r=await fetch(path,Object.assign({},opts,{headers:headers}));var data={};try{data=await r.json()}catch(e){}if(!r.ok){var err=new Error(data.message||data.error||'通信に失敗しました。');err.code=data.error;err.data=data;throw err}return data}
     function uuid(){return crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&3|8);return v.toString(16)})}
+    function recordPromptEvent(promptVersion,eventType,reason){
+      var command=promptCommands[String(promptVersion)];
+      if(!command||!sessionId)return Promise.resolve(false);
+      var eventSessionId=sessionId;
+      command.eventQueue=(command.eventQueue||Promise.resolve()).then(async function(){
+        if(command.status===eventType)return true;
+        try{
+          var result=await api('/api/h3-director/record-prompt-event',{
+            method:'POST',
+            body:JSON.stringify({
+              sessionId:eventSessionId,
+              commandId:command.commandId,
+              promptVersion:Number(promptVersion),
+              eventType:eventType,
+              reason:reason||''
+            }),
+            keepalive:true
+          });
+          command.status=result.currentStatus||eventType;
+          return true;
+        }catch(e){
+          diagnostic('prompt event save failed: version='+promptVersion+' / event='+eventType+' / code='+(e.code||'unknown'));
+          return false;
+        }
+      });
+      return command.eventQueue;
+    }
+    function markOpenPromptCommandsUnknown(reason){
+      Object.keys(promptCommands).forEach(function(version){
+        var status=promptCommands[version].status;
+        if(['checked','sent','accepted'].includes(status))recordPromptEvent(Number(version),'unknown',reason);
+      });
+    }
     function directorPrompt(text){
       var prompt=String(text||'').trim();
       if(
@@ -341,7 +377,7 @@
     function maybeStartRecording(){clearTimeout(recordStartTimer);recordStartTimer=setTimeout(function(){if(!live||recorder||!remoteStream||!remoteStream.getVideoTracks().length)return;try{recordMime=recordingMime();var options={videoBitsPerSecond:3500000,audioBitsPerSecond:128000};if(recordMime)options.mimeType=recordMime;try{recorder=new MediaRecorder(remoteStream,options)}catch(_){recorder=recordMime?new MediaRecorder(remoteStream,{mimeType:recordMime}):new MediaRecorder(remoteStream)}recordChunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)recordChunks.push(e.data)};recorder.onerror=function(){log('録画処理でエラーが発生しました。')};recorder.start(1000);recorderStartedAt=Date.now();diagnostic('recorder start: +'+(elapsedFromStart(recorderStartedAt)||0).toFixed(1)+'s / afterFirstChunk='+(firstChunkAt?((recorderStartedAt-firstChunkAt)/1000).toFixed(1):'なし')+'s');log('ライブ映像の録画を開始しました。')}catch(e){log('この端末ではライブ録画を開始できませんでした。')}},700)}
     function stopRecording(){clearTimeout(recordStartTimer);return new Promise(function(resolve){if(!recorder||recorder.state==='inactive'){resolve(null);return}var current=recorder;var stopRequestedAt=Date.now();current.addEventListener('stop',function(){recorderStoppedAt=Date.now();var wall=recorderStartedAt?(recorderStoppedAt-recorderStartedAt)/1000:0;var mime=String(current.mimeType||recordMime||'video/webm').split(';')[0];var blob=recordChunks.length?new Blob(recordChunks,{type:mime}):null;diagnostic('recorder stop: wall='+wall.toFixed(2)+'s / chunks='+recordChunks.length+' / blobBytes='+(blob?blob.size:0)+' / stopEventDelay='+(recorderStoppedAt-stopRequestedAt)+'ms');recorder=null;recordChunks=[];resolve(blob)},{once:true});try{current.stop()}catch(e){resolve(null)}})}
     function updateTimer(){var left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));$('timer').textContent='残り '+String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');if(left<=0&&live)finish('60秒のライブが終了しました。',{natural:true})}
-    function cleanup(){stopVideoDiagnostics();live=false;starting=false;promptSending=false;finishing=false;document.body.classList.remove('live-mode');clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
+    function cleanup(){stopVideoDiagnostics();live=false;starting=false;promptSending=false;finishing=false;promptCommands=Object.create(null);document.body.classList.remove('live-mode');clearInterval(heartbeatTimer);clearInterval(countdownTimer);clearTimeout(recordStartTimer);heartbeatTimer=countdownTimer=recordStartTimer=null;if(control){try{control.close()}catch(e){}}if(pc){try{pc.close()}catch(e){}}control=pc=null;$('timer').textContent='60秒';$('aspectRatio').disabled=false;$('stop').classList.remove('show');$('action').disabled=blocked||!$('prompt').value.trim();$('action').textContent='ライブ生成を開始';state('OFFLINE')}
 
     function renderAccessGate(info){
       var messages=[];
@@ -443,6 +479,7 @@
         try{if(control&&control.readyState==='open')control.send(JSON.stringify({type:'stop'}))}catch(e){}
       }
 
+      markOpenPromptCommandsUnknown(natural?'session_ended':'user_stopped');
       live=false;
 
       var recording=await stopRecording();
@@ -469,6 +506,7 @@
       videoClockBaseWall=null;videoClockBaseMedia=null;videoClockBasePresentedFrames=null;
       videoClockBaseExpectedDisplayTime=null;videoClockBaseRtpTimestamp=null;videoClockLastLogAt=0;
       lastVideoClockRatio=null;lastVideoMediaElapsed=null;lastVideoWallElapsed=null;lastPresentedFrames=null;
+      promptCommands=Object.create(null);
       starting=true;$('aspectRatio').disabled=true;$('action').disabled=true;$('action').textContent='接続を準備中…';$('action').classList.add('connecting');state('CONNECTING');log(prompt,'user');
       var idem=uuid();
       try{
@@ -496,8 +534,8 @@
           sendControl(configureMsg);
           log('H3 Max Liveへ初期指示を送信しました。')
         }catch(e){notice(e.message)}};
-        control.onclose=function(){diagnostic('datachannel closed: +'+(elapsedFromStart(Date.now())||0).toFixed(1)+'s')};
-        control.onerror=function(){diagnostic('datachannel error: +'+(elapsedFromStart(Date.now())||0).toFixed(1)+'s')};
+        control.onclose=function(){diagnostic('datachannel closed: +'+(elapsedFromStart(Date.now())||0).toFixed(1)+'s');if(live)markOpenPromptCommandsUnknown('data_channel_closed')};
+        control.onerror=function(){diagnostic('datachannel error: +'+(elapsedFromStart(Date.now())||0).toFixed(1)+'s');if(live)markOpenPromptCommandsUnknown('data_channel_error')};
         control.onmessage=function(event){try{
           var msg=JSON.parse(event.data);
           if(msg.type==='session_info'){
@@ -527,14 +565,21 @@
               ' / ratio='+msg.aspect_ratio
             );
           }
-          if(msg.type==='prompt_pending')log('次の映像へ反映準備中です。');
+          if(msg.type==='prompt_pending'){
+            log('次の映像へ反映準備中です。');
+            if(msg.prompt_version!=null)recordPromptEvent(msg.prompt_version,'accepted','prompt_pending');
+          }
           // prompt_appliedは提供元が指示を受理したことを示すだけで、現在
           // 表示中の映像がその内容になった保証ではない(次の未着手区間から
           // 反映される契約のため)。「反映しました」と断定しない。
-          if(msg.type==='prompt_applied')log('指示を受理しました。映像への反映状況を確認してください。');
+          if(msg.type==='prompt_applied'){
+            log('指示を受理しました。映像への反映状況を確認してください。');
+            if(msg.prompt_version!=null)recordPromptEvent(msg.prompt_version,'accepted','prompt_applied');
+          }
           if(msg.type==='prompt_rejected'){
             var reasonText={content_policy:'内容がコンテンツポリシーに抵触しました。',preparation_failed:'映像の準備に失敗しました。',stale_prompt_version:'指示のバージョンが古くなっています。'}[msg.reason]||'';
-            log('この指示は反映できませんでした。'+(reasonText?'('+reasonText+')':''))
+            log('この指示は反映できませんでした。'+(reasonText?'('+reasonText+')':''));
+            if(msg.prompt_version!=null)recordPromptEvent(msg.prompt_version,msg.reason==='stale_prompt_version'?'superseded':'rejected',msg.reason||'prompt_rejected');
           }
           if(msg.type==='deadline_missed'){
             log('生成が追いつくまで映像を調整しています。');
@@ -577,6 +622,7 @@
               ' / playback='+chunkPlaybackTotal.toFixed(2)+'s'
             );
             maybeStartRecording();
+            if(msg.prompt_version!=null)recordPromptEvent(msg.prompt_version,'used_for_generation','chunk');
           }
           if(msg.type==='chunk_metrics'){
             chunkMetricsCount++;
@@ -637,15 +683,24 @@
 
       promptSending=true;
       $('action').disabled=true;
+      var approved=null;
 
       try{
-        var approved=await api('/api/h3-director/approve-prompt',{
+        var commandId=uuid();
+        approved=await api('/api/h3-director/approve-prompt',{
           method:'POST',
           body:JSON.stringify({
             sessionId:sessionId,
+            commandId:commandId,
             prompt:prompt
           })
         });
+
+        promptCommands[String(approved.promptVersion)]={
+          commandId:approved.commandId,
+          status:'checked',
+          eventQueue:Promise.resolve()
+        };
 
         sendControl({
           type:'prompt',
@@ -653,6 +708,7 @@
           prompt:directorPrompt(approved.prompt),
           replan:true
         });
+        recordPromptEvent(approved.promptVersion,'sent','data_channel_send');
 
         log(prompt,'user');
 
@@ -662,6 +718,9 @@
           $('prompt').value='';
         }
       }catch(e){
+        if(approved&&approved.promptVersion!=null){
+          recordPromptEvent(approved.promptVersion,'unknown','data_channel_send_failed');
+        }
         notice(e.message);
         log(describePromptSubmitError(e.code));
       }finally{

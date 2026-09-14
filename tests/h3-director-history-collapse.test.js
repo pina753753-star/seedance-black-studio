@@ -119,12 +119,12 @@ test('aside内の順序が gate → log → composer → history-wrap になっ�
 
 test('チャット風ログ(log(prompt,\'user\')・prompt_pending/applied/rejected・deadline_missed)は維持されている(prompt_appliedの文言のみ「反映済み」誤表示防止のため変更)', () => {
   assert.match(page, /log\(prompt,'user'\)/);
-  assert.match(page, /if\(msg\.type==='prompt_pending'\)log\('次の映像へ反映準備中です。'\);/);
+  assert.match(page, /if\(msg\.type==='prompt_pending'\)\{\s*log\('次の映像へ反映準備中です。'\);\s*if\(msg\.prompt_version!=null\)recordPromptEvent\(msg\.prompt_version,'accepted','prompt_pending'\);\s*\}/);
   // prompt_appliedは提供元が指示を受理したことを示すだけで、現在表示中の
   // 映像に反映済みとは限らない(次の未着手区間から反映される契約)。「反映
   // しました」「次の映像から反映されます」と断定する表示は、映像への反映を
   // 保証してしまうため、「受理・確認を促す」表現へ変更した。
-  assert.match(page, /if\(msg\.type==='prompt_applied'\)log\('指示を受理しました。映像への反映状況を確認してください。'\);/);
+  assert.match(page, /if\(msg\.type==='prompt_applied'\)\{\s*log\('指示を受理しました。映像への反映状況を確認してください。'\);\s*if\(msg\.prompt_version!=null\)recordPromptEvent\(msg\.prompt_version,'accepted','prompt_applied'\);\s*\}/);
   assert.doesNotMatch(page, /log\('追加指示を反映しました。'\)/);
   assert.doesNotMatch(page, /log\('指示を受理しました。次の映像から反映されます。'\)/);
   assert.match(page, /if\(msg\.type==='prompt_rejected'\)\{/);
