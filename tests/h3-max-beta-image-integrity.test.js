@@ -70,7 +70,7 @@ test('送信成功後のresetInputs()は維持されている(次のジョブ用
 });
 
 // ---------------------------------------------------------------
-// text送信時の画像前提文言のすれ違い検知(補助的な警告、送信ブロックはしない)
+// text送信時の画像前提文言のすれ違い検知(ハード停止。confirmでの続行はできない)
 // ---------------------------------------------------------------
 
 test('IMAGE_RELIANT_PHRASE / textImpliesImageWithoutAttachment が定義されている', () => {
@@ -91,25 +91,32 @@ test('IMAGE_RELIANT_PHRASE(実行テスト): 添付画像系の言い回しに�
   const src = html.slice(start, end + 1);
   const regex = new Function(`${src}\nreturn IMAGE_RELIANT_PHRASE;`)();
 
-  assert.ok(regex.test('添付画像の女性を主人公にしてください'));
-  assert.ok(regex.test('添付した画像を使って歩かせる'));
-  assert.ok(regex.test('参照画像の人物のまま走らせる'));
-  assert.ok(regex.test('参照画像を基準に歩かせる'));
-  assert.ok(regex.test('この画像の人物のまま走らせる'));
-  assert.ok(regex.test('画像1の人物を使う'));
-  assert.ok(regex.test('Image 1 の人物を使う'));
+  assert.ok(regex.test('添付画像の人物'));
+  assert.ok(regex.test('添付した画像を使って'));
+  assert.ok(regex.test('参照画像の人物'));
+  assert.ok(regex.test('参照画像を使って'));
+  assert.ok(regex.test('参照画像を基準に'));
+  assert.ok(regex.test('この画像の人物'));
+  assert.ok(regex.test('この画像を使って'));
+  assert.ok(regex.test('画像1の人物'));
+  assert.ok(regex.test('画像１の人物')); // 全角数字
+  assert.ok(regex.test('Image 1の人物'));
 });
 
-test('IMAGE_RELIANT_PHRASE(実行テスト): 通常の文章・否定表現にはマッチしない(過剰検知しない)', () => {
+test('IMAGE_RELIANT_PHRASE(実行テスト): 単なる言及・否定表現にはマッチしない(過剰検知しない)', () => {
   const start = html.indexOf('var IMAGE_RELIANT_PHRASE=');
   const end = html.indexOf(';', start);
   const src = html.slice(start, end + 1);
   const regex = new Function(`${src}\nreturn IMAGE_RELIANT_PHRASE;`)();
 
+  // 「〜について説明する」のような単なる言及は、対象語句の後に「の人物」
+  // 「を使って」等の肯定的な使用表現が続かないため一致しない。
+  assert.ok(!regex.test('この画像生成AIについて説明する'));
+  assert.ok(!regex.test('参照画像について説明する'));
+  assert.ok(!regex.test('参照画像を使わない'));
+  assert.ok(!regex.test('画像なしで生成する'));
+  assert.ok(!regex.test('画像という文字を表示する'));
   assert.ok(!regex.test('夕暮れの海辺を走る白い馬。カメラは低い位置から横移動で追いかける。'));
-  assert.ok(!regex.test('画像なしで、テキストだけから生成してください。'));
-  assert.ok(!regex.test('参照画像を使わない構成にしてください。'));
-  assert.ok(!regex.test('画像について説明する文章を入れる。'));
   assert.ok(!regex.test('通常のテキストプロンプトです。'));
 });
 

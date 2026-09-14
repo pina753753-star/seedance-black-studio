@@ -78,13 +78,16 @@ function idempotencyKey(req) {
   return String(raw).trim();
 }
 
-// Server-side mirror of h3-max-beta.html's IMAGE_RELIANT_PHRASE. A client
-// can be bypassed entirely (curl / modified page), so text-mode instructions
-// that clearly depend on an attached image must be rejected here too, before
-// any moderation call, reservation, or charge. Only phrasing with a clear
-// POSITIVE dependency on an image matches; negated/explanatory phrasing
-// ("参照画像を使わない", "画像なしで") must not match (see 誤検知 note below).
-const IMAGE_RELIANT_PHRASE = /(?:添付画像|添付した画像|参照画像|この画像|画像\s*1|Image\s*1)(?!\s*(?:なし|を?使わない|は?不要|を?使用しない))/i;
+// Server-side mirror of h3-max-beta.html's IMAGE_RELIANT_PHRASE — MUST stay
+// identical to that copy. A client can be bypassed entirely (curl / modified
+// page), so text-mode instructions that clearly depend on an attached image
+// must be rejected here too, before any moderation call, reservation, or
+// charge. Matches only when a base image phrase is followed by a clear
+// POSITIVE usage continuation (の人物/を使って/を使う/を基準に) — not by
+// excluding negatives after the base phrase, which would still match mere
+// mentions like "この画像生成AIについて説明する" or "参照画像について説明する".
+// 画像1/Image 1 accepts both half-width and full-width digits.
+const IMAGE_RELIANT_PHRASE = /(?:添付画像|添付した画像|参照画像|この画像|画像\s*[0-9０-９]+|Image\s*[0-9]+)\s*(?:の人物|を使って|を使う|を基準に)/i;
 function instructionImpliesImageWithoutAttachment(mode, instruction) {
   return mode === 'text' && IMAGE_RELIANT_PHRASE.test(instruction);
 }

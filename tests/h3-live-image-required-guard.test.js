@@ -218,15 +218,21 @@ function res() {
 
 function attachDb(request, db) { request._auth.supabase = db; return request; }
 
-function makeReserveRpc({ jobId = uuid(50), jobsRows = null } = {}) {
+// counters (when passed) is the SAME object installMocks() returned, so
+// tests can assert reserveCalls/deductCalls actually incremented (or, for
+// the 422 guard, stayed at 0) rather than just asserting against fields that
+// are declared but never written to.
+function makeReserveRpc({ jobId = uuid(50), jobsRows = null, counters = null } = {}) {
   return async (name, args) => {
     if (name === 'reserve_h3_reference_job_atomic' || name === 'reserve_h3_live_job_atomic') {
+      if (counters) counters.reserveCalls++;
       if (jobsRows && !jobsRows.some((r) => r.id === jobId)) {
         jobsRows.push({ id: jobId, user_id: args.p_user_id, status: 'queued', input_mode: args.p_mode || args.p_input_mode || 'text' });
       }
       return { data: [{ job_id: jobId, code: null, retry_after_seconds: 0, existing: false }], error: null };
     }
     if (name === 'deduct_h3_live_credits_atomic') {
+      if (counters) counters.deductCalls++;
       return { data: { ok: true, code: 'deducted', deducted: 60, new_balance: 940, from_subscription: 0, from_free: 60, from_purchased: 0 }, error: null };
     }
     return { data: null, error: null };
@@ -238,21 +244,26 @@ function makeReserveRpc({ jobId = uuid(50), jobsRows = null } = {}) {
 // /deduct/fal — proven by call counters, not by reading the source.
 // ---------------------------------------------------------------
 
+// Codex-review仕様の正例そのもの(h3-max-beta.htmlのコメントと同一の一覧)。
 const IMAGE_RELIANT_INSTRUCTIONS = [
-  '添付画像の女性を主人公にしてください',
-  '添付した画像を使って歩かせる',
-  '参照画像の人物のまま走らせる',
-  'この画像の人物のまま走らせる',
-  '画像1の人物を使う',
-  'Image 1 の人物を使う'
+  '添付画像の人物',
+  '添付した画像を使って',
+  '参照画像の人物',
+  '参照画像を使って',
+  '参照画像を基準に',
+  'この画像の人物',
+  'この画像を使って',
+  '画像1の人物',
+  '画像１の人物',
+  'Image 1の人物'
 ];
 
 for (const instruction of IMAGE_RELIANT_INSTRUCTIONS) {
-  test(`text mode + 「${instruction}」+ 画像0件 → 422 image_required_by_prompt、entitlement/moderation/reserve/fal は一切呼ばれない`, async () => {
+  test(`text mode + 「${instruction}」+ 画像0件 → 422 image_required_by_prompt、entitlement/moderation/reserve/deduct/fal は一切呼ばれない`, async () => {
     const { handler, counters, restore } = installMocks();
     try {
       const jobsRows = [];
-      const db = makeFakeDb({ jobsRows, rpcImpl: makeReserveRpc({ jobsRows }) });
+      const db = makeFakeDb({ jobsRows, rpcImpl: makeReserveRpc({ jobsRows, counters }) });
       const request = attachDb(req({ mode: 'text', instruction }), db);
       const response = res();
       await handler(request, response);
@@ -266,6 +277,11 @@ for (const instruction of IMAGE_RELIANT_INSTRUCTIONS) {
 
       assert.equal(counters.entitlementCalls, 0, 'entitlement check must not run');
       assert.equal(counters.textModerationCalls, 0, 'moderation must not run');
+      // 予約(reserve)・課金(deduct)・fal送信のいずれも、422停止より前に呼ばれ
+      // ていないことを実行ベースで確認する(コメント上の主張ではなく、実際に
+      // カウンターが加算されていないことで証明する)。
+      assert.equal(counters.reserveCalls, 0, 'reserve RPC must not run (no reservation)');
+      assert.equal(counters.deductCalls, 0, 'deduct RPC must not run (no charge)');
       assert.equal(counters.submitTextCalls, 0, 'fal submit must not run');
       assert.equal(jobsRows.length, 0, 'no job row must be reserved (no charge)');
     } finally { restore(); }
@@ -273,30 +289,38 @@ for (const instruction of IMAGE_RELIANT_INSTRUCTIONS) {
 }
 
 // ---------------------------------------------------------------
-// False-positive guard: negated/explanatory phrasing, and image/reference
-// modes (where an image really is attached), must NOT be blocked.
+// False-positive guard: mere mentions ("〜について説明する"), negated/
+// explanatory phrasing, and image/reference modes (where an image really is
+// attached), must NOT be blocked.
 // ---------------------------------------------------------------
 
+// Codex-review仕様の非対象例そのもの。
 const NON_BLOCKING_TEXT_INSTRUCTIONS = [
+  'この画像生成AIについて説明する',
+  '参照画像について説明する',
+  '参照画像を使わない',
+  '画像なしで生成する',
+  '画像という文字を表示する',
   '夕暮れの海辺を走る白い馬。カメラは低い位置から横移動で追いかける。',
-  '画像なしで、テキストだけから生成してください。',
-  '参照画像を使わない構成にしてください。',
-  '画像について説明する文章を入れる。',
   '通常のテキストプロンプトです。'
 ];
 
 for (const instruction of NON_BLOCKING_TEXT_INSTRUCTIONS) {
-  test(`text mode + 「${instruction}」→ 422にならず、通常どおりentitlement以降まで進む`, async () => {
+  test(`text mode + 「${instruction}」→ 422にならず、通常どおりentitlement以降まで進む(reserve/deductも実行される)`, async () => {
     const { handler, counters, restore } = installMocks();
     try {
       const jobsRows = [];
-      const db = makeFakeDb({ jobsRows, rpcImpl: makeReserveRpc({ jobsRows }) });
+      const db = makeFakeDb({ jobsRows, rpcImpl: makeReserveRpc({ jobsRows, counters }) });
       const request = attachDb(req({ mode: 'text', instruction }), db);
       const response = res();
       await handler(request, response);
 
       assert.notEqual(response.payload && response.payload.error, 'image_required_by_prompt');
       assert.equal(counters.entitlementCalls, 1, 'entitlement check must still run normally');
+      // 誤検知していないことの裏付けとして、この経路では実際にreserve/deduct
+      // が実行されることも確認する(カウンターが常に0のまま無意味化しないため)。
+      assert.equal(counters.reserveCalls, 1, 'reserve RPC must run normally when not blocked');
+      assert.equal(counters.deductCalls, 1, 'deduct RPC must run normally when not blocked');
     } finally { restore(); }
   });
 }
@@ -305,9 +329,9 @@ test('image mode + 画像依存表現でも、mode!==\'text\'なので新しい�
   const { handler, counters, restore } = installMocks();
   try {
     const jobsRows = [];
-    const db = makeFakeDb({ jobsRows, rpcImpl: makeReserveRpc({ jobsRows }) });
+    const db = makeFakeDb({ jobsRows, rpcImpl: makeReserveRpc({ jobsRows, counters }) });
     const request = attachDb(
-      { ...req({ mode: 'image', instruction: '添付画像の女性を主人公にしてください' }), body: JSON.stringify({ instruction: '添付画像の女性を主人公にしてください', mode: 'image', uploadId: uuid(2) }) },
+      { ...req({ mode: 'image', instruction: '添付画像の人物' }), body: JSON.stringify({ instruction: '添付画像の人物', mode: 'image', uploadId: uuid(2) }) },
       db
     );
     const response = res();

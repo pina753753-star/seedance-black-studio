@@ -244,12 +244,16 @@
     async function pollStatus(){if(!state.activeJobId)return;var id=state.activeJobId;try{var d=await api('/api/h3-live/status?jobId='+encodeURIComponent(id));var job=d.job;if(!job){scheduleStatus(2500);return}if(['queued','submitting','processing'].indexOf(job.status)>=0){setGenerating(true,job.status==='processing'?'映像を生成しています…':'送信しています…');scheduleStatus(d.nextPollAfterMs||2000);return}state.activeJobId=null;state.sending=false;setGenerating(false);if(job.status==='completed'&&job.videoUrl){setStage(job.videoUrl,job.id);notice('映像が完成しました。')}else if(job.status==='failed'){notice('生成に失敗しました。'+(job.refunded?' クレジットは返還されました。':''),true)}clearImage();await refreshFeed();await loadHistory();refreshSend()}catch(e){scheduleStatus(3000)}}
     async function refreshFeed(){try{var d=await api('/api/h3-live/feed');applyEligibility(d.eligibility);if(!state.activeJobId&&d.activeJob&&['queued','submitting','processing'].indexOf(d.activeJob.status)>=0){state.activeJobId=d.activeJob.id;setGenerating(true,'映像を生成しています…');scheduleStatus(1200)}else if(!state.activeJobId&&d.onAir&&d.onAir.videoUrl&&!state.currentVideoUrl){setStage(d.onAir.videoUrl,d.onAir.id)}}catch(e){if(e.status===503){$('gate').className='gate show';$('gate').textContent='H3 Max は現在利用できません。'} }clearTimeout(state.feedTimer);state.feedTimer=setTimeout(refreshFeed,4000)}
     // モード＋実際に添付済みの画像(assetの有無)が主な判定材料であり、文章検知は
-    // あくまで補助。「テキスト」モードで画像を要求する言い回しがあるのに画像が
-    // 添付されていない場合だけ、送信前に警告する(強制停止ではなく確認)。
-    // 否定文・説明文中の単語まで一律にブロックしないよう、限られた語句のみで判定する。
-    // 画像への「肯定的な依存」が明確な表現だけに限定する。「参照画像を使わない」
-    // 「画像なしで」のような否定・除外表現は誤検知として除外する。
-    var IMAGE_RELIANT_PHRASE=/(?:添付画像|添付した画像|参照画像|この画像|画像\s*1|Image\s*1)(?!\s*(?:なし|を?使わない|は?不要|を?使用しない))/i;
+    // あくまで補助。「テキスト」モードで画像に実際に依存する言い回しがあるのに
+    // 画像が添付されていない場合、送信をブロックする(ハード停止。confirmで
+    // 続行はできない)。
+    // 「対象語句の後ろの否定表現を除外する」方式ではなく、画像を実際に使うことが
+    // 明確な後続表現(の人物/を使って/を基準に 等)まで含む場合だけ一致させる。
+    // これにより「この画像生成AIについて説明する」「参照画像について説明する」の
+    // ような単なる言及・否定文は一致しない。画像1/Image 1は半角・全角数字の両方
+    // を扱う。api/h3-live/start.jsのinstructionImpliesImageWithoutAttachment()と
+    // 同一の判定条件にすること。
+    var IMAGE_RELIANT_PHRASE=/(?:添付画像|添付した画像|参照画像|この画像|画像\s*[0-9０-９]+|Image\s*[0-9]+)\s*(?:の人物|を使って|を使う|を基準に)/i;
     function textImpliesImageWithoutAttachment(text){
       return state.mode==='text'&&IMAGE_RELIANT_PHRASE.test(text);
     }
