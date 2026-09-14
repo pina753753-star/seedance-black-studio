@@ -334,11 +334,11 @@ test('additional prompt messages set replan:true', () => {
 // 13-16. prompt_pending / prompt_applied / prompt_rejected / deadline_missed
 // ---------------------------------------------------------------
 test('prompt_pending is shown to the user', () => {
-  assert.match(page, /msg\.type==='prompt_pending'\)log\('次の映像へ反映準備中です。'\)/);
+  assert.match(page, /msg\.type==='prompt_pending'[\s\S]*?log\('次の映像へ反映準備中です。'\)/);
 });
 
 test('prompt_applied is shown to the user', () => {
-  assert.match(page, /msg\.type==='prompt_applied'\)log\('追加指示を反映しました。'\)/);
+  assert.match(page, /msg\.type==='prompt_applied'[\s\S]*?log\('指示を受理しました。映像への反映状況を確認してください。'\)/);
 });
 
 test('prompt_rejected is shown with a Japanese reason breakdown', () => {

@@ -476,13 +476,30 @@ function approvePromptDb(session) {
         }
       };
       return q;
+    },
+    async rpc(name, args) {
+      assert.equal(name, 'approve_h3_director_prompt_atomic');
+      assert.equal(args.p_session_id, SESSION_ID);
+      assert.equal(args.p_user_id, USER_ID);
+      assert.equal(args.p_command_id, IDEM_ID);
+      assert.equal(args.p_prompt, 'next scene');
+      session.prompt_version += 1;
+      return {
+        data: [{
+          command_id: IDEM_ID,
+          prompt_version: session.prompt_version,
+          code: 'approved',
+          replay: false
+        }],
+        error: null
+      };
     }
   };
 }
 
 function approvePromptReqRes(db, body) {
   const req = {
-    method: 'POST', headers: {}, body: JSON.stringify(Object.assign({ sessionId: SESSION_ID, prompt: 'next scene' }, body || {})),
+    method: 'POST', headers: {}, body: JSON.stringify(Object.assign({ sessionId: SESSION_ID, commandId: IDEM_ID, prompt: 'next scene' }, body || {})),
     _auth: { ok: true, user: { id: USER_ID }, supabase: db }
   };
   const res = {

@@ -228,9 +228,9 @@ test('WebRTC/DataChannel: 全state transitionを診断し、既存failed/closed�
   assert.match(chunk, /if\(\['failed','closed'\]\.includes\(pc\.connectionState\)&&live\)finish\('WebRTC接続が終了しました。自動再生成は行いません。'\)/);
 });
 
-test('DataChannel onclose/onerrorは診断のみでfinish()を呼ばない', () => {
-  assert.match(page, /control\.onclose=function\(\)\{diagnostic\('datachannel closed: \+'\+\(elapsedFromStart\(Date\.now\(\)\)\|\|0\)\.toFixed\(1\)\+'s'\)\};/);
-  assert.match(page, /control\.onerror=function\(\)\{diagnostic\('datachannel error: \+'\+\(elapsedFromStart\(Date\.now\(\)\)\|\|0\)\.toFixed\(1\)\+'s'\)\};/);
+test('DataChannel onclose/onerrorは診断と未確定指示の記録だけでfinish()を呼ばない', () => {
+  assert.match(page, /control\.onclose=function\(\)\{diagnostic\('datachannel closed: \+'\+\(elapsedFromStart\(Date\.now\(\)\)\|\|0\)\.toFixed\(1\)\+'s'\);if\(live\)markOpenPromptCommandsUnknown\('data_channel_closed'\)\};/);
+  assert.match(page, /control\.onerror=function\(\)\{diagnostic\('datachannel error: \+'\+\(elapsedFromStart\(Date\.now\(\)\)\|\|0\)\.toFixed\(1\)\+'s'\);if\(live\)markOpenPromptCommandsUnknown\('data_channel_error'\)\};/);
   assert.doesNotMatch(page, /control\.onclose=function\(\)\{[^}]*finish\(/);
   assert.doesNotMatch(page, /control\.onerror=function\(\)\{[^}]*finish\(/);
 });

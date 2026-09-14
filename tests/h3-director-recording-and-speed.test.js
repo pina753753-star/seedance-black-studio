@@ -131,10 +131,10 @@ test('Live中の追加promptはdirectorPrompt(approved.prompt)を使用する', 
   );
 });
 
-test('approve-promptへ送る元promptはユーザー入力のまま変更なし', () => {
+test('approve-promptへ送る元promptはユーザー入力のまま、commandIdを添えて送る', () => {
   assert.match(
     page,
-    /api\('\/api\/h3-director\/approve-prompt',\{\s*method:'POST',\s*body:JSON\.stringify\(\{\s*sessionId:sessionId,\s*prompt:prompt\s*\}\)\s*\}\);/
+    /api\('\/api\/h3-director\/approve-prompt',\{\s*method:'POST',\s*body:JSON\.stringify\(\{\s*sessionId:sessionId,\s*commandId:commandId,\s*prompt:prompt\s*\}\)\s*\}\);/
   );
 });
 
@@ -286,11 +286,11 @@ test("input listener: promptSending中は文字入力してもaction buttonを�
 test('cleanup(): promptSending=false/finishing=falseを設定する(Live終了・接続失敗後に送信中・終了中状態を残さない)', () => {
   const idx = page.indexOf('function cleanup(){stopVideoDiagnostics();');
   assert.ok(idx > 0, 'cleanup() not found');
-  const chunk = page.slice(idx, idx + 170);
-  assert.match(chunk, /function cleanup\(\)\{stopVideoDiagnostics\(\);live=false;starting=false;promptSending=false;finishing=false;document\.body\.classList\.remove\('live-mode'\);/);
+  const chunk = page.slice(idx, idx + 240);
+  assert.match(chunk, /function cleanup\(\)\{stopVideoDiagnostics\(\);live=false;starting=false;promptSending=false;finishing=false;promptCommands=Object\.create\(null\);document\.body\.classList\.remove\('live-mode'\);/);
 });
 
-test('approve-prompt APIルート自体は変更していない(呼び出しシグネチャのみ確認、ファイルは触っていない)', () => {
+test('approve-prompt APIルート呼び出しはPOSTのまま維持する', () => {
   const src = extractSendPromptSource(page);
   assert.match(src, /api\('\/api\/h3-director\/approve-prompt',\{/);
   assert.match(src, /method:'POST',/);
