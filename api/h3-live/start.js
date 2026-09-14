@@ -78,6 +78,23 @@ function idempotencyKey(req) {
   return String(raw).trim();
 }
 
+// Server-side mirror of h3-max-beta.html's IMAGE_RELIANT_PHRASE — MUST stay
+// identical to that copy (same source/flags; tests/h3-live-image-required-guard.test.js
+// asserts this). A client can be bypassed entirely (curl / modified page), so
+// text-mode instructions that clearly depend on an attached image must be
+// rejected here too, before any moderation call, reservation, or charge.
+// Matches only when a base image phrase is followed by an ownership/reference
+// continuation: の (添付画像の女性/この画像の男性/画像1の髪型 — the following
+// noun is not restricted), を (excluding an immediate negation: 使わない/
+// 使用しない/参照しない), から, と同じ, or に写る/に映る. This is deliberately
+// NOT "exclude negatives after the base phrase", which would still match mere
+// mentions like "この画像生成AIについて説明する" or "参照画像について説明する".
+// 画像1/Image 1 accepts both half-width and full-width digits.
+const IMAGE_RELIANT_PHRASE = /(?:添付画像|添付した画像|参照画像|この画像|画像\s*[0-9０-９]+|Image\s*[0-9]+)\s*(?:の|を(?!\s*(?:使わない|使用しない|参照しない))|から|と同じ|に(?:写る|映る))/i;
+function instructionImpliesImageWithoutAttachment(mode, instruction) {
+  return mode === 'text' && IMAGE_RELIANT_PHRASE.test(instruction);
+}
+
 async function fetchJob(db, jobId) {
   const { data, error } = await db.from('h3_live_jobs').select('*').eq('id', jobId).maybeSingle();
   if (error) console.error('[h3-live/start] fetchJob error:', error.message, 'jobId:', jobId);
@@ -208,6 +225,18 @@ module.exports = async function handler(req, res) {
         message: `画像は1〜${REFERENCE_MAX_IMAGES}枚、重複なく選択してください。`
       });
     }
+  }
+
+  // Text mode + a clearly image-dependent instruction, with zero images
+  // attached: stop before moderation/reservation/charge/fal submit. This
+  // mirrors the client-side check in h3-max-beta.html but must also hold
+  // when the client is bypassed (curl, modified page).
+  if (instructionImpliesImageWithoutAttachment(mode, instruction)) {
+    return res.status(422).json({
+      ok: false,
+      error: 'image_required_by_prompt',
+      message: 'プロンプトが画像を参照しています。画像モードで画像を追加してから生成してください。'
+    });
   }
 
   // Plan eligibility (Premium / Scale / Team / Ultimate, unexpired).

@@ -142,19 +142,23 @@
       $('send').disabled=state.sending||!!state.activeJobId||!state.planAllowed||!state.hasEnough||!text||!imageReady||!refReady;
     }
     function applyEligibility(e){if(!e)return;state.planAllowed=e.planAllowed!==false;state.hasEnough=e.hasEnoughCredits!==false;state.balance=typeof e.balance==='number'?e.balance:null;state.creditCost=typeof e.creditCost==='number'?e.creditCost:state.creditCost;if(state.balance!=null)$('balanceChip').innerHTML='残高 <b>'+state.balance+'</b>';if(state.creditCost)$('priceText').textContent='15秒 / 768p / 1本 '+state.creditCost+' クレジット';var msgs=[];if(!state.planAllowed)msgs.push('H3 Max は Premium 以上の有効なプランで利用できます。');if(state.planAllowed&&state.hasEnough===false)msgs.push('クレジットが不足しています。必要: '+state.creditCost+' / 残高: '+(state.balance==null?'–':state.balance));$('gate').className=msgs.length?'gate show':'gate';$('gate').innerHTML=msgs.join('<br>');refreshSend()}
+    // モード切替では、既にアップロード済みの単一画像／参照画像を消さない。
+    // 生成前に人物の基準画像を失う主因が「モードを切り替えただけで画像が
+    // 消える」ことだったため、切替時はUI表示だけを現在のモードへ合わせ、
+    // 画像そのもの(state.uploadId / state.refImages)はユーザーが明示的に
+    // 削除ボタンを押すか、生成を開始するまで保持する。
     function setMode(mode){
       state.mode=['image','reference','storyboard'].indexOf(mode)>=0?mode:'text';
       Array.prototype.forEach.call($('modes').querySelectorAll('button'),function(b){b.classList.toggle('on',b.dataset.mode===state.mode)});
       var img=state.mode==='image';
       var multi=isMultiMode();
       $('drop').classList.toggle('show',img&&!state.uploadId);
+      $('thumb').classList.toggle('show',img&&!!state.uploadId);
       $('refGrid').classList.toggle('show',multi);
       $('refGrid').hidden=!multi;
       $('refNote').classList.toggle('show',state.mode==='storyboard');
       $('refNote').hidden=state.mode!=='storyboard';
       $('rights').hidden=!(img||multi);
-      if(!img)clearImage();
-      if(!multi)clearReferenceImages();
       if(multi)renderRefGrid();
       refreshSend();
     }
@@ -239,11 +243,34 @@
     function scheduleStatus(ms){stopStatus();state.statusTimer=setTimeout(pollStatus,Math.max(1200,ms||2000))}
     async function pollStatus(){if(!state.activeJobId)return;var id=state.activeJobId;try{var d=await api('/api/h3-live/status?jobId='+encodeURIComponent(id));var job=d.job;if(!job){scheduleStatus(2500);return}if(['queued','submitting','processing'].indexOf(job.status)>=0){setGenerating(true,job.status==='processing'?'映像を生成しています…':'送信しています…');scheduleStatus(d.nextPollAfterMs||2000);return}state.activeJobId=null;state.sending=false;setGenerating(false);if(job.status==='completed'&&job.videoUrl){setStage(job.videoUrl,job.id);notice('映像が完成しました。')}else if(job.status==='failed'){notice('生成に失敗しました。'+(job.refunded?' クレジットは返還されました。':''),true)}clearImage();await refreshFeed();await loadHistory();refreshSend()}catch(e){scheduleStatus(3000)}}
     async function refreshFeed(){try{var d=await api('/api/h3-live/feed');applyEligibility(d.eligibility);if(!state.activeJobId&&d.activeJob&&['queued','submitting','processing'].indexOf(d.activeJob.status)>=0){state.activeJobId=d.activeJob.id;setGenerating(true,'映像を生成しています…');scheduleStatus(1200)}else if(!state.activeJobId&&d.onAir&&d.onAir.videoUrl&&!state.currentVideoUrl){setStage(d.onAir.videoUrl,d.onAir.id)}}catch(e){if(e.status===503){$('gate').className='gate show';$('gate').textContent='H3 Max は現在利用できません。'} }clearTimeout(state.feedTimer);state.feedTimer=setTimeout(refreshFeed,4000)}
+    // モード＋実際に添付済みの画像(assetの有無)が主な判定材料であり、文章検知は
+    // あくまで補助。「テキスト」モードで画像に実際に依存する言い回しがあるのに
+    // 画像が添付されていない場合、送信をブロックする(ハード停止。confirmで
+    // 続行はできない)。
+    // 「対象語句の後ろの否定表現を除外する」方式ではなく、画像との所有・参照
+    // 関係を示す後続表現まで含む場合だけ一致させる:
+    //   の (添付画像の女性/この画像の男性/画像1の髪型 等、対象の名詞は限定しない)
+    //   を (ただし「使わない/使用しない/参照しない」等の直後の否定は除外)
+    //   から (参照画像から始める)
+    //   と同じ
+    //   に写る / に映る
+    // これにより「この画像生成AIについて説明する」「参照画像について説明する」の
+    // ような単なる言及・否定文は一致しない。画像1/Image 1は半角・全角数字の両方
+    // を扱う。api/h3-live/start.jsのinstructionImpliesImageWithoutAttachment()と
+    // 完全に同一の正規表現にすること(source/flagsが一致することをテストで確認)。
+    var IMAGE_RELIANT_PHRASE=/(?:添付画像|添付した画像|参照画像|この画像|画像\s*[0-9０-９]+|Image\s*[0-9]+)\s*(?:の|を(?!\s*(?:使わない|使用しない|参照しない))|から|と同じ|に(?:写る|映る))/i;
+    function textImpliesImageWithoutAttachment(text){
+      return state.mode==='text'&&IMAGE_RELIANT_PHRASE.test(text);
+    }
     async function send(){
       if(state.sending||state.activeJobId)return;
       var text=$('prompt').value.trim();if(!text)return;
       if(state.mode==='image'&&!state.uploadId){notice('先に画像を追加してください。',true);return}
       if(isMultiMode()&&(!state.refImages.length||state.refImages.some(function(e){return!e||!e.uploadId||e.busy}))){notice('先に画像を追加してください。',true);return}
+      if(textImpliesImageWithoutAttachment(text)){
+        notice('「添付画像」など画像を前提にした文章です。画像モードで画像を追加してから生成してください。',true);
+        return;
+      }
       state.sending=true;refreshSend();setGenerating(true,'送信しています…');notice('');
       var idem=uuid();
       function resetInputs(){$('prompt').value='';clearImage();clearReferenceImages()}

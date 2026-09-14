@@ -230,9 +230,50 @@ test('sendPrompt(): APIエラー時もfinallyでpromptSending=falseへ戻る(cat
   assert.ok(catchIdx > 0 && finallyIdx > catchIdx, 'catch must precede finally');
   const catchBlock = src.slice(catchIdx, finallyIdx);
   assert.match(catchBlock, /notice\(e\.message\);/);
-  assert.match(catchBlock, /log\('指示を送信できませんでした。'\);/);
+  // 「指示を送信できませんでした。」の一律表示から、拒否・置換済み(prompt_version
+  // 競合)・セッション終了等を区別するdescribePromptSubmitError(e.code)へ変更。
+  assert.match(catchBlock, /log\(describePromptSubmitError\(e\.code\)\);/);
   // finally always runs after catch, restoring promptSending regardless of
   // success/failure — verified by the finally-block test above.
+});
+
+// describePromptSubmitError(): approve-prompt.jsのエラーコードごとに、拒否・
+// 置換済み・セッション終了等を区別した短い日本語文言を返す。実際にvm評価して
+// 振る舞いを確認する(directorPromptと同じ抽出パターン)。
+function loadDescribePromptSubmitError(){
+  const startIndex = page.indexOf('function describePromptSubmitError(code)');
+  assert.ok(startIndex > 0, 'describePromptSubmitError() not found in h3-director.html');
+  const endIndex = page.indexOf('\n    }', startIndex) + 6;
+  const source = page.slice(startIndex, endIndex);
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(`${source}\nthis.describePromptSubmitError = describePromptSubmitError;`, sandbox);
+  return sandbox.describePromptSubmitError;
+}
+
+// approve-prompt.js側で定義されている6コードすべてを、table-drivenで確認する。
+// prompt_version_conflictは「反映され、置き換えられた」という事実誤認を避け、
+// 「先に受理されたため送信されなかった」という表現に変更済み。
+const KNOWN_PROMPT_SUBMIT_ERRORS = [
+  ['content_not_allowed', 'この指示はコンテンツポリシーにより拒否されました。'],
+  ['prompt_version_conflict', '別の指示が先に受理されたため、この指示は送信されませんでした。内容を確認して再送してください。'],
+  ['session_not_live', 'ライブがすでに終了しているため送信できませんでした。'],
+  ['content_safety_unavailable', '安全確認ができないため送信できませんでした。'],
+  ['account_restricted', 'アカウントの状態により送信できませんでした。'],
+  ['access_revoked', '現在この機能を利用できません。']
+];
+
+for (const [code, expected] of KNOWN_PROMPT_SUBMIT_ERRORS) {
+  test(`describePromptSubmitError: ${code} → 既定の文言`, () => {
+    const fn = loadDescribePromptSubmitError();
+    assert.equal(fn(code), expected);
+  });
+}
+
+test('describePromptSubmitError: 未知のコード・undefinedは既定の送信失敗文言(fallback)', () => {
+  const fn = loadDescribePromptSubmitError();
+  assert.equal(fn('some_unknown_code'), '指示を送信できませんでした。');
+  assert.equal(fn(undefined), '指示を送信できませんでした。');
 });
 
 test("input listener: promptSending中は文字入力してもaction buttonを再有効化しない", () => {

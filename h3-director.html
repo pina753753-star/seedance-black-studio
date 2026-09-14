@@ -208,6 +208,20 @@
       }
       return prompt+' 動きは自然な実時間の速度。スローモーションにしない。';
     }
+    // 追加指示が承認APIで拒否/失敗した理由を、利用者向けの短い文言へ変換する。
+    // 「反映できませんでした」だけでなく、拒否・置換済み・セッション終了・
+    // 送信失敗を区別して表示するために使う(approve-prompt.js側のエラーコードに対応)。
+    function describePromptSubmitError(code){
+      var known={
+        content_not_allowed:'この指示はコンテンツポリシーにより拒否されました。',
+        prompt_version_conflict:'別の指示が先に受理されたため、この指示は送信されませんでした。内容を確認して再送してください。',
+        session_not_live:'ライブがすでに終了しているため送信できませんでした。',
+        content_safety_unavailable:'安全確認ができないため送信できませんでした。',
+        account_restricted:'アカウントの状態により送信できませんでした。',
+        access_revoked:'現在この機能を利用できません。'
+      };
+      return known[code]||'指示を送信できませんでした。';
+    }
     function isPreviewHost(){
       return /\.vercel\.app$/.test(location.hostname)
         && location.hostname!=='flowvid-studio.vercel.app';
@@ -514,7 +528,10 @@
             );
           }
           if(msg.type==='prompt_pending')log('次の映像へ反映準備中です。');
-          if(msg.type==='prompt_applied')log('追加指示を反映しました。');
+          // prompt_appliedは提供元が指示を受理したことを示すだけで、現在
+          // 表示中の映像がその内容になった保証ではない(次の未着手区間から
+          // 反映される契約のため)。「反映しました」と断定しない。
+          if(msg.type==='prompt_applied')log('指示を受理しました。映像への反映状況を確認してください。');
           if(msg.type==='prompt_rejected'){
             var reasonText={content_policy:'内容がコンテンツポリシーに抵触しました。',preparation_failed:'映像の準備に失敗しました。',stale_prompt_version:'指示のバージョンが古くなっています。'}[msg.reason]||'';
             log('この指示は反映できませんでした。'+(reasonText?'('+reasonText+')':''))
@@ -646,7 +663,7 @@
         }
       }catch(e){
         notice(e.message);
-        log('指示を送信できませんでした。');
+        log(describePromptSubmitError(e.code));
       }finally{
         promptSending=false;
         $('action').disabled=
