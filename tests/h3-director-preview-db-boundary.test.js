@@ -200,6 +200,7 @@ function baseDeps(db, overrides) {
     checkDirectorEnabled: async () => ({ ok: true }),
     getDirectorEntitlement: async () => ({ ok: true, allowed: true, accountStatus: 'active', balance: db.state.balance }),
     moderateDirectorPrompt: async () => ({ ok: true, allow: true }),
+    bindDirectorSessionAnchor: async () => ({ ok: true, anchorPrompt: null, replay: false }),
     createDirectorSession: async () => ({ ok: true, sessionId: 'fal-session-1', sdp: 'v=0\r\ntest-answer', type: 'answer' })
   }, overrides);
 }
@@ -424,7 +425,11 @@ function loadApprovePromptWithMocks({ control, entitlement, moderation }) {
   };
   const fakeDirectorConfig = {
     id: directorConfigPath, filename: directorConfigPath, loaded: true,
-    exports: { PROMPT_MAX_CHARS: 2000, ALLOWED_PLANS: ['premium', 'scale', 'team', 'ultimate'] }
+    exports: {
+      PROMPT_MAX_CHARS: 2000,
+      ALLOWED_PLANS: ['premium', 'scale', 'team', 'ultimate'],
+      buildDirectorProviderPrompt: (prompt, anchor) => anchor ? `${anchor}\n${prompt}` : prompt
+    }
   };
   const prev = {
     confirmedAuth: require.cache[confirmedAuthPath],
@@ -524,6 +529,65 @@ test('approve-prompt: Preview + disabled → kill switchだけを理由に拒否
       await handler(req, res);
       assert.equal(res.statusCode, 200);
       assert.equal(res.payload.promptVersion, 2);
+    } finally { restore(); }
+  });
+});
+
+test('approve-prompt: image session returns the saved identity anchor with the original command', async () => {
+  await withVercelEnv('preview', async () => {
+    const session = {
+      id: SESSION_ID,
+      user_id: USER_ID,
+      status: 'live',
+      prompt_version: 1,
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      input_mode: 'image',
+      identity_anchor_prompt: '開始画像の主対象を固定する。',
+      anchor_bound_at: new Date().toISOString()
+    };
+    const db = approvePromptDb(session);
+    const { handler, restore } = loadApprovePromptWithMocks({
+      control: { ok: false },
+      entitlement: { ok: true, allowed: true, accountStatus: 'active' },
+      moderation: { ok: true, allow: true }
+    });
+    try {
+      const { req, res } = approvePromptReqRes(db);
+      await handler(req, res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.payload.prompt, 'next scene');
+      assert.equal(res.payload.providerPrompt, '開始画像の主対象を固定する。\nnext scene');
+    } finally { restore(); }
+  });
+});
+
+test('approve-prompt: image session without a complete anchor fails closed before approval', async () => {
+  await withVercelEnv('preview', async () => {
+    const session = {
+      id: SESSION_ID,
+      user_id: USER_ID,
+      status: 'live',
+      prompt_version: 1,
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      input_mode: 'image',
+      identity_anchor_prompt: null,
+      anchor_bound_at: null
+    };
+    let rpcCalls = 0;
+    const db = approvePromptDb(session);
+    const originalRpc = db.rpc;
+    db.rpc = async (...args) => { rpcCalls += 1; return originalRpc(...args); };
+    const { handler, restore } = loadApprovePromptWithMocks({
+      control: { ok: false },
+      entitlement: { ok: true, allowed: true, accountStatus: 'active' },
+      moderation: { ok: true, allow: true }
+    });
+    try {
+      const { req, res } = approvePromptReqRes(db);
+      await handler(req, res);
+      assert.equal(res.statusCode, 409);
+      assert.equal(res.payload.error, 'identity_anchor_unavailable');
+      assert.equal(rpcCalls, 0);
     } finally { restore(); }
   });
 });

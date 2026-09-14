@@ -25,14 +25,124 @@ process.env.FAL_KEY = process.env.FAL_KEY || 'test-fal-key';
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'test-openai-key';
 
 const startModule = require('../api/h3-director/start-session.js');
+const {
+  IMAGE_IDENTITY_ANCHOR_PROMPT,
+  buildDirectorProviderPrompt
+} = require('../api/_lib/h3-director-config.js');
 
 const root = path.join(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'h3-director.html'), 'utf8');
+const anchorMigration = fs.readFileSync(
+  path.join(root, 'supabase/migrations/20260914051700_h3_director_character_anchor.sql'),
+  'utf8'
+);
+const liveImageStore = fs.readFileSync(
+  path.join(root, 'api/_lib/h3-live-image-store.js'),
+  'utf8'
+);
+const h3LiveStart = fs.readFileSync(
+  path.join(root, 'api/h3-live/start.js'),
+  'utf8'
+);
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const IDEM_ID = '22222222-2222-4222-8222-222222222222';
 const SESSION_ID = '33333333-3333-4333-8333-333333333333';
 const IMAGE_UPLOAD_ID = '44444444-4444-4444-8444-444444444444';
+
+test('character anchor migration is additive, service-only, and does not touch billing', () => {
+  assert.match(anchorMigration, /add column if not exists input_mode text not null default 'text'/);
+  assert.match(anchorMigration, /add column if not exists initial_image_upload_id uuid/);
+  assert.match(anchorMigration, /add column if not exists identity_anchor_prompt text/);
+  assert.match(anchorMigration, /add column if not exists director_session_id uuid/);
+  assert.match(anchorMigration, /check \(not \(job_id is not null and director_session_id is not null\)\)/);
+  assert.match(anchorMigration, /where job_id is null\s+and director_session_id is null\s+and deleted_at is null\s+and superseded_at is null/);
+  assert.match(anchorMigration, /security invoker/);
+  assert.match(anchorMigration, /grant execute on function public\.bind_h3_director_session_anchor_atomic[\s\S]*?to service_role/);
+  assert.doesNotMatch(anchorMigration, /grant execute[\s\S]*?to (anon|authenticated)/i);
+  assert.doesNotMatch(anchorMigration, /credit_balances|credit_transactions|deduct|refund/i);
+});
+
+test('character anchor RPC locks the session, atomically claims the owned image, and rejects mode changes', () => {
+  const fn = anchorMigration.slice(
+    anchorMigration.indexOf('create or replace function public.bind_h3_director_session_anchor_atomic'),
+    anchorMigration.indexOf('revoke all on function public.bind_h3_director_session_anchor_atomic')
+  );
+  assert.match(fn, /from public\.h3_director_sessions[\s\S]*?for update/);
+  assert.match(fn, /update public\.h3_live_image_uploads[\s\S]*?set director_session_id = p_session_id[\s\S]*?user_id = p_user_id/);
+  assert.match(fn, /moderation_status = 'passed'/);
+  assert.match(fn, /job_id is null[\s\S]*?director_session_id is null/);
+  assert.match(fn, /return query select 'anchor_conflict'::text/);
+  assert.match(fn, /v_session\.identity_anchor_prompt is not distinct from v_anchor then[\s\S]*?true;\s*return;\s*end if/);
+  assert.match(fn, /v_session\.status <> 'reserved' or v_session\.charged_at is not null/);
+});
+
+test('shared upload replacement excludes both queued-job and Director-bound images', () => {
+  const createStart = liveImageStore.indexOf('async function createImageUploadSlot');
+  const expireStart = liveImageStore.indexOf('async function expirePendingUpload');
+  const createFn = liveImageStore.slice(createStart, liveImageStore.indexOf('// Load a registry row', createStart));
+  const expireFn = liveImageStore.slice(expireStart, liveImageStore.indexOf('async function deleteUploadById', expireStart));
+  for (const fn of [createFn, expireFn]) {
+    assert.match(fn, /\.is\('job_id', null\)[\s\S]*?\.is\('director_session_id', null\)/);
+  }
+  assert.ok(
+    createFn.indexOf(".is('director_session_id', null)") < createFn.indexOf('expirePendingUpload(db, prior)'),
+    'Director-bound rows must be excluded before any supersede/remove call'
+  );
+});
+
+test('regular H3 rejects a Director-bound upload before its reservation path', () => {
+  const imageValidation = h3LiveStart.slice(
+    h3LiveStart.indexOf("if (mode === 'image')"),
+    h3LiveStart.indexOf('// A charged replay was validated')
+  );
+  assert.match(
+    imageValidation,
+    /imageUploadRow\.director_session_id[\s\S]*?error: 'image_not_usable'/
+  );
+});
+
+test('provider prompt keeps text-only input unchanged and prefixes image sessions', () => {
+  assert.equal(buildDirectorProviderPrompt('  次は右へ走る  '), '次は右へ走る');
+  assert.equal(
+    buildDirectorProviderPrompt('次は右へ走る', IMAGE_IDENTITY_ANCHOR_PROMPT),
+    `${IMAGE_IDENTITY_ANCHOR_PROMPT}\n次は右へ走る`
+  );
+});
+
+test('start anchor binder sends a server-owned prompt and preserves text mode as null', async () => {
+  const calls = [];
+  const db = {
+    async rpc(name, args) {
+      calls.push({ name, args });
+      return {
+        data: {
+          code: 'bound',
+          input_mode: args.p_image_upload_id ? 'image' : 'text',
+          anchor_prompt: args.p_anchor_prompt,
+          replay: false
+        },
+        error: null
+      };
+    }
+  };
+  const imageResult = await startModule._test.bindDirectorSessionAnchor(db, {
+    sessionId: SESSION_ID,
+    userId: USER_ID,
+    imageUploadId: IMAGE_UPLOAD_ID
+  });
+  const textResult = await startModule._test.bindDirectorSessionAnchor(db, {
+    sessionId: SESSION_ID,
+    userId: USER_ID,
+    imageUploadId: ''
+  });
+  assert.equal(imageResult.anchorPrompt, IMAGE_IDENTITY_ANCHOR_PROMPT);
+  assert.equal(textResult.anchorPrompt, null);
+  assert.equal(calls[0].name, 'bind_h3_director_session_anchor_atomic');
+  assert.equal(calls[0].args.p_anchor_prompt, IMAGE_IDENTITY_ANCHOR_PROMPT);
+  assert.equal(calls[1].args.p_image_upload_id, null);
+  assert.equal(calls[1].args.p_anchor_prompt, null);
+});
 
 function makeDb() {
   const state = { session: null, balance: 1000, chargeWrites: 0, order: [] };
@@ -133,6 +243,11 @@ function baseDeps(db, overrides) {
     checkDirectorEnabled: async () => ({ ok: true }),
     getDirectorEntitlement: async () => ({ ok: true, allowed: true, accountStatus: 'active', balance: db.state.balance }),
     moderateDirectorPrompt: async () => ({ ok: true, allow: true }),
+    bindDirectorSessionAnchor: async (_db, input) => ({
+      ok: true,
+      anchorPrompt: input.imageUploadId ? 'test identity anchor' : null,
+      replay: false
+    }),
     createDirectorSession: async () => ({ ok: true, sessionId: 'fal-session-1', sdp: 'v=0\r\ntest-answer', type: 'answer' })
   }, overrides);
 }
@@ -277,19 +392,63 @@ test('a failed fal signed URL mint leaves credits untouched', async () => {
 // ---------------------------------------------------------------
 test('a successful image-attached start returns media.initialImageUrl', async () => {
   const db = makeDb();
+  const bindingCalls = [];
   const handler = startModule._test.createHandler(baseDeps(db, {
     getUploadRow: async () => ({ ok: true, row: { id: IMAGE_UPLOAD_ID, object_path: 'uploads/x', deleted_at: null, moderation_status: 'pending' } }),
     downloadAndValidate: async () => ({ ok: true, buffer: Buffer.from([1, 2, 3]), contentType: 'image/jpeg' }),
     createModerationSignedUrl: async () => ({ ok: true, signedUrl: 'https://example.test/mod' }),
     createFalSignedUrl: async () => ({ ok: true, signedUrl: 'https://example.test/fal-short-lived' }),
     markModeration: async () => true,
-    moderateImageInput: async () => ({ ok: true, allow: true })
+    moderateImageInput: async () => ({ ok: true, allow: true }),
+    bindDirectorSessionAnchor: async (_database, input) => {
+      bindingCalls.push(input);
+      return { ok: true, anchorPrompt: IMAGE_IDENTITY_ANCHOR_PROMPT, replay: false };
+    }
   }));
   const res = responseRecorder();
   await handler(request({ imageUploadId: IMAGE_UPLOAD_ID }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.media.initialImageUrl, 'https://example.test/fal-short-lived');
+  assert.equal(
+    res.body.media.initialProviderPrompt,
+    buildDirectorProviderPrompt('A live city street', IMAGE_IDENTITY_ANCHOR_PROMPT)
+  );
+  assert.deepEqual(bindingCalls, [{
+    sessionId: SESSION_ID,
+    userId: USER_ID,
+    imageUploadId: IMAGE_UPLOAD_ID
+  }]);
   assert.equal(db.state.chargeWrites, 1);
+});
+
+test('identity anchor binding failure stops before charge and provider creation', async () => {
+  const db = makeDb();
+  let providerCalls = 0;
+  const handler = startModule._test.createHandler(baseDeps(db, {
+    bindDirectorSessionAnchor: async () => ({ ok: false, error: 'anchor_state_failed' }),
+    createDirectorSession: async () => {
+      providerCalls += 1;
+      return { ok: true, sessionId: 'unexpected', sdp: 'v=0\r\nunexpected', type: 'answer' };
+    }
+  }));
+  const res = responseRecorder();
+  await handler(request(), res);
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.error, 'anchor_state_failed');
+  assert.equal(db.state.chargeWrites, 0);
+  assert.equal(providerCalls, 0);
+});
+
+test('identity anchor conflict is an idempotency conflict and costs zero credits', async () => {
+  const db = makeDb();
+  const handler = startModule._test.createHandler(baseDeps(db, {
+    bindDirectorSessionAnchor: async () => ({ ok: false, error: 'anchor_conflict' })
+  }));
+  const res = responseRecorder();
+  await handler(request(), res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.error, 'idempotency_conflict');
+  assert.equal(db.state.chargeWrites, 0);
 });
 
 // ---------------------------------------------------------------
@@ -327,7 +486,7 @@ test('an image-attached session stops safely when the provider does not confirm 
 test('additional prompt messages set replan:true', () => {
   // prompt is wrapped in directorPrompt() (adds a natural-speed hint unless the
   // user already specified a speed) — prompt_version and replan:true are unchanged.
-  assert.match(page, /type:'prompt',\s*prompt_version:approved\.promptVersion,\s*prompt:directorPrompt\(approved\.prompt\),\s*replan:true/);
+  assert.match(page, /type:'prompt',\s*prompt_version:approved\.promptVersion,\s*prompt:directorPrompt\(approved\.providerPrompt\|\|approved\.prompt\),\s*replan:true/);
 });
 
 // ---------------------------------------------------------------

@@ -189,7 +189,7 @@
     var videoClockBaseExpectedDisplayTime=null,videoClockBaseRtpTimestamp=null,videoClockLastLogAt=0;
     var lastVideoClockRatio=null,lastVideoMediaElapsed=null,lastVideoWallElapsed=null,lastPresentedFrames=null;
     var pendingStartKey='h3_director_pending_start_v1';
-    var imageUploadId=null,imageUploading=false,imageObjectUrl=null,sessionExpectsImage=false,initialImageUrlForConfigure=null;
+    var imageUploadId=null,imageUploading=false,imageObjectUrl=null,sessionExpectsImage=false,initialImageUrlForConfigure=null,initialProviderPromptForConfigure=null;
     // Additional-prompt audit state only. Keys are provider prompt_version
     // values; initial prompt_version=1 is not part of this ledger.
     var promptCommands=Object.create(null);
@@ -253,6 +253,7 @@
         prompt_version_conflict:'別の指示が先に受理されたため、この指示は送信されませんでした。内容を確認して再送してください。',
         session_not_live:'ライブがすでに終了しているため送信できませんでした。',
         content_safety_unavailable:'安全確認ができないため送信できませんでした。',
+        identity_anchor_unavailable:'開始画像の人物固定情報を確認できないため、指示を送信しませんでした。',
         account_restricted:'アカウントの状態により送信できませんでした。',
         access_revoked:'現在この機能を利用できません。'
       };
@@ -498,7 +499,7 @@
       var aspectRatio=$('aspectRatio').value;if(!['16:9','9:16'].includes(aspectRatio)){notice('画面比率を選択してください。');return}
       if(!window.RTCPeerConnection||!window.MediaRecorder){notice('このブラウザはライブ生成・録画に対応していません。');return}
       var startImageUploadId=imageUploadId;
-      sessionExpectsImage=!!startImageUploadId;initialImageUrlForConfigure=null;
+      sessionExpectsImage=!!startImageUploadId;initialImageUrlForConfigure=null;initialProviderPromptForConfigure=null;
       liveStartRequestedAt=Date.now();firstChunkAt=0;chunkPlaybackTotal=0;chunkRequestedTotal=0;diagnosticSummaryShown=false;
       dataChannelOpenedAt=0;configuredAt=0;firstVideoTrackAt=0;recorderStartedAt=0;recorderStoppedAt=0;
       lastHeartbeatAt=0;heartbeatCount=0;streamEndedReason='';lastSessionWallMs=0;chunkMetricsCount=0;
@@ -527,7 +528,7 @@
         control.onopen=function(){try{
           dataChannelOpenedAt=Date.now();
           diagnostic('datachannel open: +'+(elapsedFromStart(dataChannelOpenedAt)||0).toFixed(1)+'s');
-          var outgoingPrompt=directorPrompt(prompt);
+          var outgoingPrompt=directorPrompt(initialProviderPromptForConfigure||prompt);
           var configureMsg={type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12};
           if(initialImageUrlForConfigure)configureMsg.image_url=initialImageUrlForConfigure;
           diagnostic('configure prompt chars: raw='+prompt.length+' / sent='+outgoingPrompt.length);
@@ -667,6 +668,7 @@
           result=await api('/api/h3-director/start-session',startOptions);
         }
         initialImageUrlForConfigure=(result.media&&result.media.initialImageUrl)||null;
+        initialProviderPromptForConfigure=(result.media&&result.media.initialProviderPrompt)||null;
         sessionId=result.session.id;expiresAt=Date.parse(result.session.expiresAt);await pc.setRemoteDescription(result.answer);
         clearPendingStart();
         live=true;starting=false;heartbeatFailures=0;document.body.classList.add('live-mode');$('historyPanel').hidden=true;$('historyToggle').textContent='履歴を見る';$('historyToggle').setAttribute('aria-expanded','false');$('action').classList.remove('connecting');$('action').textContent='追加指示を送る';$('action').disabled=true;$('prompt').value='';$('stop').classList.add('show');state('LIVE');
@@ -705,7 +707,7 @@
         sendControl({
           type:'prompt',
           prompt_version:approved.promptVersion,
-          prompt:directorPrompt(approved.prompt),
+          prompt:directorPrompt(approved.providerPrompt||approved.prompt),
           replan:true
         });
         recordPromptEvent(approved.promptVersion,'sent','data_channel_send');

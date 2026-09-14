@@ -98,6 +98,7 @@ async function createImageUploadSlot(db, userId, { contentType, filename } = {})
     .select('id, object_path')
     .eq('user_id', userId)
     .is('job_id', null)
+    .is('director_session_id', null)
     .is('deleted_at', null)
     .is('superseded_at', null);
   if (priorLookupError) {
@@ -320,7 +321,8 @@ async function deleteUploadObject(db, row) {
 // superseded_at is a SEPARATE marker from deleted_at (added by the migration
 // that replaced h3_live_image_uploads_one_bound_per_job_idx): leaving
 // deleted_at null here (so the row stays sweepable) but doing nothing else
-// would leave the row still matching job_id IS NULL AND deleted_at IS NULL —
+// would leave the row still matching job_id IS NULL, director_session_id IS
+// NULL, AND deleted_at IS NULL —
 // i.e. still colliding with the very "one pending upload per user" unique
 // index this whole fix exists to add, which would make the caller's very
 // next insert in createImageUploadSlot fail with a unique violation on every
@@ -335,13 +337,12 @@ async function deleteUploadObject(db, row) {
 // reserve_h3_live_job_atomic. Removing the Storage object first (the
 // previous version of this function did that) would then delete the input
 // image out from under an active job — found in review, PR #224 follow-up
-// round 2. Conditioning this UPDATE on job_id IS NULL (in addition to
-// deleted_at/superseded_at IS NULL — the same predicate as the unique index)
-// makes it lose that race cleanly: if a bind won, this UPDATE matches zero
-// rows and the object is never touched. That is also correct bookkeeping,
-// not just a safe no-op — once job_id is set the row no longer collides with
-// h3_live_image_uploads_one_pending_per_user_idx at all, so there is nothing
-// left here for this call to do.
+// round 2. Conditioning this UPDATE on both job_id IS NULL and
+// director_session_id IS NULL (in addition to deleted_at/superseded_at IS
+// NULL — the same predicate as the unique index) makes it lose that race
+// cleanly: if a queued H3 job or a Director session bind won, this UPDATE
+// matches zero rows and the object is never touched. Once either binding is
+// set the row no longer collides with the pending index.
 //
 // Never throws (all failures are caught internally). Returns whether the
 // row was left in a state where it no longer blocks a new upload slot for
@@ -363,6 +364,7 @@ async function expirePendingUpload(db, row) {
       })
       .eq('id', row.id)
       .is('job_id', null)
+      .is('director_session_id', null)
       .is('deleted_at', null)
       .is('superseded_at', null)
       .select('id');

@@ -117,17 +117,17 @@ test('directorPrompt: 空文字・空白のみは補助文だけのtrim済み文
   assert.equal(directorPrompt('   '), ' 動きは自然な実時間の速度。スローモーションにしない。');
 });
 
-test('初期configureメッセージはdirectorPrompt(prompt)を使用する', () => {
+test('初期configureメッセージはサーバー固定済みpromptを優先してdirectorPromptへ渡す', () => {
   assert.match(
     page,
-    /var outgoingPrompt=directorPrompt\(prompt\);\s*var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
+    /var outgoingPrompt=directorPrompt\(initialProviderPromptForConfigure\|\|prompt\);\s*var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
   );
 });
 
-test('Live中の追加promptはdirectorPrompt(approved.prompt)を使用する', () => {
+test('Live中の追加promptはサーバー固定済みpromptを優先し旧API応答へも対応する', () => {
   assert.match(
     page,
-    /sendControl\(\{\s*type:'prompt',\s*prompt_version:approved\.promptVersion,\s*prompt:directorPrompt\(approved\.prompt\),\s*replan:true\s*\}\);/
+    /sendControl\(\{\s*type:'prompt',\s*prompt_version:approved\.promptVersion,\s*prompt:directorPrompt\(approved\.providerPrompt\|\|approved\.prompt\),\s*replan:true\s*\}\);/
   );
 });
 
@@ -163,11 +163,11 @@ test('acceleration / chunk_duration などの未公開パラメータをClient�
   // configure/prompt messages sent to fal must not gain new fields.
   assert.match(
     page,
-    /var outgoingPrompt=directorPrompt\(prompt\);\s*var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
+    /var outgoingPrompt=directorPrompt\(initialProviderPromptForConfigure\|\|prompt\);\s*var configureMsg=\{type:'configure',protocol_version:1,prompt_version:1,prompt:outgoingPrompt,resolution:'768p',aspect_ratio:aspectRatio,memory:12\};/
   );
   assert.match(
     page,
-    /sendControl\(\{\s*type:'prompt',\s*prompt_version:approved\.promptVersion,\s*prompt:directorPrompt\(approved\.prompt\),\s*replan:true\s*\}\);/
+    /sendControl\(\{\s*type:'prompt',\s*prompt_version:approved\.promptVersion,\s*prompt:directorPrompt\(approved\.providerPrompt\|\|approved\.prompt\),\s*replan:true\s*\}\);/
   );
   // acceleration/chunk_duration appear ONLY as read-only diagnostic() output
   // sourced from server messages (msg.acceleration / msg.chunk_duration),
@@ -259,6 +259,7 @@ const KNOWN_PROMPT_SUBMIT_ERRORS = [
   ['prompt_version_conflict', '別の指示が先に受理されたため、この指示は送信されませんでした。内容を確認して再送してください。'],
   ['session_not_live', 'ライブがすでに終了しているため送信できませんでした。'],
   ['content_safety_unavailable', '安全確認ができないため送信できませんでした。'],
+  ['identity_anchor_unavailable', '開始画像の人物固定情報を確認できないため、指示を送信しませんでした。'],
   ['account_restricted', 'アカウントの状態により送信できませんでした。'],
   ['access_revoked', '現在この機能を利用できません。']
 ];

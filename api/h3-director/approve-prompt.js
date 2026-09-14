@@ -5,7 +5,9 @@ const {
   jsonBody, isUuid, checkDirectorEnabled, getDirectorEntitlement
 } = require('../_lib/h3-director-store.js');
 const { moderateDirectorPrompt } = require('../_lib/h3-director-moderation.js');
-const { PROMPT_MAX_CHARS, ALLOWED_PLANS } = require('../_lib/h3-director-config.js');
+const {
+  PROMPT_MAX_CHARS, ALLOWED_PLANS, buildDirectorProviderPrompt
+} = require('../_lib/h3-director-config.js');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -23,11 +25,15 @@ module.exports = async function handler(req, res) {
   }
 
   const { data: session, error } = await auth.supabase.from('h3_director_sessions')
-    .select('id,status,prompt_version,expires_at').eq('id', sessionId).eq('user_id', auth.user.id).maybeSingle();
+    .select('id,status,prompt_version,expires_at,input_mode,identity_anchor_prompt,anchor_bound_at')
+    .eq('id', sessionId).eq('user_id', auth.user.id).maybeSingle();
   if (error) return res.status(500).json({ ok: false, error: 'session_lookup_failed' });
   if (!session) return res.status(404).json({ ok: false, error: 'session_not_found' });
   if (!['connecting', 'live'].includes(session.status) || Date.now() >= Date.parse(String(session.expires_at || ''))) {
     return res.status(409).json({ ok: false, error: 'session_not_live' });
+  }
+  if (session.input_mode === 'image' && (!session.anchor_bound_at || !session.identity_anchor_prompt)) {
+    return res.status(409).json({ ok: false, error: 'identity_anchor_unavailable' });
   }
 
   // Same Preview-only relaxation as start-session.js / heartbeat.js.
@@ -75,6 +81,7 @@ module.exports = async function handler(req, res) {
     ok: true,
     commandId: approved.command_id,
     prompt,
+    providerPrompt: buildDirectorProviderPrompt(prompt, session.identity_anchor_prompt),
     promptVersion: Number(approved.prompt_version),
     replay: approved.replay === true
   });

@@ -157,6 +157,7 @@ for (const point of ['after_credit_deduction', 'after_fal_request', 'before_prov
       checkDirectorEnabled: async () => ({ ok: true }),
       getDirectorEntitlement: async () => ({ ok: true, allowed: true, accountStatus: 'active', balance: db.state.balance }),
       moderateDirectorPrompt: async () => ({ ok: true, allow: true }),
+      bindDirectorSessionAnchor: async () => ({ ok: true, anchorPrompt: null, replay: false }),
       createDirectorSession: async () => {
         providerCalls += 1;
         return { ok: true, sessionId: 'fal-session-1', sdp: 'v=0\r\ntest-answer', type: 'answer' };
@@ -219,6 +220,7 @@ test('same idempotency key replays the stored answer without a second charge or 
     checkDirectorEnabled: async () => ({ ok: true }),
     getDirectorEntitlement: async () => ({ ok: true, allowed: true, accountStatus: 'active', balance: db.state.balance }),
     moderateDirectorPrompt: async () => ({ ok: true, allow: true }),
+    bindDirectorSessionAnchor: async () => ({ ok: true, anchorPrompt: null, replay: false }),
     createDirectorSession: async () => {
       providerCalls += 1;
       return { ok: true, sessionId: 'fal-session-1', sdp: 'v=0\r\ntest-answer', type: 'answer' };

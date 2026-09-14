@@ -30,6 +30,14 @@ function currentCreditCost(at = Date.now()) {
 const CREDIT_COST = currentCreditCost();
 
 const PROMPT_MAX_CHARS = 2000;
+const IMAGE_IDENTITY_ANCHOR_PROMPT =
+  '主対象固定：開始画像と同一の人物・キャラクター・物体を維持する。人物の場合は顔、髪、目、衣装、装飾、体格、色を変えない。追加指示を適用しても同一性を維持し、明示された変更だけ許可する。';
+
+function buildDirectorProviderPrompt(prompt, anchorPrompt = '') {
+  const instruction = String(prompt || '').trim();
+  const anchor = String(anchorPrompt || '').trim();
+  return anchor ? `${anchor}\n${instruction}` : instruction;
+}
 const HEARTBEAT_INTERVAL_MS = 5000;
 const SESSION_CREATE_TIMEOUT_MS = 45000;
 const HEARTBEAT_TIMEOUT_MS = 4000;
@@ -77,6 +85,8 @@ module.exports = {
   CREDIT_COST,
   currentCreditCost,
   PROMPT_MAX_CHARS,
+  IMAGE_IDENTITY_ANCHOR_PROMPT,
+  buildDirectorProviderPrompt,
   HEARTBEAT_INTERVAL_MS,
   SESSION_CREATE_TIMEOUT_MS,
   HEARTBEAT_TIMEOUT_MS,
