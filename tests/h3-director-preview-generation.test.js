@@ -139,6 +139,7 @@ function baseDeps(db, overrides) {
     checkDirectorEnabled: async () => ({ ok: true }),
     getDirectorEntitlement: async () => ({ ok: true, allowed: true, accountStatus: 'active', balance: db.state.balance }),
     moderateDirectorPrompt: async () => ({ ok: true, allow: true }),
+    bindDirectorSessionAnchor: async () => ({ ok: true, anchorPrompt: null, replay: false }),
     createDirectorSession: async () => ({ ok: true, sessionId: 'fal-session-1', sdp: 'v=0\r\ntest-answer', type: 'answer' })
   }, overrides);
 }

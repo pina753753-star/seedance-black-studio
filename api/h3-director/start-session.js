@@ -13,7 +13,8 @@ const { createDirectorSession } = require('../_lib/h3-director-fal.js');
 const {
   ALLOWED_PLANS, CREDIT_COST, DURATION_SECONDS, RESOLUTION,
   ALLOWED_ASPECT_RATIOS,
-  PROMPT_MAX_CHARS, requireDirectorConfig, openaiApiKey
+  PROMPT_MAX_CHARS, IMAGE_IDENTITY_ANCHOR_PROMPT, buildDirectorProviderPrompt,
+  requireDirectorConfig, openaiApiKey
 } = require('../_lib/h3-director-config.js');
 // Reused as-is from H3 Max's own image isolation basis (private quarantine
 // bucket + moderation gate). See the note above image-upload-url.js: this
@@ -33,6 +34,19 @@ async function fetchSession(db, sessionId) {
   const { data, error } = await db.from('h3_director_sessions').select('*').eq('id', sessionId).maybeSingle();
   if (error) console.error('[h3-director/start] session lookup failed:', error.message);
   return data || null;
+}
+
+async function bindDirectorSessionAnchor(db, { sessionId, userId, imageUploadId }) {
+  const { data, error } = await db.rpc('bind_h3_director_session_anchor_atomic', {
+    p_session_id: sessionId,
+    p_user_id: userId,
+    p_image_upload_id: imageUploadId || null,
+    p_anchor_prompt: imageUploadId ? IMAGE_IDENTITY_ANCHOR_PROMPT : null
+  });
+  if (error) return { ok: false, error: 'anchor_state_failed' };
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || row.code !== 'bound') return { ok: false, error: row?.code || 'anchor_state_failed' };
+  return { ok: true, anchorPrompt: row.anchor_prompt || null, replay: row.replay === true };
 }
 
 async function refund(db, sessionId, code, message) {
@@ -87,6 +101,7 @@ function createHandler(overrides = {}) {
     markModeration,
     deleteUploadObject,
     moderateImageInput: moderateDirectorImageInput,
+    bindDirectorSessionAnchor,
     interruptionHook: async () => {},
     ...overrides
   };
@@ -257,9 +272,28 @@ function createHandler(overrides = {}) {
     return res.status(status).json({ ok: false, error: reserved?.code || 'reservation_rejected' });
   }
 
+  if (reserved.code === 'idempotency_conflict') return res.status(409).json({ ok: false, error: 'idempotency_conflict' });
+
+  // Bind text/image mode and the server-owned identity instruction before any
+  // charge. An idempotent replay must use the same image mode and upload id.
+  const anchor = await deps.bindDirectorSessionAnchor(db, {
+    sessionId: reserved.session_id,
+    userId: auth.user.id,
+    imageUploadId
+  });
+  if (!anchor.ok) {
+    const conflict = anchor.error === 'anchor_conflict' || anchor.error === 'session_not_bindable';
+    const unusable = anchor.error === 'image_not_usable';
+    return res.status(conflict || unusable ? 409 : 500).json({
+      ok: false,
+      error: conflict ? 'idempotency_conflict' : anchor.error,
+      ...(unusable ? { message: '開始画像の安全な固定を確認できませんでした。画像を選び直してお試しください。' } : {})
+    });
+  }
+
   let session = await fetchSession(db, reserved.session_id);
   if (!session) return res.status(500).json({ ok: false, error: 'session_state_unavailable' });
-  if (reserved.code === 'idempotency_conflict') return res.status(409).json({ ok: false, error: 'idempotency_conflict' });
+  const initialProviderPrompt = buildDirectorProviderPrompt(prompt, anchor.anchorPrompt);
 
   // Exact replay of a response whose delivery failed: same offer fingerprint,
   // so the saved answer remains valid and no second paid session is created.
@@ -268,7 +302,7 @@ function createHandler(overrides = {}) {
       ok: true,
       session: publicSession(session),
       answer: { sdp: session.provider_answer_sdp, type: 'answer' },
-      ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl } } : {}),
+      ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl, initialProviderPrompt } } : {}),
       replay: true
     });
   }
@@ -315,7 +349,7 @@ function createHandler(overrides = {}) {
         ok: true,
         session: publicSession(session),
         answer: { sdp: session.provider_answer_sdp, type: 'answer' },
-        ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl } } : {}),
+        ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl, initialProviderPrompt } } : {}),
         replay: true
       });
     }
@@ -414,7 +448,7 @@ function createHandler(overrides = {}) {
     ok: true,
     session: publicSession(session),
     answer: { sdp: upstream.sdp, type: upstream.type },
-    ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl } } : {}),
+    ...(initialImageFalUrl ? { media: { initialImageUrl: initialImageFalUrl, initialProviderPrompt } } : {}),
     fixed: { durationSeconds: DURATION_SECONDS, resolution: RESOLUTION, aspectRatio: session.aspect_ratio, creditCost: CREDIT_COST }
   });
   };
@@ -422,4 +456,4 @@ function createHandler(overrides = {}) {
 
 const handler = createHandler();
 module.exports = handler;
-module.exports._test = { createHandler, markNeedsReview };
+module.exports._test = { createHandler, markNeedsReview, bindDirectorSessionAnchor };

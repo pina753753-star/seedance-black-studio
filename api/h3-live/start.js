@@ -309,6 +309,7 @@ module.exports = async function handler(req, res) {
     if (
       imageUploadRow.deleted_at ||
       imageUploadRow.moderation_status === 'blocked' ||
+      imageUploadRow.director_session_id ||
       (imageUploadRow.job_id && !boundToOwnReplay)
     ) {
       return res.status(409).json({
