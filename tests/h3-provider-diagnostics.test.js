@@ -17,6 +17,8 @@ const storeSource = fs.readFileSync(path.join(root, 'api/_lib/h3-live-store.js')
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
 test('diagnostic migration is additive, nullable, and does not change billing', () => {
+  assert.match(migration, /^--[\s\S]*?begin;/i);
+  assert.match(migration, /commit;\s*$/i);
   assert.match(migration, /alter table public\.h3_live_jobs/);
   assert.match(migration, /add column if not exists provider_prompt text/);
   assert.match(migration, /add column if not exists provider_expanded_prompt text/);

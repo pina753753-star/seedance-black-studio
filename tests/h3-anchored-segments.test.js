@@ -18,6 +18,7 @@ test('anchored segment is fixed to a short five-second interval', () => {
   assert.equal(input.duration, 5);
   assert.equal(input.resolution, '768P');
   assert.equal(input.aspect_ratio, '16:9');
+  assert.equal(input.prompt_expansion_mode, 'disabled');
 });
 
 test('every segment carries the original identity image', () => {

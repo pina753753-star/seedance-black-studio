@@ -80,7 +80,7 @@ test('H3 image input uses the official exact-first-frame payload', () => {
   assert.equal(input.resolution, '768P');
   assert.equal(Object.prototype.hasOwnProperty.call(input, 'aspect_ratio'), false);
   assert.equal(input.enable_safety_checker, true);
-  assert.equal(input.prompt_expansion_mode, 'balanced');
+  assert.equal(input.prompt_expansion_mode, 'disabled');
   assert.ok(input.prompt.startsWith('素早く薙刀を振る'));
   assert.ok(input.prompt.includes(H3_IMAGE_FIDELITY_MARKER));
 });
@@ -218,6 +218,11 @@ test('8b. a no-slow-motion instruction selects fast guidance rather than slow gu
   assert.doesNotMatch(built, /Keep slow motion only/);
 });
 
+test('8c. fast text prompts disable provider rewriting', () => {
+  const input = buildH3MaxInput('高速で戦う。スローモーションにしない。');
+  assert.equal(input.prompt_expansion_mode, 'disabled');
+});
+
 test('9. empty prompt stays empty for the motion helper', () => {
   assert.equal(buildH3MaxMotionPrompt(''), '');
   assert.equal(buildH3MaxMotionPrompt('   '), '');
@@ -246,21 +251,21 @@ test('12. provider parameters unchanged: text/reference/storyboard/image', () =>
   assert.equal(refInput.resolution, '768P');
   assert.equal(refInput.aspect_ratio, '16:9');
   assert.equal(refInput.enable_safety_checker, true);
-  assert.equal(refInput.prompt_expansion_mode, 'balanced');
+  assert.equal(refInput.prompt_expansion_mode, 'disabled');
 
   const storyboardInput = buildH3MaxStoryboardInput('通常のシーン', ['https://example.test/a.png']);
   assert.equal(storyboardInput.duration, 15);
   assert.equal(storyboardInput.resolution, '768P');
   assert.equal(storyboardInput.aspect_ratio, '16:9');
   assert.equal(storyboardInput.enable_safety_checker, true);
-  assert.equal(storyboardInput.prompt_expansion_mode, 'balanced');
+  assert.equal(storyboardInput.prompt_expansion_mode, 'disabled');
 
   const imageInput = buildH3MaxImageInput('通常のシーン', 'https://example.test/frame.png');
   assert.equal(imageInput.duration, 15);
   assert.equal(imageInput.resolution, '768P');
   assert.equal(Object.prototype.hasOwnProperty.call(imageInput, 'aspect_ratio'), false);
   assert.equal(imageInput.enable_safety_checker, true);
-  assert.equal(imageInput.prompt_expansion_mode, 'balanced');
+  assert.equal(imageInput.prompt_expansion_mode, 'disabled');
 });
 
 test('13. single-image mode uses the exact-first-frame image-to-video model', () => {

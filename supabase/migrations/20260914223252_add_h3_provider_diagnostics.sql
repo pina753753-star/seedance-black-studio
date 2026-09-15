@@ -3,6 +3,8 @@
 -- compare the exact submitted prompt with fal's expanded prompt and reproduce
 -- a result by seed without exposing either value through sanitizeJob().
 
+begin;
+
 alter table public.h3_live_jobs
   add column if not exists provider_prompt text,
   add column if not exists provider_expanded_prompt text,
@@ -35,3 +37,5 @@ comment on column public.h3_live_jobs.provider_seed is
   'Reproduction seed returned by fal; nullable when unavailable.';
 comment on column public.h3_live_jobs.provider_timings is
   'Finite numeric timing metrics returned by fal; nullable when unavailable.';
+
+commit;

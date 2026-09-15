@@ -33,6 +33,8 @@ const {
 
 const REQUEST_TIMEOUT_MS = 15000;
 const ANCHORED_SEGMENT_DURATION_SECONDS = 5;
+const PROMPT_EXPANSION_DISABLED = 'disabled';
+const PROMPT_EXPANSION_BALANCED = 'balanced';
 
 // fal.ai aspect ratio for a broadcast-style screen.
 const ASPECT_RATIO = '16:9';
@@ -102,6 +104,12 @@ function buildH3MaxMotionPrompt(instruction) {
   return `${originalPrompt}\n\n${guidance}`;
 }
 
+function textPromptExpansionMode(instruction) {
+  return FAST_ACTION_RE.test(String(instruction || ''))
+    ? PROMPT_EXPANSION_DISABLED
+    : PROMPT_EXPANSION_BALANCED;
+}
+
 // Build the fal.ai input payload for a text instruction. The 15s duration is
 // referenced here (and in buildH3MaxImageInput) and nowhere else. <-- SINGLE
 // POINT OF CHANGE if fal.ai rejects 15s for minimax/h3-max.
@@ -112,7 +120,7 @@ function buildH3MaxInput(instruction) {
     resolution: RESOLUTION_FAL,
     aspect_ratio: ASPECT_RATIO,
     enable_safety_checker: true,
-    prompt_expansion_mode: 'balanced'
+    prompt_expansion_mode: textPromptExpansionMode(instruction)
   };
 }
 
@@ -160,7 +168,7 @@ function buildH3MaxImageInput(instruction, imageUrl) {
     duration: DURATION_SECONDS,
     resolution: RESOLUTION_FAL,
     enable_safety_checker: true,
-    prompt_expansion_mode: 'balanced'
+    prompt_expansion_mode: PROMPT_EXPANSION_DISABLED
   };
 }
 
@@ -177,7 +185,7 @@ function buildH3MaxReferenceInput(instruction, imageUrls) {
     resolution: RESOLUTION_FAL,
     aspect_ratio: ASPECT_RATIO,
     enable_safety_checker: true,
-    prompt_expansion_mode: 'balanced'
+    prompt_expansion_mode: PROMPT_EXPANSION_DISABLED
   };
 }
 
@@ -204,7 +212,7 @@ function buildH3AnchoredSegmentInput(instruction, identityImageUrl, previousVide
     resolution: RESOLUTION_FAL,
     aspect_ratio: ASPECT_RATIO,
     enable_safety_checker: true,
-    prompt_expansion_mode: 'balanced'
+    prompt_expansion_mode: PROMPT_EXPANSION_DISABLED
   };
   if (previous) input.reference_video_urls = [previous];
   if (hasSeed && Number.isSafeInteger(numericSeed) && numericSeed >= 0) input.seed = numericSeed;
@@ -529,6 +537,7 @@ module.exports = {
     buildH3MaxReferenceInput,
     buildH3MaxStoryboardInput,
     buildH3AnchoredSegmentInput,
+    textPromptExpansionMode,
     classifyProviderError,
     extractVideoUrl,
     extractProviderDiagnostics,
@@ -556,5 +565,7 @@ module.exports._test = {
   SLOW_MOTION_NEGATION_RE,
   requestsSlowMotion,
   FAST_ACTION_RE,
-  ANCHORED_SEGMENT_DURATION_SECONDS
+  ANCHORED_SEGMENT_DURATION_SECONDS,
+  PROMPT_EXPANSION_DISABLED,
+  PROMPT_EXPANSION_BALANCED
 };

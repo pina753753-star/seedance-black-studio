@@ -102,6 +102,21 @@ test('directorPrompt: "slow motion" を含む場合は補助を追加しない',
   assert.equal(directorPrompt('cat walking in slow motion'), 'cat walking in slow motion');
 });
 
+test('directorPrompt: 一部スローの後に高速へ戻る指示はスロー区間を限定する', () => {
+  const directorPrompt = loadDirectorPrompt();
+  const built = directorPrompt('5〜7秒だけスローモーション。その後すぐ高速戦闘へ戻る');
+  assert.match(built, /スローモーションは明示した区間だけに限定/);
+  assert.match(built, /その直後から指定どおり実時間または高速動作へ戻す/);
+  assert.match(built, /指定区間以外をスローにしない/);
+});
+
+test('directorPrompt: 一部スローの後に通常速度へ戻る指示もスロー区間を限定する', () => {
+  const directorPrompt = loadDirectorPrompt();
+  const built = directorPrompt('2秒だけスロー、その後は通常速度へ戻る');
+  assert.match(built, /スローモーションは明示した区間だけに限定/);
+  assert.match(built, /指定区間以外をスローにしない/);
+});
+
 test('directorPrompt: 「高速」を含む場合も高速動作補助を追加する', () => {
   const directorPrompt = loadDirectorPrompt();
   assert.match(directorPrompt('高速で走る'), /開始直後から実時間の高速動作/);
