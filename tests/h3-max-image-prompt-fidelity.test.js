@@ -10,10 +10,13 @@ const { buildH3MaxInput, buildH3MaxReferenceInput, buildH3MaxStoryboardInput } =
 
 const {
   buildH3MaxImagePrompt,
+  buildH3MaxReferencePrompt,
   buildH3MaxImageInput,
   H3_IMAGE_FIDELITY_MARKER,
+  H3_REFERENCE_FIDELITY_MARKER,
   buildH3MaxMotionPrompt,
-  H3_MOTION_MARKER
+  H3_MOTION_MARKER,
+  requestsSlowMotion
 } = h3Fal._test || {};
 
 // ---------------------------------------------------------------
@@ -33,25 +36,22 @@ test('H3 image prompt keeps the original user prompt verbatim at the beginning',
 test('H3 image prompt explicitly preserves subject identity and appearance', () => {
   const built = buildH3MaxImagePrompt('走りながら振り返る');
 
-  assert.match(built, /Preserve the same character or subject identity/i);
+  assert.match(built, /supplied image is the exact first frame/i);
   assert.match(built, /face/i);
-  assert.match(built, /hairstyle/i);
+  assert.match(built, /hair/i);
   assert.match(built, /outfit/i);
   assert.match(built, /body proportions/i);
-  assert.match(built, /color palette/i);
-  assert.match(built, /Do not redesign/i);
-  assert.match(built, /different person or character/i);
-  assert.match(built, /Image 1 is the authoritative visual reference for the main subject/i);
-  assert.match(built, /Keep the main subject consistent with Image 1 throughout the entire video/i);
+  assert.match(built, /throughout the video/i);
+  assert.match(built, /Never morph, age, or change the subject/i);
 });
 
 test('H3 image prompt explicitly prioritizes requested action and motion speed', () => {
   const built = buildH3MaxImagePrompt('激しく走って戦う');
 
-  assert.match(built, /Follow the user's requested action/i);
-  assert.match(built, /motion speed and intensity/i);
-  assert.match(built, /do not reinterpret it as slow motion/i);
-  assert.match(built, /unless the user explicitly asks for slow/i);
+  assert.match(built, /FAST REAL-TIME ACTION/i);
+  assert.match(built, /Start moving in the first frame/i);
+  assert.match(built, /clear body displacement/i);
+  assert.match(built, /without pose holds, lingering close-ups, floaty movement, or slow motion/i);
 });
 
 test('H3 image prompt does not duplicate the system guidance', () => {
@@ -66,7 +66,7 @@ test('H3 image prompt does not duplicate the system guidance', () => {
   assert.equal(markerMatches.length, 1);
 });
 
-test('H3 image input keeps existing provider parameters unchanged', () => {
+test('H3 image input uses the official exact-first-frame payload', () => {
   const imageUrl = 'https://example.test/frame.png';
 
   const input = buildH3MaxImageInput(
@@ -74,10 +74,11 @@ test('H3 image input keeps existing provider parameters unchanged', () => {
     imageUrl
   );
 
-  assert.deepEqual(input.reference_image_urls, [imageUrl]);
-  assert.equal(Object.prototype.hasOwnProperty.call(input, 'image_url'), false);
+  assert.equal(input.image_url, imageUrl);
+  assert.equal(Object.prototype.hasOwnProperty.call(input, 'reference_image_urls'), false);
   assert.equal(input.duration, 15);
   assert.equal(input.resolution, '768P');
+  assert.equal(Object.prototype.hasOwnProperty.call(input, 'aspect_ratio'), false);
   assert.equal(input.enable_safety_checker, true);
   assert.equal(input.prompt_expansion_mode, 'balanced');
   assert.ok(input.prompt.startsWith('素早く薙刀を振る'));
@@ -89,29 +90,24 @@ test('empty prompt stays empty rather than becoming system-guidance-only', () =>
   assert.equal(buildH3MaxImagePrompt('   '), '');
 });
 
-test('H3 image guidance preserves identity without weakening explicit scene instructions', () => {
+test('H3 image guidance preserves the complete original scene instruction', () => {
   const original =
     '月夜に照らされ薙刀を使って舞っているように戦う。背景は実写の日本庭園。';
 
   const built = buildH3MaxImagePrompt(original);
 
   assert.ok(built.startsWith(original));
-  assert.match(built, /fully applying any scene, lighting, camera, environment, or background changes explicitly requested by the user/i);
-  assert.match(built, /Do not alter the subject's identity or appearance merely to satisfy those scene changes/i);
+  assert.equal(built.slice(0, original.length), original);
+  assert.match(built, /supplied image is the exact first frame/i);
 });
 
-test('11. H3 image prompt contains the 3 added subject-identity-reference sentences', () => {
+test('11. H3 image prompt uses concise identity guidance without repeated requirements', () => {
   const built = buildH3MaxImagePrompt('普通に歩く');
 
-  assert.match(built, /Treat Image 1 as a subject-identity reference, not merely as a style reference\./);
-  assert.match(
-    built,
-    /The generated main subject must remain recognizably the same individual or character as Image 1 across all shots and camera angles\./
-  );
-  assert.match(
-    built,
-    /When Image 1 does not show the full body or every angle, infer unseen details conservatively while preserving all visible identity-defining features and costume design\./
-  );
+  assert.match(built, /The supplied image is the exact first frame\./);
+  assert.match(built, /Keep the same recognizable face, hair, eyes, outfit, accessories, body proportions, and colors throughout the video\./);
+  assert.match(built, /Infer unseen details conservatively\./);
+  assert.ok(built.length < 700, 'system guidance should not overwhelm a short user action');
 });
 
 // ---------------------------------------------------------------
@@ -143,7 +139,18 @@ test('3. reference: H3_MOTION_MARKER appears exactly once, reference_image_urls 
   ) || [];
 
   assert.equal(matches.length, 1);
+  assert.equal((input.prompt.match(/\[Pina Studio H3 reference fidelity requirements\]/g) || []).length, 1);
   assert.deepEqual(input.reference_image_urls, urls);
+});
+
+test('3b. reference prompt preserves identity guidance without changing the user instruction', () => {
+  const original = '画像1の女性が全速力で走る';
+  const built = buildH3MaxReferencePrompt(original);
+
+  assert.ok(built.startsWith(original));
+  assert.ok(built.includes(H3_REFERENCE_FIDELITY_MARKER));
+  assert.match(built, /Treat each Image N as an identity and design reference/i);
+  assert.match(built, /Do not merge distinct referenced subjects/i);
 });
 
 test('4. storyboard: H3_MOTION_MARKER appears exactly once, STORYBOARD_ORDER_HINT is preserved', () => {
@@ -177,10 +184,10 @@ test('6. fast action: generated prompt keeps the original and includes fast-moti
   const built = buildH3MaxMotionPrompt(original);
 
   assert.ok(built.startsWith(original));
-  assert.match(built, /clearly fast real-time speed/i);
-  assert.match(built, /sharp acceleration/i);
+  assert.match(built, /FAST REAL-TIME ACTION/i);
+  assert.match(built, /immediate acceleration/i);
   assert.match(built, /immediate follow-through/i);
-  assert.match(built, /Do not smooth fast action/i);
+  assert.match(built, /rapid consecutive actions/i);
 });
 
 test('7. slow action: original prompt preserved, explicit slow motion is not overridden', () => {
@@ -188,8 +195,8 @@ test('7. slow action: original prompt preserved, explicit slow motion is not ove
   const built = buildH3MaxMotionPrompt(original);
 
   assert.ok(built.startsWith(original));
-  assert.match(built, /Do not accelerate movement that the user explicitly asks to be slow\./);
-  assert.doesNotMatch(built, /slow motion禁止/);
+  assert.match(built, /Follow the user's requested timing exactly\./);
+  assert.doesNotMatch(built, /FAST REAL-TIME ACTION/);
 });
 
 test('8. mixed speed: original prompt preserved, limited slow-motion window is respected', () => {
@@ -198,8 +205,17 @@ test('8. mixed speed: original prompt preserved, limited slow-motion window is r
   const built = buildH3MaxMotionPrompt(original);
 
   assert.ok(built.startsWith(original));
-  assert.match(built, /limit slow motion to that moment/i);
-  assert.match(built, /immediately return to the requested normal or fast speed afterward/i);
+  assert.match(built, /Keep slow motion only within the explicitly requested moment/i);
+  assert.match(built, /return immediately to the requested normal or fast speed/i);
+});
+
+test('8b. a no-slow-motion instruction selects fast guidance rather than slow guidance', () => {
+  const original = '高速で戦う。スローモーションにしない。';
+  const built = buildH3MaxMotionPrompt(original);
+
+  assert.equal(requestsSlowMotion(original), false);
+  assert.match(built, /FAST REAL-TIME ACTION/i);
+  assert.doesNotMatch(built, /Keep slow motion only/);
 });
 
 test('9. empty prompt stays empty for the motion helper', () => {
@@ -228,23 +244,26 @@ test('12. provider parameters unchanged: text/reference/storyboard/image', () =>
   const refInput = buildH3MaxReferenceInput('通常のシーン', ['https://example.test/a.png']);
   assert.equal(refInput.duration, 15);
   assert.equal(refInput.resolution, '768P');
+  assert.equal(refInput.aspect_ratio, '16:9');
   assert.equal(refInput.enable_safety_checker, true);
   assert.equal(refInput.prompt_expansion_mode, 'balanced');
 
   const storyboardInput = buildH3MaxStoryboardInput('通常のシーン', ['https://example.test/a.png']);
   assert.equal(storyboardInput.duration, 15);
   assert.equal(storyboardInput.resolution, '768P');
+  assert.equal(storyboardInput.aspect_ratio, '16:9');
   assert.equal(storyboardInput.enable_safety_checker, true);
   assert.equal(storyboardInput.prompt_expansion_mode, 'balanced');
 
   const imageInput = buildH3MaxImageInput('通常のシーン', 'https://example.test/frame.png');
   assert.equal(imageInput.duration, 15);
   assert.equal(imageInput.resolution, '768P');
+  assert.equal(Object.prototype.hasOwnProperty.call(imageInput, 'aspect_ratio'), false);
   assert.equal(imageInput.enable_safety_checker, true);
   assert.equal(imageInput.prompt_expansion_mode, 'balanced');
 });
 
-test('13. single-image routing unchanged: uses the reference-to-video model', () => {
+test('13. single-image mode uses the exact-first-frame image-to-video model', () => {
   const fs = require('fs');
   const path = require('path');
 
@@ -252,25 +271,30 @@ test('13. single-image routing unchanged: uses the reference-to-video model', ()
     path.join(__dirname, '..', 'api', '_lib', 'h3-live-fal.js'),
     'utf8'
   );
+  const imageSubmit = falSrc.slice(
+    falSrc.indexOf('async function submitImageJob'),
+    falSrc.indexOf('async function submitReferenceJob')
+  );
 
   assert.match(
-    falSrc,
-    /async function submitImageJob[\s\S]*?modelId:\s*FAL_MODEL_ID_REFERENCE/
+    imageSubmit,
+    /async function submitImageJob[\s\S]*?modelId:\s*FAL_MODEL_ID_IMAGE/
   );
 
   assert.doesNotMatch(
-    falSrc,
-    /async function submitImageJob[\s\S]*?modelId:\s*FAL_MODEL_ID_IMAGE/
+    imageSubmit,
+    /async function submitImageJob[\s\S]*?modelId:\s*FAL_MODEL_ID_REFERENCE/
   );
 });
 
-test('14. reference_image_urls structure unchanged for reference and image modes', () => {
+test('14. reference and exact-first-frame modes keep distinct official payload shapes', () => {
   const urls = ['https://example.test/a.png', 'https://example.test/b.png', 'https://example.test/c.png'];
   const refInput = buildH3MaxReferenceInput('通常のシーン', urls);
   assert.deepEqual(refInput.reference_image_urls, urls);
 
   const imageInput = buildH3MaxImageInput('通常のシーン', 'https://example.test/frame.png');
-  assert.deepEqual(imageInput.reference_image_urls, ['https://example.test/frame.png']);
+  assert.equal(imageInput.image_url, 'https://example.test/frame.png');
+  assert.equal(Object.prototype.hasOwnProperty.call(imageInput, 'reference_image_urls'), false);
 });
 
 // ---------------------------------------------------------------
@@ -288,21 +312,21 @@ test('H3 provider model metadata matches actual routing', () => {
 
   assert.match(
     startSrc,
-    /const providerModelId = mode === 'text'[\s\S]*?\?\s*FAL_MODEL_ID_TEXT[\s\S]*?:\s*FAL_MODEL_ID_REFERENCE/
+    /const providerModelId = mode === 'text'[\s\S]*?\?\s*FAL_MODEL_ID_TEXT[\s\S]*?mode === 'image'[\s\S]*?\?\s*FAL_MODEL_ID_IMAGE[\s\S]*?:\s*FAL_MODEL_ID_REFERENCE/
   );
 
   assert.match(
     startSrc,
-    /models:\s*\{\s*text:\s*FAL_MODEL_ID_TEXT,\s*image:\s*FAL_MODEL_ID_REFERENCE,/
+    /models:\s*\{\s*text:\s*FAL_MODEL_ID_TEXT,\s*image:\s*FAL_MODEL_ID_IMAGE,/
   );
 
   assert.doesNotMatch(
     startSrc,
-    /models:\s*\{\s*text:\s*FAL_MODEL_ID_TEXT,\s*image:\s*FAL_MODEL_ID_IMAGE,/
+    /models:\s*\{\s*text:\s*FAL_MODEL_ID_TEXT,\s*image:\s*FAL_MODEL_ID_REFERENCE,/
   );
 });
 
-test('H3 image mode requires the reference model configuration', () => {
+test('H3 image mode requires the image-to-video model configuration', () => {
   const fs = require('fs');
   const path = require('path');
 
@@ -313,10 +337,28 @@ test('H3 image mode requires the reference model configuration', () => {
 
   assert.match(
     configSrc,
-    /mode === 'image'[\s\S]*?FAL_MODEL_ID_REFERENCE/
+    /mode === 'image' && !FAL_MODEL_ID_IMAGE/
   );
 });
 
 test('H3_MOTION_MARKER differs from H3_IMAGE_FIDELITY_MARKER (no collision)', () => {
   assert.notEqual(H3_MOTION_MARKER, H3_IMAGE_FIDELITY_MARKER);
+});
+
+test('provider diagnostics keep only bounded prompt, safe integer seed, and finite numeric timings', () => {
+  const { extractProviderDiagnostics } = h3Fal._internals;
+  const diagnostics = extractProviderDiagnostics({
+    expanded_prompt: 'x'.repeat(50010),
+    seed: 123456,
+    timings: { inference: 12.5, queue: '3.2', bad: 'not-a-number' }
+  });
+
+  assert.equal(diagnostics.expandedPrompt.length, 50000);
+  assert.equal(diagnostics.seed, 123456);
+  assert.deepEqual(diagnostics.timings, { inference: 12.5, queue: 3.2 });
+  assert.deepEqual(extractProviderDiagnostics({ seed: 'unsafe', timings: [] }), {
+    expandedPrompt: null,
+    seed: null,
+    timings: null
+  });
 });

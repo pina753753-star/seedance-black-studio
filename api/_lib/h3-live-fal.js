@@ -24,6 +24,7 @@ const {
   RESOLUTION_FAL,
   FAL_QUEUE_BASE_URL,
   FAL_MODEL_ID_TEXT,
+  FAL_MODEL_ID_IMAGE,
   FAL_MODEL_ID_REFERENCE,
   falApiKey,
   isTrustedFalQueueUrl,
@@ -31,6 +32,7 @@ const {
 } = require('./h3-live-config.js');
 
 const REQUEST_TIMEOUT_MS = 15000;
+const ANCHORED_SEGMENT_DURATION_SECONDS = 5;
 
 // fal.ai aspect ratio for a broadcast-style screen.
 const ASPECT_RATIO = '16:9';
@@ -67,18 +69,22 @@ async function falFetch(url, init) {
 }
 
 const H3_MOTION_MARKER = '[Pina Studio H3 motion requirements]';
+const EXPLICIT_SLOW_MOTION_RE = /ゆっくり|ゆるやか|スロー(?:モーション)?|slowly|slow[\s-]?motion/i;
+const SLOW_MOTION_NEGATION_RE = /(?:ゆっくり|ゆるやか|スロー(?:モーション)?)(?:に|は|を)?(?:しない|しません|ではない|ではなく|禁止|不要|なし)|(?:no|without|avoid|do not use)\s+slow[\s-]?motion/i;
+const FAST_ACTION_RE = /高速|素早|速く|急加速|全速|疾走|激しく|連続|戦|攻撃|斬|薙刀|敵|走|回避|ジャンプ|fast|rapid|quick|high[\s-]?speed|action|fight|attack|slash|run|dodge|jump/i;
 
-const H3_MOTION_GUIDANCE = `${H3_MOTION_MARKER}
-Follow the user's requested motion speed, action timing, pauses, and slow-motion instructions literally.
-For motion whose speed is not specified, use natural real-time speed rather than slow motion.
-Do not introduce slow motion, floaty movement, graceful lingering, or pose holds unless the user explicitly requests them.
-When the user requests fast, rapid, energetic, sharp, or high-speed action, execute it at clearly fast real-time speed with sharp acceleration and immediate follow-through.
-Do not smooth fast action into slow, balletic, or pose-heavy movement.
-If the user requests slow motion only for a specific moment, limit slow motion to that moment and immediately return to the requested normal or fast speed afterward.
-Do not accelerate movement that the user explicitly asks to be slow.
-Keep consecutive actions continuous and do not insert unrequested pauses between them.
-Prioritize the user's requested action timing over generic cinematic smoothness.
-Do not add music, background music, score, or soundtrack that the user did not explicitly request. Preserve any requested dialogue or sound effects.`;
+function requestsSlowMotion(prompt) {
+  return EXPLICIT_SLOW_MOTION_RE.test(prompt) && !SLOW_MOTION_NEGATION_RE.test(prompt);
+}
+
+const H3_FAST_MOTION_GUIDANCE = `${H3_MOTION_MARKER}
+FAST REAL-TIME ACTION. Start moving in the first frame. Use immediate acceleration, clear body displacement, rapid consecutive actions, and immediate follow-through. Keep the full action readable without pose holds, lingering close-ups, floaty movement, or slow motion. Do not add unrequested music.`;
+
+const H3_REALTIME_MOTION_GUIDANCE = `${H3_MOTION_MARKER}
+REAL-TIME MOTION. Start the requested action immediately and keep it continuous at natural speed. Do not replace the action with pose holds, lingering close-ups, floaty movement, or slow motion. Do not add unrequested music.`;
+
+const H3_EXPLICIT_SLOW_GUIDANCE = `${H3_MOTION_MARKER}
+Follow the user's requested timing exactly. Keep slow motion only within the explicitly requested moment, then return immediately to the requested normal or fast speed. Do not add unrequested music.`;
 
 function buildH3MaxMotionPrompt(instruction) {
   const originalPrompt = String(instruction || '').trim();
@@ -87,7 +93,13 @@ function buildH3MaxMotionPrompt(instruction) {
     return originalPrompt;
   }
 
-  return `${originalPrompt}\n\n${H3_MOTION_GUIDANCE}`;
+  const guidance = requestsSlowMotion(originalPrompt)
+    ? H3_EXPLICIT_SLOW_GUIDANCE
+    : FAST_ACTION_RE.test(originalPrompt)
+      ? H3_FAST_MOTION_GUIDANCE
+      : H3_REALTIME_MOTION_GUIDANCE;
+
+  return `${originalPrompt}\n\n${guidance}`;
 }
 
 // Build the fal.ai input payload for a text instruction. The 15s duration is
@@ -107,19 +119,14 @@ function buildH3MaxInput(instruction) {
 const H3_IMAGE_FIDELITY_MARKER = '[Pina Studio H3 image fidelity requirements]';
 
 const H3_IMAGE_FIDELITY_GUIDANCE = `${H3_IMAGE_FIDELITY_MARKER}
-Image 1 is the authoritative visual reference for the main subject.
-Keep the main subject consistent with Image 1 throughout the entire video.
-Treat Image 1 as a subject-identity reference, not merely as a style reference.
-The generated main subject must remain recognizably the same individual or character as Image 1 across all shots and camera angles.
-When Image 1 does not show the full body or every angle, infer unseen details conservatively while preserving all visible identity-defining features and costume design.
-Preserve the same character or subject identity throughout the entire video, including the face, facial features, hairstyle, hair color, outfit, costume details, accessories, body proportions, distinctive markings, and overall color palette.
-Do not redesign, replace, restyle, age, de-age, gender-swap, or morph the subject into a different person or character unless the user explicitly requests that transformation.
-Maintain strong temporal consistency of the face, hair, clothing, hands, body, and distinctive visual details across frames.
-Follow the user's requested action, motion, camera direction, environment, and pacing as literally as possible.
-Preserve the user's requested motion speed and intensity. When the user requests energetic action such as fighting, dancing, running, dodging, spinning, weapon action, or rapid movement, do not reinterpret it as slow motion, a static pose, or a gentle performance unless the user explicitly asks for slow or restrained movement.
-Do not replace the user's requested action with unrelated cinematic movement.
-Preserve the supplied subject's identity while fully applying any scene, lighting, camera, environment, or background changes explicitly requested by the user. Do not alter the subject's identity or appearance merely to satisfy those scene changes.
-Do not add music, background music, score, or soundtrack that the user did not explicitly request. Preserve any requested dialogue or sound effects.`;
+The supplied image is the exact first frame. Begin from that frame without replacing or redesigning its main subject. Keep the same recognizable face, hair, eyes, outfit, accessories, body proportions, and colors throughout the video. Infer unseen details conservatively. Never morph, age, or change the subject unless the user explicitly requests it.`;
+
+const H3_REFERENCE_FIDELITY_MARKER = '[Pina Studio H3 reference fidelity requirements]';
+const H3_REFERENCE_FIDELITY_GUIDANCE = `${H3_REFERENCE_FIDELITY_MARKER}
+Treat each Image N as an identity and design reference, not only a style reference. Keep every referenced subject recognizable, with the same face, hair, eyes, outfit, accessories, body proportions, and colors throughout the video. Do not merge distinct referenced subjects or redesign them unless the user explicitly requests it.`;
+const H3_ANCHORED_CONTINUITY_MARKER = '[Pina Studio H3 anchored continuity requirements]';
+const H3_ANCHORED_CONTINUITY_GUIDANCE = `${H3_ANCHORED_CONTINUITY_MARKER}
+Image 1 is the sole authority for the character's identity, face, hair, outfit, accessories, proportions, and colors. When Video 1 is supplied, use it only for motion, pose, camera, scene, and temporal continuity. Never inherit a changed face, hair, outfit, accessories, proportions, or colors from Video 1.`;
 
 function buildH3MaxImagePrompt(instruction) {
   const originalPrompt = String(instruction || '').trim();
@@ -137,16 +144,19 @@ function buildH3MaxImagePrompt(instruction) {
   return `${motionPrompt}\n\n${H3_IMAGE_FIDELITY_GUIDANCE}`;
 }
 
-// Build the fal.ai input payload for a single subject reference image +
-// instruction. Sent to the reference-to-video model (FAL_MODEL_ID_REFERENCE)
-// as a single-element reference_image_urls array — NOT image_url/first-frame
-// — so the model treats the supplied image as a subject/style reference
-// rather than a literal starting frame. imageUrl must be an https URL fal
-// can fetch (api/h3-live/start.js passes a short-lived Supabase signed URL).
+function buildH3MaxReferencePrompt(instruction) {
+  const motionPrompt = buildH3MaxMotionPrompt(instruction);
+  if (!motionPrompt || motionPrompt.includes(H3_REFERENCE_FIDELITY_MARKER)) return motionPrompt;
+  return `${motionPrompt}\n\n${H3_REFERENCE_FIDELITY_GUIDANCE}`;
+}
+
+// Build the fal.ai input payload for an exact first frame + instruction.
+// minimax/h3-max/image-to-video derives the canvas from image_url, so this
+// payload intentionally does not send the reference endpoint's aspect_ratio.
 function buildH3MaxImageInput(instruction, imageUrl) {
   return {
     prompt: buildH3MaxImagePrompt(instruction),
-    reference_image_urls: [String(imageUrl || '').trim()],
+    image_url: String(imageUrl || '').trim(),
     duration: DURATION_SECONDS,
     resolution: RESOLUTION_FAL,
     enable_safety_checker: true,
@@ -161,13 +171,44 @@ function buildH3MaxImageInput(instruction, imageUrl) {
 // fal.ai docs before real use.
 function buildH3MaxReferenceInput(instruction, imageUrls) {
   return {
-    prompt: buildH3MaxMotionPrompt(instruction),
+    prompt: buildH3MaxReferencePrompt(instruction),
     reference_image_urls: (Array.isArray(imageUrls) ? imageUrls : []).map((u) => String(u || '').trim()),
     duration: DURATION_SECONDS,
     resolution: RESOLUTION_FAL,
+    aspect_ratio: ASPECT_RATIO,
     enable_safety_checker: true,
     prompt_expansion_mode: 'balanced'
   };
+}
+
+// Build one short identity-anchored segment for the replacement Live path.
+// The original character image is sent again for EVERY segment. From segment
+// 2 onward, the immediately preceding 5-second output is also supplied as a
+// motion/scene continuity reference. The previous video never replaces the
+// original identity image.
+//
+// Verified against fal.ai's minimax/h3-max/reference-to-video schema on
+// 2026-09-15: reference_image_urls and reference_video_urls are supported;
+// reference video clips may be 2-15 seconds and their combined duration may
+// not exceed 15 seconds. A single preceding 5-second clip stays inside that
+// limit.
+function buildH3AnchoredSegmentInput(instruction, identityImageUrl, previousVideoUrl = '', seed = null) {
+  const previous = String(previousVideoUrl || '').trim();
+  const hasSeed = seed !== null && seed !== undefined && String(seed).trim() !== '';
+  const numericSeed = Number(seed);
+  const prompt = buildH3MaxReferencePrompt(instruction);
+  const input = {
+    prompt: `${prompt}\n\n${H3_ANCHORED_CONTINUITY_GUIDANCE}`,
+    reference_image_urls: [String(identityImageUrl || '').trim()],
+    duration: ANCHORED_SEGMENT_DURATION_SECONDS,
+    resolution: RESOLUTION_FAL,
+    aspect_ratio: ASPECT_RATIO,
+    enable_safety_checker: true,
+    prompt_expansion_mode: 'balanced'
+  };
+  if (previous) input.reference_video_urls = [previous];
+  if (hasSeed && Number.isSafeInteger(numericSeed) && numericSeed >= 0) input.seed = numericSeed;
+  return input;
 }
 
 // "storyboard" mode reuses the exact same reference-to-video model and input
@@ -203,6 +244,28 @@ function extractVideoUrl(data) {
     if (url && isTrustedFalOutputUrl(url)) return url;
   }
   return '';
+}
+
+function extractProviderDiagnostics(data) {
+  const expandedPrompt = typeof data?.expanded_prompt === 'string'
+    ? data.expanded_prompt.slice(0, 50000)
+    : null;
+  const rawSeed = Number(data?.seed);
+  const seed = Number.isSafeInteger(rawSeed) ? rawSeed : null;
+  const rawTimings = data?.timings;
+  const timings = rawTimings && typeof rawTimings === 'object' && !Array.isArray(rawTimings)
+    ? Object.fromEntries(
+        Object.entries(rawTimings)
+          .filter(([key, value]) => key.length <= 100 && Number.isFinite(Number(value)))
+          .slice(0, 50)
+          .map(([key, value]) => [key, Number(value)])
+      )
+    : null;
+  return {
+    expandedPrompt,
+    seed,
+    timings: timings && Object.keys(timings).length ? timings : null
+  };
 }
 
 // POST an already-built input body to a fal.ai queue model.
@@ -266,24 +329,26 @@ async function submitToFalQueue({ modelId, input }) {
 
 // Submit a text -> video generation to fal.ai's queue.
 async function submitTextJob({ instruction }) {
-  return submitToFalQueue({
+  const input = buildH3MaxInput(instruction);
+  const result = await submitToFalQueue({
     modelId: FAL_MODEL_ID_TEXT,
-    input: buildH3MaxInput(instruction)
+    input
   });
+  return { ...result, submittedPrompt: input.prompt };
 }
 
-// Submit a single subject reference image + instruction -> video generation.
-// Routed to the reference-to-video model so the supplied image is treated as
-// a subject reference (identity to keep), not a literal first frame.
+// Submit an exact first frame + instruction -> video generation.
 async function submitImageJob({ instruction, imageUrl }) {
   const url = String(imageUrl || '').trim();
   if (!/^https:\/\//i.test(url)) {
     return { ok: false, category: 'invalid_input', httpStatus: 0, detail: 'missing or non-https image_url' };
   }
-  return submitToFalQueue({
-    modelId: FAL_MODEL_ID_REFERENCE,
-    input: buildH3MaxImageInput(instruction, url)
+  const input = buildH3MaxImageInput(instruction, url);
+  const result = await submitToFalQueue({
+    modelId: FAL_MODEL_ID_IMAGE,
+    input
   });
+  return { ...result, submittedPrompt: input.prompt };
 }
 
 // Submit a "reference" or "storyboard" (1-9 images) + instruction -> video
@@ -301,10 +366,28 @@ async function submitReferenceJob({ instruction, imageUrls, mode }) {
   const input = mode === 'storyboard'
     ? buildH3MaxStoryboardInput(instruction, urls)
     : buildH3MaxReferenceInput(instruction, urls);
-  return submitToFalQueue({
+  const result = await submitToFalQueue({
     modelId: FAL_MODEL_ID_REFERENCE,
     input
   });
+  return { ...result, submittedPrompt: input.prompt };
+}
+
+async function submitAnchoredSegmentJob({ instruction, identityImageUrl, previousVideoUrl = '', seed = null }) {
+  const identityUrl = String(identityImageUrl || '').trim();
+  const previousUrl = String(previousVideoUrl || '').trim();
+  if (!/^https:\/\//i.test(identityUrl)) {
+    return { ok: false, category: 'invalid_input', httpStatus: 0, detail: 'missing or non-https identity image url' };
+  }
+  if (previousUrl && !isTrustedFalOutputUrl(previousUrl)) {
+    return { ok: false, category: 'invalid_input', httpStatus: 0, detail: 'untrusted previous segment video url' };
+  }
+  const input = buildH3AnchoredSegmentInput(instruction, identityUrl, previousUrl, seed);
+  const result = await submitToFalQueue({
+    modelId: FAL_MODEL_ID_REFERENCE,
+    input
+  });
+  return { ...result, submittedPrompt: input.prompt };
 }
 
 // HTTP statuses that mean "this job/request is genuinely gone or invalid" (as
@@ -425,13 +508,19 @@ async function getJobStatus({ statusUrl, responseUrl }) {
     return { ok: false, detail: 'completed but no video URL yet' };
   }
 
-  return { ok: true, state: 'completed', outputUrl };
+  return {
+    ok: true,
+    state: 'completed',
+    outputUrl,
+    providerDiagnostics: extractProviderDiagnostics(rData)
+  };
 }
 
 module.exports = {
   submitTextJob,
   submitImageJob,
   submitReferenceJob,
+  submitAnchoredSegmentJob,
   getJobStatus,
   // exported for tests
   _internals: {
@@ -439,8 +528,10 @@ module.exports = {
     buildH3MaxImageInput,
     buildH3MaxReferenceInput,
     buildH3MaxStoryboardInput,
+    buildH3AnchoredSegmentInput,
     classifyProviderError,
     extractVideoUrl,
+    extractProviderDiagnostics,
     isAuthLikeFailure
   }
 };
@@ -448,10 +539,22 @@ module.exports = {
 module.exports._test = {
   ...(module.exports._test || {}),
   buildH3MaxImagePrompt,
+  buildH3MaxReferencePrompt,
   buildH3MaxImageInput,
   H3_IMAGE_FIDELITY_MARKER,
   H3_IMAGE_FIDELITY_GUIDANCE,
+  H3_REFERENCE_FIDELITY_MARKER,
+  H3_REFERENCE_FIDELITY_GUIDANCE,
+  H3_ANCHORED_CONTINUITY_MARKER,
+  H3_ANCHORED_CONTINUITY_GUIDANCE,
   buildH3MaxMotionPrompt,
   H3_MOTION_MARKER,
-  H3_MOTION_GUIDANCE
+  H3_FAST_MOTION_GUIDANCE,
+  H3_REALTIME_MOTION_GUIDANCE,
+  H3_EXPLICIT_SLOW_GUIDANCE,
+  EXPLICIT_SLOW_MOTION_RE,
+  SLOW_MOTION_NEGATION_RE,
+  requestsSlowMotion,
+  FAST_ACTION_RE,
+  ANCHORED_SEGMENT_DURATION_SECONDS
 };

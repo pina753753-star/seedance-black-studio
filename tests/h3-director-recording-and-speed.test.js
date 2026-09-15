@@ -84,9 +84,12 @@ test('maybeStartRecording()自体の多重開始ガード(recorder存在チェ�
 // B. directorPrompt() natural-speed hint
 // ---------------------------------------------------------------
 
-test('directorPrompt: 速度未指定のpromptには自然な実時間速度の補助が付く', () => {
+test('directorPrompt: アクションpromptには即時の高速動作補助が付く', () => {
   const directorPrompt = loadDirectorPrompt();
-  assert.equal(directorPrompt('ジャンプする'), 'ジャンプする 動きは自然な実時間の速度。スローモーションにしない。');
+  assert.equal(
+    directorPrompt('ジャンプする'),
+    'ジャンプする 開始直後から実時間の高速動作。静止、溜め、長いポーズ、全編スローモーションを入れず、連続動作を即座に実行する。'
+  );
 });
 
 test('directorPrompt: 「ゆっくり」を含む場合は補助を追加しない', () => {
@@ -99,9 +102,15 @@ test('directorPrompt: "slow motion" を含む場合は補助を追加しない',
   assert.equal(directorPrompt('cat walking in slow motion'), 'cat walking in slow motion');
 });
 
-test('directorPrompt: 「高速」を含む場合は補助を追加しない', () => {
+test('directorPrompt: 「高速」を含む場合も高速動作補助を追加する', () => {
   const directorPrompt = loadDirectorPrompt();
-  assert.equal(directorPrompt('高速で走る'), '高速で走る');
+  assert.match(directorPrompt('高速で走る'), /開始直後から実時間の高速動作/);
+  assert.match(directorPrompt('高速で走る'), /全編スローモーションを入れず/);
+});
+
+test('directorPrompt: スロー禁止はスロー要求として誤判定しない', () => {
+  const directorPrompt = loadDirectorPrompt();
+  assert.match(directorPrompt('高速で戦う。スローモーションにしない。'), /開始直後から実時間の高速動作/);
 });
 
 test('directorPrompt: 「普通の速度」「通常速度」「実時間」を含む場合も補助を追加しない', () => {
@@ -111,10 +120,10 @@ test('directorPrompt: 「普通の速度」「通常速度」「実時間」を�
   assert.equal(directorPrompt('実時間で動く'), '実時間で動く');
 });
 
-test('directorPrompt: 空文字・空白のみは補助文だけのtrim済み文字列になる', () => {
+test('directorPrompt: 空文字・空白のみは空文字のまま', () => {
   const directorPrompt = loadDirectorPrompt();
-  assert.equal(directorPrompt(''), ' 動きは自然な実時間の速度。スローモーションにしない。');
-  assert.equal(directorPrompt('   '), ' 動きは自然な実時間の速度。スローモーションにしない。');
+  assert.equal(directorPrompt(''), '');
+  assert.equal(directorPrompt('   '), '');
 });
 
 test('初期configureメッセージはサーバー固定済みpromptを優先してdirectorPromptへ渡す', () => {
