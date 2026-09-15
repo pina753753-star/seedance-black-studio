@@ -39,6 +39,10 @@ const { moderateH3LiveInstruction } = require('../_lib/h3-live-moderation.js');
 const { moderateH3LiveImageInput, moderateH3LiveImageOnly } = require('../_lib/h3-live-image-moderation.js');
 const { submitTextJob, submitImageJob, submitReferenceJob } = require('../_lib/h3-live-fal.js');
 const {
+  withoutProviderDiagnostics,
+  isMissingProviderDiagnosticsSchema
+} = require('../_lib/h3-provider-diagnostics.js');
+const {
   getUploadRow,
   downloadAndValidate,
   createModerationSignedUrl,
@@ -65,6 +69,7 @@ const {
   CREDIT_COST,
   STATUS_POLL_MS,
   FAL_MODEL_ID_TEXT,
+  FAL_MODEL_ID_IMAGE,
   FAL_MODEL_ID_REFERENCE,
   REFERENCE_INPUT_MODES,
   REFERENCE_MIN_IMAGES,
@@ -144,7 +149,7 @@ module.exports = async function handler(req, res) {
       endpoint: '/api/h3-live/start',
       method: 'POST',
       note: 'POST only. Authorization: Bearer <supabase-jwt> and Idempotency-Key: <uuid> required.',
-      models: { text: FAL_MODEL_ID_TEXT, image: FAL_MODEL_ID_REFERENCE, reference: FAL_MODEL_ID_REFERENCE, storyboard: FAL_MODEL_ID_REFERENCE },
+      models: { text: FAL_MODEL_ID_TEXT, image: FAL_MODEL_ID_IMAGE, reference: FAL_MODEL_ID_REFERENCE, storyboard: FAL_MODEL_ID_REFERENCE },
       modes: ['text', 'image', 'reference', 'storyboard'],
       fixed: { durationSeconds: 15, resolution: '768p', creditCost: CREDIT_COST }
     });
@@ -799,7 +804,9 @@ module.exports = async function handler(req, res) {
   const creditBalance = Number(deduction.new_balance);
   const providerModelId = mode === 'text'
     ? FAL_MODEL_ID_TEXT
-    : FAL_MODEL_ID_REFERENCE;
+    : mode === 'image'
+      ? FAL_MODEL_ID_IMAGE
+      : FAL_MODEL_ID_REFERENCE;
 
   // Move queued -> submitting and record the provider model id.
   await db.from('h3_live_jobs')
@@ -903,11 +910,23 @@ module.exports = async function handler(req, res) {
     // 'timeout'/'network_error' is a send that may or may not have landed.
     if (['timeout', 'network_error', 'accepted_untrackable'].includes(submission.category)) {
       console.error('[h3-live/start] submission ambiguous:', submission.category, 'jobId:', jobId);
-      if (submission.requestId) {
-        await db.from('h3_live_jobs')
-          .update({ provider_request_id: submission.requestId, updated_at: new Date().toISOString() })
+      const ambiguousTracking = {
+        provider_prompt: submission.submittedPrompt || null,
+        updated_at: new Date().toISOString()
+      };
+      if (submission.requestId) ambiguousTracking.provider_request_id = submission.requestId;
+      let ambiguousResult = await db.from('h3_live_jobs')
+        .update(ambiguousTracking)
+        .eq('id', jobId)
+        .in('status', ['submitting', 'queued', 'processing']);
+      if (isMissingProviderDiagnosticsSchema(ambiguousResult.error)) {
+        ambiguousResult = await db.from('h3_live_jobs')
+          .update(withoutProviderDiagnostics(ambiguousTracking))
           .eq('id', jobId)
           .in('status', ['submitting', 'queued', 'processing']);
+      }
+      if (ambiguousResult.error) {
+        console.error('[h3-live/start] ambiguous tracking persist failed:', ambiguousResult.error.message, 'jobId:', jobId);
       }
       return res.status(202).json({
         ok: true,
@@ -955,19 +974,29 @@ module.exports = async function handler(req, res) {
   // ---- Persist tracking info (retry up to 3 attempts) ----
   let persisted = false;
   for (let attempt = 1; attempt <= 3 && !persisted; attempt++) {
-    const { data: rows, error } = await db.from('h3_live_jobs')
-      .update({
+    const trackingUpdate = {
         status: 'processing',
         provider_request_id: submission.requestId,
         provider_poll_url: submission.statusUrl,
         provider_response_url: submission.responseUrl,
         provider_status: 'IN_QUEUE',
+        provider_prompt: submission.submittedPrompt || null,
         submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      })
+      };
+    let persistResult = await db.from('h3_live_jobs')
+      .update(trackingUpdate)
       .eq('id', jobId)
       .in('status', ['submitting', 'queued', 'processing'])
       .select('id');
+    if (isMissingProviderDiagnosticsSchema(persistResult.error)) {
+      persistResult = await db.from('h3_live_jobs')
+        .update(withoutProviderDiagnostics(trackingUpdate))
+        .eq('id', jobId)
+        .in('status', ['submitting', 'queued', 'processing'])
+        .select('id');
+    }
+    const { data: rows, error } = persistResult;
     if (!error && Array.isArray(rows) && rows.length === 1) {
       persisted = true;
       break;
