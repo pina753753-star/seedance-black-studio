@@ -12,15 +12,16 @@
 -- - does not change video generation, credits, Stripe, or Storage
 --
 -- Do not apply to production without explicit human approval.
-BEGIN;
-REVOKE ALL ON TABLE public.flowvid_video_history
-FROM PUBLIC;
-REVOKE ALL ON TABLE public.flowvid_video_history
-FROM anon;
-REVOKE ALL ON TABLE public.flowvid_video_history
-FROM authenticated;
-GRANT ALL ON TABLE public.flowvid_video_history
-TO service_role;
-ALTER TABLE public.flowvid_video_history
-ENABLE ROW LEVEL SECURITY;
-COMMIT;
+DO $$
+BEGIN
+  -- Fresh preview databases never contained this retired legacy table.
+  -- Keep the hardening for older databases without blocking clean rebuilds.
+  IF to_regclass('public.flowvid_video_history') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON TABLE public.flowvid_video_history FROM PUBLIC';
+    EXECUTE 'REVOKE ALL ON TABLE public.flowvid_video_history FROM anon';
+    EXECUTE 'REVOKE ALL ON TABLE public.flowvid_video_history FROM authenticated';
+    EXECUTE 'GRANT ALL ON TABLE public.flowvid_video_history TO service_role';
+    EXECUTE 'ALTER TABLE public.flowvid_video_history ENABLE ROW LEVEL SECURITY';
+  END IF;
+END
+$$;
