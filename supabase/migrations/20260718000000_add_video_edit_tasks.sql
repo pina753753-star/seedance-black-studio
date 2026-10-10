@@ -258,3 +258,112 @@ begin
     insert into credit_transactions (user_id, amount, credit_type, reason, related_task_id)
     values (p_user_id, -v_from_sub, 'subscription', 'video_edit', v_new_task_id);
   end if;
+  if v_from_free > 0 then
+    insert into credit_transactions (user_id, amount, credit_type, reason, related_task_id)
+    values (p_user_id, -v_from_free, 'free', 'video_edit', v_new_task_id);
+  end if;
+  if v_from_purch > 0 then
+    insert into credit_transactions (user_id, amount, credit_type, reason, related_task_id)
+    values (p_user_id, -v_from_purch, 'purchased', 'video_edit', v_new_task_id);
+  end if;
+
+  return query select v_new_task_id, null::text, false;
+end;
+$$;
+
+revoke all on function public.reserve_video_edit_task(uuid, text, integer, jsonb, text, integer, numeric) from public;
+revoke all on function public.reserve_video_edit_task(uuid, text, integer, jsonb, text, integer, numeric) from anon;
+revoke all on function public.reserve_video_edit_task(uuid, text, integer, jsonb, text, integer, numeric) from authenticated;
+grant execute on function public.reserve_video_edit_task(uuid, text, integer, jsonb, text, integer, numeric) to service_role;
+
+-- ────────────────────────────────────────────────────────────────
+-- 3. refund_video_edit_task — atomic refund RPC
+-- ────────────────────────────────────────────────────────────────
+-- Returns a single row with:
+--   ok      boolean
+--   reason  text — 'not_found' | 'not_refundable' | 'already_refunded' | NULL
+create or replace function public.refund_video_edit_task(
+  p_task_id      uuid,
+  p_failure_code text
+)
+returns table (
+  ok     boolean,
+  reason text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_task record;
+begin
+  select id, user_id, status, refunded_at,
+         deducted_subscription, deducted_free, deducted_purchased
+    into v_task
+  from video_edit_tasks
+  where id = p_task_id
+  for update;
+
+  if not found then
+    return query select false, 'not_found'::text;
+    return;
+  end if;
+
+  -- Double-refund guard: both the status check and the refunded_at check
+  -- must pass. The row lock above (FOR UPDATE) serializes concurrent
+  -- refund attempts for the same task.
+  if v_task.status not in ('queued', 'processing') then
+    return query select false, 'not_refundable'::text;
+    return;
+  end if;
+
+  if v_task.refunded_at is not null then
+    return query select false, 'already_refunded'::text;
+    return;
+  end if;
+
+  update credit_balances
+  set subscription_credits = subscription_credits + v_task.deducted_subscription,
+      free_credits         = free_credits + v_task.deducted_free,
+      purchased_credits    = purchased_credits + v_task.deducted_purchased,
+      updated_at            = now()
+  where user_id = v_task.user_id;
+
+  if v_task.deducted_subscription > 0 then
+    insert into credit_transactions (user_id, amount, credit_type, reason, related_task_id)
+    values (v_task.user_id, v_task.deducted_subscription, 'subscription', 'video_edit_refund', v_task.id);
+  end if;
+  if v_task.deducted_free > 0 then
+    insert into credit_transactions (user_id, amount, credit_type, reason, related_task_id)
+    values (v_task.user_id, v_task.deducted_free, 'free', 'video_edit_refund', v_task.id);
+  end if;
+  if v_task.deducted_purchased > 0 then
+    insert into credit_transactions (user_id, amount, credit_type, reason, related_task_id)
+    values (v_task.user_id, v_task.deducted_purchased, 'purchased', 'video_edit_refund', v_task.id);
+  end if;
+
+  update video_edit_tasks
+  set status       = 'failed',
+      failure_code = p_failure_code,
+      failed_at    = now(),
+      refunded_at  = now(),
+      updated_at   = now()
+  where id = v_task.id;
+
+  return query select true, null::text;
+end;
+$$;
+
+revoke all on function public.refund_video_edit_task(uuid, text) from public;
+revoke all on function public.refund_video_edit_task(uuid, text) from anon;
+revoke all on function public.refund_video_edit_task(uuid, text) from authenticated;
+grant execute on function public.refund_video_edit_task(uuid, text) to service_role;
+
+commit;
+
+-- Rollback (if unexpected breakage is observed after applying):
+--   begin;
+--   drop function if exists public.refund_video_edit_task(uuid, text);
+--   drop function if exists public.reserve_video_edit_task(uuid, text, integer, jsonb, text, integer, numeric);
+--   drop table if exists public.video_edit_tasks;
+--   commit;
