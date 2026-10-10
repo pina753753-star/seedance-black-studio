@@ -13,6 +13,17 @@ const {
   REFERENCE_AUDIO_REGISTRY_TABLE
 } = require('./reference-audio.js');
 const { getSeedance25Entitlement } = require('./video-plan-entitlements.js');
+const {
+  REFERENCE_DANCE_BUCKET,
+  REFERENCE_DANCE_TABLE,
+  REFERENCE_DANCE_RETENTION_MS,
+  REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS,
+  isUuid: isReferenceDanceUuid,
+  authorizeReferenceDanceAdmin,
+  validateReadyReferenceDance,
+  validateReferenceDanceVariant,
+  buildReferenceDanceProviderPrompt
+} = require('./reference-dance.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
@@ -78,13 +89,13 @@ function collectModerationImageUrls(body) {
   return [...new Set(values.map(extractImageUrl).filter(Boolean))];
 }
 
-function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRatio, mode, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls, referenceAudioUrls = [] }) {
+function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRatio, mode, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls, referenceAudioUrls = [], referenceVideoUrls = [] }) {
   const payload = {
     prompt: providerPrompt,
     duration,
     resolution,
     aspect_ratio: aspectRatio,
-    generate_audio: true
+    generate_audio: referenceVideoUrls.length === 0
   };
   const waveReferenceUrls = [
     ...(Array.isArray(frameImages) ? frameImages : []).map(extractImageUrl),
@@ -96,6 +107,7 @@ function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRat
   if (mode === 'image_to_video') payload.image = waveReferenceUrls[0] || '';
   else if (waveReferenceUrls.length) payload.reference_images = [...new Set(waveReferenceUrls)];
   if (referenceAudioUrls.length) payload.reference_audios = [...new Set(referenceAudioUrls)];
+  if (referenceVideoUrls.length) payload.reference_videos = [...new Set(referenceVideoUrls)];
   return payload;
 }
 
@@ -401,6 +413,9 @@ module.exports = async function handler(req, res) {
     if (!options.ok) return res.status(400).json({ ok: false, error: options.error, message: options.message });
     const { resolution, aspectRatio, duration, mode, model } = options;
     const uiOrigin = body.ui_origin === 'storyboard' && mode === 'reference_to_video' ? 'storyboard' : '';
+    const referenceDanceAssetId = String(body.reference_video_asset_id || '').trim();
+    let referenceDance = null;
+    let referenceDanceSignedUrl = '';
     let generationPlan = 'free';
     if (SEEDANCE_25_MODELS.has(model)) {
       const entitlement = await getSeedance25Entitlement(db, user.id);
@@ -421,6 +436,54 @@ module.exports = async function handler(req, res) {
       }
       generationPlan = entitlement.plan;
     }
+    if (referenceDanceAssetId) {
+      if (!isReferenceDanceUuid(referenceDanceAssetId)) {
+        return res.status(400).json({ ok: false, error: 'invalid_reference_video_id', message: '参考動画を確認できませんでした。もう一度添付してください。' });
+      }
+      try {
+        validateReferenceDanceVariant({ model, mode, resolution, outputSeconds: duration });
+      } catch (error) {
+        return res.status(400).json({ ok: false, error: error.code || 'reference_dance_variant_not_allowed', message: '参考ダンス動画はSeedance 2.5 Turbo・リファレンス・720p・4〜15秒で利用できます。' });
+      }
+      const adminAccess = await authorizeReferenceDanceAdmin(auth);
+      if (!adminAccess.ok) {
+        return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden', message: '参考ダンス動画は現在、運営テスト専用です。' });
+      }
+      const { data: referenceDanceRow, error: referenceDanceError } = await db
+        .from(REFERENCE_DANCE_TABLE)
+        .select('id,user_id,status,approved_path,size_bytes,duration_ms,billable_seconds,video_codec,sha256,rights_confirmed_at,expires_at')
+        .eq('id', referenceDanceAssetId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (referenceDanceError || !referenceDanceRow) {
+        return res.status(400).json({ ok: false, error: 'reference_video_not_found', message: '参考動画を確認できませんでした。もう一度添付してください。' });
+      }
+      try {
+        referenceDance = validateReadyReferenceDance(referenceDanceRow, user.id);
+      } catch (error) {
+        return res.status(400).json({ ok: false, error: error.code || 'reference_video_not_ready', message: '参考動画の安全確認が完了していません。もう一度添付してください。' });
+      }
+      if (collectModerationImageUrls(body).length < 1) {
+        return res.status(400).json({ ok: false, error: 'identity_reference_image_required', message: '人物を維持するための参考画像を1枚以上追加してください。' });
+      }
+      const extendedExpiry = new Date(Date.now() + REFERENCE_DANCE_RETENTION_MS).toISOString();
+      const { data: retainedRows, error: retentionError } = await db.from(REFERENCE_DANCE_TABLE)
+        .update({ expires_at: extendedExpiry, updated_at: new Date().toISOString() })
+        .eq('id', referenceDanceAssetId)
+        .eq('user_id', user.id)
+        .eq('status', 'ready')
+        .select('id');
+      if (retentionError || !retainedRows || retainedRows.length !== 1) {
+        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: '参考動画の安全な保持期間を確認できないため、生成を開始できません。' });
+      }
+      const { data: signedVideo, error: signedVideoError } = await db.storage
+        .from(REFERENCE_DANCE_BUCKET)
+        .createSignedUrl(referenceDance.approvedPath, REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS);
+      if (signedVideoError || !signedVideo?.signedUrl) {
+        return res.status(503).json({ ok: false, error: 'reference_video_unavailable', message: '参考動画を読み込めませんでした。もう一度添付してください。' });
+      }
+      referenceDanceSignedUrl = signedVideo.signedUrl;
+    }
     const provider = SEEDANCE_25_MODELS.has(model) ? 'wavespeed' : 'openrouter';
     const apiKey = provider === 'wavespeed'
       ? (process.env.WAVESPEED_API_KEY || '')
@@ -436,6 +499,9 @@ module.exports = async function handler(req, res) {
     const referenceAudioSyncMode = body.reference_audio_sync_mode === 'rhythm' ? 'rhythm' : 'singing';
     if (!normalizedAudio.ok) {
       return res.status(400).json({ ok: false, error: normalizedAudio.error, message: normalizedAudio.message });
+    }
+    if (referenceDance && normalizedAudio.paths.length) {
+      return res.status(400).json({ ok: false, error: 'reference_audio_video_conflict', message: '初期BETAでは参考動画と参照音源を同時に使用できません。' });
     }
     if (normalizedAudio.paths.length && (resolution !== '1080p' || mode === 'image_to_video')) {
       return res.status(400).json({
@@ -516,7 +582,16 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const creditCost = calculateVideoCreditCost({ ...body, mode, duration, resolution, model, plan: generationPlan });
+    // Pass an exact server-built pricing object. Never spread the browser body
+    // into the trusted referenceDanceBillableSeconds field.
+    const creditCost = calculateVideoCreditCost({
+      mode,
+      duration,
+      resolution,
+      model,
+      plan: generationPlan,
+      referenceDanceBillableSeconds: referenceDance?.billableSeconds
+    });
 
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db
@@ -613,6 +688,45 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    if (referenceDance) {
+      const danceSettings = {
+        ...(uiOrigin ? { ui_origin: uiOrigin } : {}),
+        reference_dance: {
+          asset_id: referenceDance.assetId,
+          billable_seconds: referenceDance.billableSeconds
+        }
+      };
+      const { data: settingsRows, error: settingsError } = await db.from('generation_tasks')
+        .update({ settings: danceSettings, updated_at: new Date().toISOString() })
+        .eq('id', taskId)
+        .eq('user_id', user.id)
+        .eq('status', 'queued')
+        .is('api_task_id', null)
+        .select('id');
+      if (settingsError || !settingsRows || settingsRows.length !== 1) {
+        await releaseTask(db, user.id, taskId, 'cancelled', 'Reference dance settings could not be saved');
+        return res.status(500).json({
+          ok: false,
+          error: 'reference_video_settings_save_failed',
+          message: '参考動画の生成設定を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+        });
+      }
+      const { data: boundRows, error: bindError } = await db.from(REFERENCE_DANCE_TABLE)
+        .update({ last_task_id: taskId, used_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', referenceDance.assetId)
+        .eq('user_id', user.id)
+        .eq('status', 'ready')
+        .select('id');
+      if (bindError || !boundRows || boundRows.length !== 1) {
+        await releaseTask(db, user.id, taskId, 'cancelled', 'Reference dance asset could not be bound');
+        return res.status(503).json({
+          ok: false,
+          error: 'reference_video_bind_failed',
+          message: '参考動画を生成へ関連付けられなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+        });
+      }
+    }
+
     // Deduct balance + ledger rows in one DB transaction.
     deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
     if (!deduction.ok) {
@@ -680,8 +794,8 @@ module.exports = async function handler(req, res) {
     // audio does not invent music that may trigger output copyright checks.
     const providerPrompt = buildProviderPrompt({
       model,
-      prompt,
-      generateAudio: true,
+      prompt: referenceDance ? buildReferenceDanceProviderPrompt(prompt) : prompt,
+      generateAudio: !referenceDance,
       hasReferenceAudio: signedAudio.urls.length > 0,
       referenceAudioSyncMode
     });
@@ -707,7 +821,8 @@ module.exports = async function handler(req, res) {
           firstFrameUrl,
           referenceUrl,
           referenceUrls,
-          referenceAudioUrls: signedAudio.urls
+          referenceAudioUrls: signedAudio.urls,
+          referenceVideoUrls: referenceDanceSignedUrl ? [referenceDanceSignedUrl] : []
         })
       : {
           model,
@@ -992,6 +1107,7 @@ module.exports = async function handler(req, res) {
         frame_image_count: payload.frame_images?.length || 0,
         has_input_references: Boolean(payload.input_references?.length),
         input_reference_count: payload.input_references?.length || 0,
+        has_reference_video: Boolean(payload.reference_videos?.length),
         text_only: !payload.frame_images?.length && !payload.input_references?.length
       },
       response: data,

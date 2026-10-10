@@ -44,6 +44,10 @@
       "schedule": "37 * * * *"
     },
     {
+      "path": "/api/reference-dance-cleanup",
+      "schedule": "42 * * * *"
+    },
+    {
       "path": "/api/h3-live/image-cleanup",
       "schedule": "47 * * * *"
     }

@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
 // ffmpeg-static is not used; system ffmpeg is used via Dockerfile
@@ -685,6 +686,188 @@ app.post('/edit', async (req, res) => {
   }
 
   return res.status(result.ok ? 200 : 500).json(result);
+});
+
+// ================================================================
+// CLOSED SEEDANCE 2.5 REFERENCE-DANCE INSPECTION
+// ================================================================
+
+const REFERENCE_DANCE_BUCKET = 'seedance-reference-video';
+const REFERENCE_DANCE_MAX_BYTES = 50 * 1024 * 1024;
+const REFERENCE_DANCE_MIN_SECONDS = 2;
+const REFERENCE_DANCE_MAX_SECONDS = 15;
+const REFERENCE_DANCE_PROBE_TIMEOUT_MS = 15000;
+const REFERENCE_DANCE_PROCESS_TIMEOUT_MS = 90000;
+const REFERENCE_DANCE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function referenceDancePath(kind, userId, assetId) {
+  if (kind === 'staging') return `staging/${userId}/${assetId}.mp4`;
+  if (kind === 'approved') return `approved/${userId}/${assetId}.mp4`;
+  return '';
+}
+
+function referenceDanceError(code, detail) {
+  return Object.assign(new Error(detail || code), { publicCode: code });
+}
+
+function referenceDanceRemainingMs(deadline) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw referenceDanceError('VIDEO_CHECK_TIMEOUT');
+  return remaining;
+}
+
+function referenceDanceProbe(file) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(referenceDanceError('VIDEO_CHECK_TIMEOUT'));
+    }, REFERENCE_DANCE_PROBE_TIMEOUT_MS);
+    ffmpeg.ffprobe(file, (err, data) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(referenceDanceError('VIDEO_UNREADABLE', err.message));
+      else resolve(data);
+    });
+  });
+}
+
+async function storageBlobBuffer(storage, objectPath) {
+  const { data, error } = await storage.download(objectPath);
+  if (error || !data) return null;
+  const buffer = Buffer.from(await data.arrayBuffer());
+  if (!buffer.length || buffer.length > REFERENCE_DANCE_MAX_BYTES) {
+    throw referenceDanceError('VIDEO_SIZE_INVALID');
+  }
+  return buffer;
+}
+
+async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) throw referenceDanceError('SERVICE_NOT_CONFIGURED');
+  if (!REFERENCE_DANCE_UUID_RE.test(userId) || !REFERENCE_DANCE_UUID_RE.test(assetId)) {
+    throw referenceDanceError('INVALID_REQUEST');
+  }
+  if (stagingPath !== referenceDancePath('staging', userId, assetId)) {
+    throw referenceDanceError('INVALID_REQUEST');
+  }
+
+  const approvedPath = referenceDancePath('approved', userId, assetId);
+  const reviewPaths = Array.from({ length: 5 }, (_, i) => `review/${userId}/${assetId}/frame-${i + 1}.jpg`);
+  const uid = uuidv4();
+  const inputFile = path.join('/tmp', `dance_in_${uid}.mp4`);
+  const approvedFile = path.join('/tmp', `dance_approved_${uid}.mp4`);
+  const frameFiles = reviewPaths.map((_, i) => path.join('/tmp', `dance_frame_${i + 1}_${uid}.jpg`));
+  const tempFiles = [inputFile, approvedFile, ...frameFiles];
+  const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
+  const storage = db.storage.from(REFERENCE_DANCE_BUCKET);
+  const processingDeadline = Date.now() + REFERENCE_DANCE_PROCESS_TIMEOUT_MS;
+
+  try {
+    // A retry after a lost response may find that staging was already removed.
+    // In that case the deterministic, server-only approved object is the safe
+    // recovery source; browser clients never receive an upload token for it.
+    let sourceBuffer = await storageBlobBuffer(storage, stagingPath);
+    if (!sourceBuffer) sourceBuffer = await storageBlobBuffer(storage, approvedPath);
+    if (!sourceBuffer) throw referenceDanceError('VIDEO_NOT_FOUND');
+    fs.writeFileSync(inputFile, sourceBuffer);
+
+    const probe = await referenceDanceProbe(inputFile);
+    const video = (probe.streams || []).find((stream) => stream.codec_type === 'video');
+    if (!video) throw referenceDanceError('VIDEO_STREAM_MISSING');
+    const duration = Number(probe.format?.duration || video.duration || 0);
+    const durationMs = Math.round(duration * 1000);
+    const width = Number(video.width || 0);
+    const height = Number(video.height || 0);
+    const fps = editParseFps(video.r_frame_rate || video.avg_frame_rate);
+    const formatName = String(probe.format?.format_name || '').toLowerCase();
+    if (!formatName.split(',').includes('mp4')) throw referenceDanceError('VIDEO_CONTAINER_INVALID');
+    if (String(video.codec_name || '').toLowerCase() !== 'h264') throw referenceDanceError('VIDEO_CODEC_UNSUPPORTED');
+    if (!Number.isSafeInteger(durationMs) || duration < REFERENCE_DANCE_MIN_SECONDS || duration > REFERENCE_DANCE_MAX_SECONDS) {
+      throw referenceDanceError('VIDEO_DURATION_INVALID');
+    }
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 64 || height < 64 || width > 4096 || height > 4096) {
+      throw referenceDanceError('VIDEO_DIMENSIONS_INVALID');
+    }
+
+    // Strip audio and remux into a server-owned path. The provider receives
+    // this sealed copy, never the browser-writable staging object.
+    await runFfmpeg(
+      () => ffmpeg(inputFile)
+        .outputOptions('-map', '0:v:0', '-c:v', 'copy', '-an', '-movflags', '+faststart')
+        .output(approvedFile),
+      referenceDanceRemainingMs(processingDeadline)
+    );
+
+    const positions = [0.05, 0.25, 0.5, 0.75, 0.95].map((ratio) =>
+      Math.min(Math.max(0, duration * ratio), Math.max(0, duration - 0.05))
+    );
+    for (let i = 0; i < positions.length; i++) {
+      await runFfmpeg(
+        () => ffmpeg(inputFile)
+          .seekInput(positions[i])
+          .frames(1)
+          .outputOptions('-q:v', '2')
+          .output(frameFiles[i]),
+        referenceDanceRemainingMs(processingDeadline)
+      );
+    }
+
+    const approvedBuffer = fs.readFileSync(approvedFile);
+    const sha256 = crypto.createHash('sha256').update(approvedBuffer).digest('hex');
+    const { error: approvedUploadError } = await storage.upload(approvedPath, approvedBuffer, {
+      contentType: 'video/mp4',
+      upsert: true
+    });
+    if (approvedUploadError) throw referenceDanceError('APPROVED_UPLOAD_FAILED', approvedUploadError.message);
+    for (let i = 0; i < frameFiles.length; i++) {
+      const { error: frameUploadError } = await storage.upload(reviewPaths[i], fs.readFileSync(frameFiles[i]), {
+        contentType: 'image/jpeg',
+        upsert: true
+      });
+      if (frameUploadError) throw referenceDanceError('REVIEW_UPLOAD_FAILED', frameUploadError.message);
+    }
+    const { error: stagingDeleteError } = await storage.remove([stagingPath]);
+    if (stagingDeleteError) throw referenceDanceError('STAGING_DELETE_FAILED', stagingDeleteError.message);
+
+    return {
+      ok: true,
+      approvedPath,
+      reviewPaths,
+      sizeBytes: approvedBuffer.length,
+      durationMs,
+      width,
+      height,
+      fps: Number(fps.toFixed(3)),
+      videoCodec: 'h264',
+      sha256
+    };
+  } finally {
+    for (const file of tempFiles) {
+      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch (_) {}
+    }
+  }
+}
+
+app.post('/reference-dance-inspect', async (req, res) => {
+  // Unlike legacy routes, this new endpoint fails closed when the shared
+  // secret is missing; it must never become public because it reads private
+  // user uploads through the service role.
+  if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
+  const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  if (auth !== WATERMARK_SECRET) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+  const { userId, assetId, stagingPath } = req.body || {};
+  await acquireSlot('edit');
+  try {
+    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath });
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('[reference-dance-inspect] failed', error?.publicCode || 'PROCESSING_FAILED', error?.message);
+    return res.status(422).json({ ok: false, error: error?.publicCode || 'PROCESSING_FAILED' });
+  } finally {
+    releaseSlot('edit');
+  }
 });
 
 app.listen(PORT, () => {
