@@ -1,6 +1,11 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "public",
+  "functions": {
+    "api/reference-dance-confirm-upload.js": {
+      "maxDuration": 300
+    }
+  },
   "routes": [
     {
       "src": "/api/seedance-start",

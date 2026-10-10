@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   MAX_REFERENCE_DANCE_BYTES,
+  isPermanentReferenceDanceInspectionError,
   stagingPath,
   approvedPath,
   reviewFramePath,
@@ -17,6 +18,10 @@ const {
   buildReferenceDanceProviderPrompt
 } = require('../api/_lib/reference-dance.js');
 const { calculateVideoCreditCost } = require('../api/_lib/video-pricing.js');
+const {
+  validateReferenceDanceProbe,
+  validateReferenceDanceDurationMatch
+} = require('../watermark-server/reference-dance-inspection.js');
 
 const USER = '5a951e62-7bc3-46c0-a89b-33fa5eea7bb3';
 const ASSET = '270bf01a-bafd-4255-8ad5-e18a4f1c8c47';
@@ -130,26 +135,76 @@ test('migration is private, service-role only, and claims inspection atomically'
   assert.match(sql, /for update/i);
   assert.match(sql, /inspection_attempts >= 3/i);
   assert.match(sql, /interval '5 minutes'/i);
+  assert.match(sql, /set search_path = public, pg_temp/i);
+  assert.match(sql, /expires_at = greatest\(expires_at, now\(\) \+ interval '1 hour'\)/i);
   assert.match(sql, /billable_seconds = greatest\(2, ceil\(duration_ms \/ 1000\.0\)::integer\)/i);
   assert.match(sql, /seedance_reference_video_ready_complete_check/i);
   assert.match(sql, /grant execute on function public\.claim_seedance_reference_video_inspection\(uuid, uuid\)[\s\S]*?to service_role/i);
 });
 
-test('Railway inspection fails closed, strips audio and samples five frames', () => {
+test('approved probe is the billing authority and rejects remaining audio', () => {
+  const baseProbe = {
+    format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '5.001' },
+    streams: [{ codec_type: 'video', codec_name: 'h264', width: 720, height: 1280, r_frame_rate: '30000/1001' }]
+  };
+  assert.deepEqual(validateReferenceDanceProbe(baseProbe, { requireNoAudio: true }), {
+    durationSeconds: 5.001,
+    durationMs: 5001,
+    width: 720,
+    height: 1280,
+    fps: 30000 / 1001,
+    videoCodec: 'h264'
+  });
+  assert.throws(
+    () => validateReferenceDanceProbe({ ...baseProbe, streams: [...baseProbe.streams, { codec_type: 'audio', codec_name: 'aac' }] }, { requireNoAudio: true }),
+    { publicCode: 'VIDEO_AUDIO_STRIP_FAILED' }
+  );
+  assert.throws(
+    () => validateReferenceDanceProbe({ ...baseProbe, format: { ...baseProbe.format, duration: '15.001' } }, { requireNoAudio: true }),
+    { publicCode: 'VIDEO_DURATION_INVALID' }
+  );
+  assert.equal(validateReferenceDanceDurationMatch({ durationMs: 5000 }, { durationMs: 5200 }), true);
+  assert.throws(
+    () => validateReferenceDanceDurationMatch({ durationMs: 5000 }, { durationMs: 5500 }),
+    { publicCode: 'VIDEO_DURATION_MISMATCH' }
+  );
+});
+
+test('Railway inspection fails closed, re-probes the sealed file and samples it', () => {
   const source = read('watermark-server/server.js');
+  const validator = read('watermark-server/reference-dance-inspection.js');
   assert.match(source, /app\.post\('\/reference-dance-inspect'/);
   assert.match(source, /if \(!WATERMARK_SECRET\) return res\.status\(503\)/);
   assert.match(source, /'-an'/);
+  assert.match(source, /'-t', String\(REFERENCE_DANCE_MAX_SECONDS\)/);
+  assert.match(source, /approvedProbe = await referenceDanceProbe\(approvedFile/);
+  assert.match(source, /validateReferenceDanceProbe\(approvedProbe, \{ requireNoAudio: true \}\)/);
+  assert.match(source, /ffmpeg\(approvedFile\)[\s\S]*?\.seekInput\(positions\[i\]\)/);
   assert.match(source, /Array\.from\(\{ length: 5 \}/);
-  assert.match(source, /codec_name[\s\S]*?'h264'/);
+  assert.match(validator, /codec_name[\s\S]*?'h264'/);
   assert.match(source, /REFERENCE_DANCE_MAX_SECONDS = 15/);
   assert.match(source, /crypto\.createHash\('sha256'\)/);
   assert.match(source, /processingDeadline = Date\.now\(\) \+ REFERENCE_DANCE_PROCESS_TIMEOUT_MS/);
   assert.match(source, /referenceDanceRemainingMs\(processingDeadline\)/);
+  assert.match(source, /storageBlobBuffer\(storage, stagingPath, processingDeadline\)/);
+});
+
+test('permanent inspection failures are separated from retryable failures', () => {
+  for (const code of ['VIDEO_CODEC_UNSUPPORTED', 'VIDEO_DURATION_INVALID', 'VIDEO_DURATION_MISMATCH', 'VIDEO_AUDIO_STRIP_FAILED']) {
+    assert.equal(isPermanentReferenceDanceInspectionError(code), true);
+  }
+  for (const code of ['VIDEO_CHECK_TIMEOUT', 'APPROVED_UPLOAD_FAILED', 'HTTP_503']) {
+    assert.equal(isPermanentReferenceDanceInspectionError(code), false);
+  }
+  const confirm = read('api/reference-dance-confirm-upload.js');
+  assert.match(confirm, /await removeObjects\(auth\.supabase, paths\)/);
+  assert.match(confirm, /status: 'failed'/);
+  assert.match(confirm, /return res\.status\(422\)/);
 });
 
 test('cleanup cron is registered and reference assets are isolated from audio cleanup', () => {
   const vercel = JSON.parse(read('vercel.json'));
+  assert.equal(vercel.functions['api/reference-dance-confirm-upload.js'].maxDuration, 300);
   assert.equal(vercel.crons.some((item) => item.path === '/api/reference-dance-cleanup'), true);
   assert.notEqual(
     vercel.crons.find((item) => item.path === '/api/reference-dance-cleanup').schedule,
@@ -167,11 +222,18 @@ test('admin BETA UI keeps the browser on asset IDs and requires rights confirmat
   assert.match(ui, /referenceDanceAsset\?\.status==='ready'/);
 });
 
-test('a reference video already bound to generation cannot be manually deleted', () => {
+test('active generation keeps its asset while failed or cancelled tasks allow deletion', () => {
   const deletion = read('api/reference-dance-delete.js');
   assert.match(deletion, /review_paths,last_task_id/);
-  assert.match(deletion, /row\.last_task_id \|\| row\.status === 'checking'/);
+  assert.match(deletion, /row\.status === 'checking'/);
+  assert.match(deletion, /\['failed', 'cancelled'\]\.includes\(task\.status\)/);
   assert.match(deletion, /deleted: false, retained: true/);
+});
+
+test('failed attempts cannot extend reference-video retention forever', () => {
+  const start = read('api/_lib/seedance-start.js');
+  assert.match(start, /REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS = 72 \* 60 \* 60 \* 1000/);
+  assert.match(start, /Math\.min\([\s\S]*?Date\.now\(\) \+ REFERENCE_DANCE_RETENTION_MS,[\s\S]*?maxRetentionMs/);
 });
 
 test('cleanup derives every deterministic output path after a partial inspection', () => {

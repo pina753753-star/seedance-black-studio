@@ -93,7 +93,7 @@ create or replace function public.claim_seedance_reference_video_inspection(
 ) returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_row public.seedance_reference_video_uploads%rowtype;
@@ -121,6 +121,7 @@ begin
   update public.seedance_reference_video_uploads
     set status = 'checking',
         inspection_attempts = inspection_attempts + 1,
+        expires_at = greatest(expires_at, now() + interval '1 hour'),
         updated_at = now()
     where id = p_asset_id;
   return jsonb_build_object('ok', true, 'code', 'claimed');

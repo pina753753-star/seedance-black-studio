@@ -10,12 +10,25 @@ const {
   MIN_REFERENCE_DANCE_DURATION_MS,
   MAX_REFERENCE_DANCE_DURATION_MS,
   isUuid,
+  isPermanentReferenceDanceInspectionError,
   validateOwnedPath,
+  approvedPath,
+  reviewFramePath,
   authorizeReferenceDanceAdmin,
   referenceDanceCredits
 } = require('./_lib/reference-dance.js');
 
 const INSPECTION_TIMEOUT_MS = 120000;
+const PERMANENT_INSPECTION_MESSAGES = {
+  VIDEO_SIZE_INVALID: '参考動画は50MB以下にしてください。',
+  VIDEO_STREAM_MISSING: '動画トラックを確認できませんでした。別のMP4動画を選択してください。',
+  VIDEO_CONTAINER_INVALID: 'MP4形式の動画を選択してください。',
+  VIDEO_CODEC_UNSUPPORTED: 'H.264形式のMP4動画を選択してください。',
+  VIDEO_AUDIO_STRIP_FAILED: '参考動画の音声を安全に除去できませんでした。別の動画を選択してください。',
+  VIDEO_DURATION_INVALID: '参考動画は2〜15秒にしてください。',
+  VIDEO_DURATION_MISMATCH: '参考動画の長さを安全に確認できませんでした。別の動画を選択してください。',
+  VIDEO_DIMENSIONS_INVALID: '参考動画の解像度を確認できませんでした。別の動画を選択してください。'
+};
 
 async function removeObjects(db, paths) {
   const safe = [...new Set((paths || []).filter(Boolean))];
@@ -72,7 +85,7 @@ async function inspectOnRailway({ userId, assetId, stagingPath }) {
     try { data = raw ? JSON.parse(raw) : null; } catch (_) {}
     if (!response.ok || !data?.ok) {
       const code = typeof data?.error === 'string' ? data.error : `HTTP_${response.status}`;
-      throw new Error(code);
+      throw Object.assign(new Error(code), { inspectionCode: code, inspectionStatus: response.status });
     }
     return data;
   } finally {
@@ -87,6 +100,7 @@ module.exports = async function handler(req, res) {
   if (!auth.ok) return res.status(auth.status).json(auth.body);
 
   let assetId = '';
+  let claimedRow = null;
   try {
     const access = await authorizeReferenceDanceAdmin(auth);
     if (!access.ok) return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden' });
@@ -122,6 +136,7 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, assetId, status: 'ready' });
     }
 
+    claimedRow = row;
     const railwayData = await inspectOnRailway({ userId: auth.user.id, assetId, stagingPath: row.staging_path });
     const inspected = validateInspection(railwayData, auth.user.id, assetId);
     if (!inspected) throw new Error('invalid_inspection_response');
@@ -177,6 +192,34 @@ module.exports = async function handler(req, res) {
     });
   } catch (error) {
     console.error('[reference-dance-confirm] failed', error?.message || String(error), 'assetId:', assetId || null);
+    if (claimedRow && isPermanentReferenceDanceInspectionError(error?.inspectionCode)) {
+      const paths = [
+        claimedRow.staging_path,
+        approvedPath(auth.user.id, assetId),
+        ...Array.from({ length: 5 }, (_, index) => reviewFramePath(auth.user.id, assetId, index + 1))
+      ];
+      await removeObjects(auth.supabase, paths);
+      const now = new Date().toISOString();
+      const { error: failureError } = await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
+        status: 'failed',
+        expires_at: now,
+        updated_at: now
+      }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
+      if (failureError) {
+        console.error('[reference-dance-confirm] permanent failure persist failed', failureError.message);
+        return res.status(503).json({
+          ok: false,
+          error: 'reference_video_check_failed',
+          message: '参考動画を安全に処理できませんでした。時間を空けてもう一度お試しください。'
+        });
+      }
+      return res.status(422).json({
+        ok: false,
+        error: 'reference_video_invalid',
+        reason: error.inspectionCode,
+        message: PERMANENT_INSPECTION_MESSAGES[error.inspectionCode] || '参考動画を読み取れませんでした。別のMP4動画を選択してください。'
+      });
+    }
     return res.status(503).json({
       ok: false,
       error: 'reference_video_check_failed',

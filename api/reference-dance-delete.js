@@ -41,11 +41,17 @@ module.exports = async function handler(req, res) {
       .eq('id', assetId).eq('user_id', auth.user.id).maybeSingle();
     if (rowError) throw rowError;
     if (!row) return res.status(200).json({ ok: true, deleted: true });
-    // Once a provider task references the sealed object, keep it until the
-    // 24-hour expiry cleanup. Deleting it here could invalidate a signed URL
-    // while the provider is still fetching or processing the request.
-    if (row.last_task_id || row.status === 'checking') {
+    // Keep the sealed object while a provider task may still fetch or process
+    // its signed URL. A failed/cancelled task is terminal and can be deleted.
+    if (row.status === 'checking') {
       return res.status(200).json({ ok: true, deleted: false, retained: true });
+    }
+    if (row.last_task_id) {
+      const { data: task, error: taskError } = await auth.supabase.from('generation_tasks')
+        .select('status').eq('id', row.last_task_id).eq('user_id', auth.user.id).maybeSingle();
+      if (taskError || !task || !['failed', 'cancelled'].includes(task.status)) {
+        return res.status(200).json({ ok: true, deleted: false, retained: true });
+      }
     }
     const paths = ownedObjectPaths(row, auth.user.id);
     if (paths.length) {

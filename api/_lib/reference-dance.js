@@ -17,6 +17,18 @@ const REFERENCE_DANCE_MAX_PER_DAY = 20;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_RE = /^[0-9a-f]{64}$/i;
 const REFERENCE_DANCE_PROMPT_MARKER = '[Pina Studio reference dance requirements]';
+const PERMANENT_REFERENCE_DANCE_INSPECTION_ERRORS = new Set([
+  'INVALID_REQUEST',
+  'VIDEO_SIZE_INVALID',
+  'VIDEO_UNREADABLE',
+  'VIDEO_STREAM_MISSING',
+  'VIDEO_CONTAINER_INVALID',
+  'VIDEO_CODEC_UNSUPPORTED',
+  'VIDEO_AUDIO_STRIP_FAILED',
+  'VIDEO_DURATION_INVALID',
+  'VIDEO_DURATION_MISMATCH',
+  'VIDEO_DIMENSIONS_INVALID'
+]);
 
 function error(code, message) {
   return Object.assign(new Error(message || code), { code });
@@ -24,6 +36,10 @@ function error(code, message) {
 
 function isUuid(value) {
   return typeof value === 'string' && UUID_RE.test(value);
+}
+
+function isPermanentReferenceDanceInspectionError(code) {
+  return PERMANENT_REFERENCE_DANCE_INSPECTION_ERRORS.has(String(code || ''));
 }
 
 function stagingPath(userId, assetId) {
@@ -164,6 +180,7 @@ module.exports = {
   REFERENCE_DANCE_MAX_PER_DAY,
   UUID_RE,
   isUuid,
+  isPermanentReferenceDanceInspectionError,
   stagingPath,
   approvedPath,
   reviewFramePath,

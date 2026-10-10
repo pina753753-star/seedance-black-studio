@@ -29,6 +29,7 @@ const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
 const SEEDANCE_25_TURBO_MODEL = 'bytedance/seedance-2.5';
 const SEEDANCE_25_STANDARD_MODEL = 'bytedance/seedance-2.5-standard';
+const REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS = 72 * 60 * 60 * 1000;
 const SEEDANCE_25_MODELS = new Set([SEEDANCE_25_TURBO_MODEL, SEEDANCE_25_STANDARD_MODEL]);
 const WAVESPEED_MODELS = Object.freeze({
   [SEEDANCE_25_TURBO_MODEL]: Object.freeze({
@@ -451,7 +452,7 @@ module.exports = async function handler(req, res) {
       }
       const { data: referenceDanceRow, error: referenceDanceError } = await db
         .from(REFERENCE_DANCE_TABLE)
-        .select('id,user_id,status,approved_path,size_bytes,duration_ms,billable_seconds,video_codec,sha256,rights_confirmed_at,expires_at')
+        .select('id,user_id,status,approved_path,size_bytes,duration_ms,billable_seconds,video_codec,sha256,rights_confirmed_at,expires_at,created_at')
         .eq('id', referenceDanceAssetId)
         .eq('user_id', user.id)
         .maybeSingle();
@@ -466,7 +467,15 @@ module.exports = async function handler(req, res) {
       if (collectModerationImageUrls(body).length < 1) {
         return res.status(400).json({ ok: false, error: 'identity_reference_image_required', message: '人物を維持するための参考画像を1枚以上追加してください。' });
       }
-      const extendedExpiry = new Date(Date.now() + REFERENCE_DANCE_RETENTION_MS).toISOString();
+      const createdMs = Date.parse(String(referenceDanceRow.created_at || ''));
+      const maxRetentionMs = createdMs + REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS;
+      if (!Number.isFinite(createdMs) || maxRetentionMs <= Date.now()) {
+        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: '参考動画の安全な保持期間を確認できないため、生成を開始できません。' });
+      }
+      const extendedExpiry = new Date(Math.min(
+        Date.now() + REFERENCE_DANCE_RETENTION_MS,
+        maxRetentionMs
+      )).toISOString();
       const { data: retainedRows, error: retentionError } = await db.from(REFERENCE_DANCE_TABLE)
         .update({ expires_at: extendedExpiry, updated_at: new Date().toISOString() })
         .eq('id', referenceDanceAssetId)
