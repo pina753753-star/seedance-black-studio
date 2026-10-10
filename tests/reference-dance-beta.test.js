@@ -173,6 +173,7 @@ test('approved probe is the billing authority and rejects remaining audio', () =
 test('Railway inspection fails closed, re-probes the sealed file and samples it', () => {
   const source = read('watermark-server/server.js');
   const validator = read('watermark-server/reference-dance-inspection.js');
+  const dockerfile = read('watermark-server/Dockerfile');
   assert.match(source, /app\.post\('\/reference-dance-inspect'/);
   assert.match(source, /if \(!WATERMARK_SECRET\) return res\.status\(503\)/);
   assert.match(source, /'-an'/);
@@ -187,6 +188,14 @@ test('Railway inspection fails closed, re-probes the sealed file and samples it'
   assert.match(source, /processingDeadline = Date\.now\(\) \+ REFERENCE_DANCE_PROCESS_TIMEOUT_MS/);
   assert.match(source, /referenceDanceRemainingMs\(processingDeadline\)/);
   assert.match(source, /storageBlobBuffer\(storage, stagingPath, processingDeadline\)/);
+  const localRequires = [...source.matchAll(/require\(['"]\.\/([^'"]+)['"]\)/g)].map((match) => match[1]);
+  for (const requiredFile of localRequires) {
+    assert.equal(
+      dockerfile.includes('COPY *.js ./') || dockerfile.split(/\r?\n/).some((line) => line.startsWith('COPY ') && line.split(/\s+/).includes(requiredFile)),
+      true,
+      `Dockerfile must copy ${requiredFile}`
+    );
+  }
 });
 
 test('permanent inspection failures are separated from retryable failures', () => {
@@ -222,17 +231,18 @@ test('admin BETA UI keeps the browser on asset IDs and requires rights confirmat
   assert.match(ui, /referenceDanceAsset\?\.status==='ready'/);
 });
 
-test('active generation keeps its asset while failed or cancelled tasks allow deletion', () => {
+test('any generation binding keeps its asset until bounded expiry cleanup', () => {
   const deletion = read('api/reference-dance-delete.js');
   assert.match(deletion, /review_paths,last_task_id/);
-  assert.match(deletion, /row\.status === 'checking'/);
-  assert.match(deletion, /\['failed', 'cancelled'\]\.includes\(task\.status\)/);
+  assert.match(deletion, /row\.last_task_id \|\| row\.status === 'checking'/);
   assert.match(deletion, /deleted: false, retained: true/);
 });
 
 test('failed attempts cannot extend reference-video retention forever', () => {
   const start = read('api/_lib/seedance-start.js');
   assert.match(start, /REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS = 72 \* 60 \* 60 \* 1000/);
+  assert.match(start, /REFERENCE_DANCE_START_MARGIN_MS = \(REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS \+ 10 \* 60\) \* 1000/);
+  assert.match(start, /maxRetentionMs - Date\.now\(\) < REFERENCE_DANCE_START_MARGIN_MS/);
   assert.match(start, /Math\.min\([\s\S]*?Date\.now\(\) \+ REFERENCE_DANCE_RETENTION_MS,[\s\S]*?maxRetentionMs/);
 });
 

@@ -30,6 +30,7 @@ const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
 const SEEDANCE_25_TURBO_MODEL = 'bytedance/seedance-2.5';
 const SEEDANCE_25_STANDARD_MODEL = 'bytedance/seedance-2.5-standard';
 const REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS = 72 * 60 * 60 * 1000;
+const REFERENCE_DANCE_START_MARGIN_MS = (REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS + 10 * 60) * 1000;
 const SEEDANCE_25_MODELS = new Set([SEEDANCE_25_TURBO_MODEL, SEEDANCE_25_STANDARD_MODEL]);
 const WAVESPEED_MODELS = Object.freeze({
   [SEEDANCE_25_TURBO_MODEL]: Object.freeze({
@@ -469,7 +470,7 @@ module.exports = async function handler(req, res) {
       }
       const createdMs = Date.parse(String(referenceDanceRow.created_at || ''));
       const maxRetentionMs = createdMs + REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS;
-      if (!Number.isFinite(createdMs) || maxRetentionMs <= Date.now()) {
+      if (!Number.isFinite(createdMs) || maxRetentionMs - Date.now() < REFERENCE_DANCE_START_MARGIN_MS) {
         return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: '参考動画の安全な保持期間を確認できないため、生成を開始できません。' });
       }
       const extendedExpiry = new Date(Math.min(
