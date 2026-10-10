@@ -1,13 +1,16 @@
 begin;
-alter table public.generated_videos enable row level security;
-drop policy if exists
-  "Allow service role full access to generated videos"
-on public.generated_videos;
-revoke all on table public.generated_videos
-from public, anon, authenticated;
-grant select, insert, update, delete
-on table public.generated_videos
-to service_role;
+do $$
+begin
+  -- This retired table exists on older production databases but is absent
+  -- from clean preview databases. Harden it only where it still exists.
+  if to_regclass('public.generated_videos') is not null then
+    execute 'alter table public.generated_videos enable row level security';
+    execute 'drop policy if exists "Allow service role full access to generated videos" on public.generated_videos';
+    execute 'revoke all on table public.generated_videos from public, anon, authenticated';
+    execute 'grant select, insert, update, delete on table public.generated_videos to service_role';
+  end if;
+end
+$$;
 
 alter table public.user_subscriptions enable row level security;
 alter table public.video_edit_tasks enable row level security;

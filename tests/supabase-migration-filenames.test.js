@@ -31,3 +31,14 @@ test('legacy history hardening tolerates clean preview databases', () => {
     assert.match(sql, /to_regclass\('public\.flowvid_video_history'\) is not null/i);
   }
 });
+
+test('legacy generated videos migrations tolerate clean preview databases', () => {
+  const migrationsDir = path.join(__dirname, '..', 'supabase', 'migrations');
+  for (const file of [
+    '20260726000000_add_public_sample_flag.sql',
+    '20260726000001_harden_internal_table_access.sql'
+  ]) {
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+    assert.match(sql, /to_regclass\('public\.generated_videos'\) is not null/i);
+  }
+});
