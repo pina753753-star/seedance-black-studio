@@ -42,3 +42,17 @@ test('legacy generated videos migrations tolerate clean preview databases', () =
     assert.match(sql, /to_regclass\('public\.generated_videos'\) is not null/i);
   }
 });
+
+test('signup credit settings migration accepts only known production and preview states', () => {
+  const migrationsDir = path.join(__dirname, '..', 'supabase', 'migrations');
+  const sql = fs.readFileSync(
+    path.join(migrationsDir, '20260822020000_update_signup_credit_campaign_v1_settings.sql'),
+    'utf8'
+  );
+
+  assert.match(sql, /max_grants\s*=\s*20[\s\S]*credits_per_user\s*=\s*800[\s\S]*granted_count\s*=\s*19/i);
+  assert.match(sql, /max_grants\s*=\s*10[\s\S]*credits_per_user\s*=\s*100[\s\S]*granted_count\s*=\s*0/i);
+  assert.match(sql, /max_grants\s*=\s*50[\s\S]*credits_per_user\s*=\s*100/i);
+  assert.match(sql, /if\s+v_updated_id\s+is\s+null\s+and\s+not\s+exists/i);
+  assert.match(sql, /raise\s+exception/i);
+});

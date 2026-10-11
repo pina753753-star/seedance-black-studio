@@ -23,11 +23,11 @@
 --     実現される。
 --
 -- 安全策:
---   UPDATE文のWHERE句に「作業前提と一致する場合のみ」という条件
---   (max_grants=20, credits_per_user=800, granted_count=19)を付け、
---   一致しない場合(=作業直前に新規登録が発生し前提が崩れていた場合)は
---   0行更新のままロールバックする。RAISE EXCEPTIONで明示的に中断し、
---   「更新されたかどうか分からない」状態を残さない。
+--   本番で確認済みの旧値 (20, 800, 19) に加え、migrationを先頭から適用する
+--   Preview環境の初期値 (10, 100, 0) だけを更新対象にする。
+--   すでに目標値 (50, 100) なら何もしない。それ以外の状態は
+--   RAISE EXCEPTIONで明示的に中断し、「更新されたかどうか分からない」
+--   状態を残さない。
 --
 -- DO NOT run against production without explicit approval.
 --
@@ -52,15 +52,23 @@ begin
     credits_per_user = 100,
     updated_at = now()
   where campaign_key = 'signup_free_credit_v1'
-    and max_grants = 20
-    and credits_per_user = 800
-    and granted_count = 19
+    and (
+      (max_grants = 20 and credits_per_user = 800 and granted_count = 19)
+      or
+      (max_grants = 10 and credits_per_user = 100 and granted_count = 0)
+    )
   returning id into v_updated_id;
 
-  if v_updated_id is null then
+  if v_updated_id is null and not exists (
+    select 1
+    from private.signup_credit_campaigns
+    where campaign_key = 'signup_free_credit_v1'
+      and max_grants = 50
+      and credits_per_user = 100
+  ) then
     raise exception using
       errcode = 'P0001',
-      message = 'signup_credit_campaigns の現在値が想定(max_grants=20, credits_per_user=800, granted_count=19)と一致しなかったため、更新を中止しました。作業直前に新規登録が発生していないか確認してください。';
+      message = 'signup_credit_campaigns の現在値が既知の旧値・Preview初期値・目標値のいずれとも一致しなかったため、更新を中止しました。';
   end if;
 end;
 $$;
