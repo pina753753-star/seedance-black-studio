@@ -50,18 +50,17 @@ for (const invalid of [
   });
 }
 
-test('official 720p Turbo reference-video provider examples remain exact', () => {
-  assert.equal(providerCostCents(2, 5), 87);
-  assert.equal(providerCostCents(5, 5), 120);
-  assert.equal(providerCostCents(15, 5), 230);
-  assert.equal(providerCostCents(15, 15), 360);
+test('official 720p Motion Control provider pricing remains exact', () => {
+  assert.equal(providerCostCents(4), 176);
+  assert.equal(providerCostCents(5), 220);
+  assert.equal(providerCostCents(15), 660);
+  assert.throws(() => providerCostCents(3));
 });
 
-test('credits preserve existing Turbo 720p provider-cost ratio', () => {
-  assert.equal(referenceDanceCredits(2, 4), 70);
-  assert.equal(referenceDanceCredits(5, 5), 110);
-  assert.equal(referenceDanceCredits(15, 5), 215);
-  assert.equal(referenceDanceCredits(15, 15), 330);
+test('Motion Control credits preserve existing provider-cost ratio', () => {
+  assert.equal(referenceDanceCredits(4), 165);
+  assert.equal(referenceDanceCredits(5), 205);
+  assert.equal(referenceDanceCredits(15), 605);
 });
 
 test('server pricing ignores browser estimates and uses inspected duration', () => {
@@ -73,28 +72,29 @@ test('server pricing ignores browser estimates and uses inspected duration', () 
     referenceDanceBillableSeconds: 15,
     estimated_credits: 1
   };
-  assert.equal(calculateVideoCreditCost(trusted), 215);
+  assert.equal(calculateVideoCreditCost(trusted), 605);
   assert.throws(() => calculateVideoCreditCost({ ...trusted, resolution: '1080p' }));
 });
 
-test('WaveSpeed receives only a server-signed reference video with audio disabled', () => {
+test('WaveSpeed Motion Control receives only a server-signed video and identity images', () => {
   const start = read('api/_lib/seedance-start.js');
   const providerPrompt = buildReferenceDanceProviderPrompt('踊る');
   assert.match(start, /createSignedUrl\(referenceDance\.approvedPath/);
-  assert.match(start, /payload\.reference_videos = \[\.\.\.new Set\(referenceVideoUrls\)\]/);
-  assert.match(start, /generate_audio: referenceVideoUrls\.length === 0/);
+  assert.match(start, /video: String\(referenceVideoUrl \|\| ''\)\.trim\(\)/);
+  assert.match(start, /reference_images: collectWaveSpeedReferenceImageUrls/);
+  assert.match(start, /generate_audio: false/);
+  assert.match(start, /bytedance\/seedance-2\.5\/motion-control/);
   assert.match(providerPrompt, /@Image 1/);
   assert.match(providerPrompt, /@Video 1/);
   assert.match(providerPrompt, /do not convert it to slow motion/i);
 });
 
-test('closed beta accepts only Turbo reference mode, 720p and 4-15 seconds', () => {
-  assert.equal(validateReferenceDanceVariant({ model: 'bytedance/seedance-2.5', mode: 'reference_to_video', resolution: '720p', outputSeconds: 15 }), true);
+test('closed beta accepts only Turbo reference mode and 720p', () => {
+  assert.equal(validateReferenceDanceVariant({ model: 'bytedance/seedance-2.5', mode: 'reference_to_video', resolution: '720p' }), true);
   for (const input of [
     { model: 'bytedance/seedance-2.5-standard', mode: 'reference_to_video', resolution: '720p', outputSeconds: 5 },
     { model: 'bytedance/seedance-2.5', mode: 'image_to_video', resolution: '720p', outputSeconds: 5 },
-    { model: 'bytedance/seedance-2.5', mode: 'reference_to_video', resolution: '1080p', outputSeconds: 5 },
-    { model: 'bytedance/seedance-2.5', mode: 'reference_to_video', resolution: '720p', outputSeconds: 16 }
+    { model: 'bytedance/seedance-2.5', mode: 'reference_to_video', resolution: '1080p', outputSeconds: 5 }
   ]) assert.throws(() => validateReferenceDanceVariant(input));
 });
 

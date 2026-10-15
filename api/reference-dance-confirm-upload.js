@@ -25,7 +25,7 @@ const PERMANENT_INSPECTION_MESSAGES = {
   VIDEO_CONTAINER_INVALID: 'MP4形式の動画を選択してください。',
   VIDEO_CODEC_UNSUPPORTED: 'H.264形式のMP4動画を選択してください。',
   VIDEO_AUDIO_STRIP_FAILED: '参考動画の音声を安全に除去できませんでした。別の動画を選択してください。',
-  VIDEO_DURATION_INVALID: '参考動画は2〜15秒にしてください。',
+  VIDEO_DURATION_INVALID: '参考動画は4〜15秒にしてください。',
   VIDEO_DURATION_MISMATCH: '参考動画の長さを安全に確認できませんでした。別の動画を選択してください。',
   VIDEO_DIMENSIONS_INVALID: '参考動画の解像度を確認できませんでした。別の動画を選択してください。'
 };
@@ -45,7 +45,7 @@ function validateInspection(data, userId, assetId) {
   if (reviewPaths.length !== 5 || !reviewPaths.every((p) => validateOwnedPath('review', userId, assetId, p))) return null;
   const sizeBytes = Number(data.sizeBytes);
   const durationMs = Number(data.durationMs);
-  const billableSeconds = Math.max(2, Math.ceil(durationMs / 1000));
+  const billableSeconds = Math.max(4, Math.ceil(durationMs / 1000));
   const width = Number(data.width);
   const height = Number(data.height);
   const fps = Number(data.fps);
@@ -121,7 +121,7 @@ module.exports = async function handler(req, res) {
         status: 'ready',
         durationMs: row.duration_ms,
         billableSeconds: row.billable_seconds,
-        sampleCredits: referenceDanceCredits(Number(row.billable_seconds), 5)
+        sampleCredits: referenceDanceCredits(Number(row.billable_seconds))
       });
     }
 
@@ -187,7 +187,7 @@ module.exports = async function handler(req, res) {
       status: 'ready',
       durationMs: inspected.durationMs,
       billableSeconds: inspected.billableSeconds,
-      sampleCredits: referenceDanceCredits(inspected.billableSeconds, 5),
+      sampleCredits: referenceDanceCredits(inspected.billableSeconds),
       expiresAt
     });
   } catch (error) {

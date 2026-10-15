@@ -35,7 +35,8 @@ const SEEDANCE_25_MODELS = new Set([SEEDANCE_25_TURBO_MODEL, SEEDANCE_25_STANDAR
 const WAVESPEED_MODELS = Object.freeze({
   [SEEDANCE_25_TURBO_MODEL]: Object.freeze({
     text: 'bytedance/seedance-2.5/text-to-video-turbo',
-    image: 'bytedance/seedance-2.5/image-to-video-turbo'
+    image: 'bytedance/seedance-2.5/image-to-video-turbo',
+    motion: 'bytedance/seedance-2.5/motion-control'
   }),
   [SEEDANCE_25_STANDARD_MODEL]: Object.freeze({
     text: 'bytedance/seedance-2.5/text-to-video',
@@ -113,9 +114,32 @@ function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRat
   return payload;
 }
 
-function resolveWaveSpeedModel(model, mode) {
+function collectWaveSpeedReferenceImageUrls({ frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }) {
+  return [...new Set([
+    ...(Array.isArray(frameImages) ? frameImages : []).map(extractImageUrl),
+    firstFrameUrl,
+    ...(Array.isArray(inputReferences) ? inputReferences : []).map(extractImageUrl),
+    ...(Array.isArray(referenceUrls) ? referenceUrls : []).map(extractImageUrl),
+    referenceUrl
+  ].filter(Boolean))];
+}
+
+function buildWaveSpeedMotionControlPayload({ providerPrompt, resolution, referenceVideoUrl, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }) {
+  return {
+    video: String(referenceVideoUrl || '').trim(),
+    reference_images: collectWaveSpeedReferenceImageUrls({ frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }),
+    prompt: providerPrompt,
+    resolution,
+    // The inspected upload has already had its audio removed. Keeping audio
+    // generation off therefore produces the silent result promised by the UI.
+    generate_audio: false
+  };
+}
+
+function resolveWaveSpeedModel(model, mode, useMotionControl = false) {
   const providerModels = WAVESPEED_MODELS[model];
   if (!providerModels) return '';
+  if (useMotionControl && mode === 'reference_to_video') return providerModels.motion || '';
   return mode === 'image_to_video' ? providerModels.image : providerModels.text;
 }
 
@@ -443,9 +467,9 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ ok: false, error: 'invalid_reference_video_id', message: '参考動画を確認できませんでした。もう一度添付してください。' });
       }
       try {
-        validateReferenceDanceVariant({ model, mode, resolution, outputSeconds: duration });
+        validateReferenceDanceVariant({ model, mode, resolution });
       } catch (error) {
-        return res.status(400).json({ ok: false, error: error.code || 'reference_dance_variant_not_allowed', message: '参考ダンス動画はSeedance 2.5 Turbo・リファレンス・720p・4〜15秒で利用できます。' });
+        return res.status(400).json({ ok: false, error: error.code || 'reference_dance_variant_not_allowed', message: '参考ダンス動画はSeedance 2.5 Turbo・リファレンス・720pで利用できます。生成尺と縦横比は参考動画に従います。' });
       }
       const adminAccess = await authorizeReferenceDanceAdmin(auth);
       if (!adminAccess.ok) {
@@ -820,7 +844,18 @@ module.exports = async function handler(req, res) {
     // 2.5 variants use WaveSpeed's request shape, but their endpoint IDs remain
     // separate so standard and Turbo can never be substituted implicitly.
     const payload = provider === 'wavespeed'
-      ? buildWaveSpeedPayload({
+      ? referenceDance
+        ? buildWaveSpeedMotionControlPayload({
+          providerPrompt,
+          resolution,
+          referenceVideoUrl: referenceDanceSignedUrl,
+          frameImages,
+          inputReferences,
+          firstFrameUrl,
+          referenceUrl,
+          referenceUrls
+        })
+        : buildWaveSpeedPayload({
           providerPrompt,
           duration,
           resolution,
@@ -924,7 +959,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    const providerModel = resolveWaveSpeedModel(model, mode);
+    const providerModel = resolveWaveSpeedModel(model, mode, Boolean(referenceDance));
     const providerEndpoint = provider === 'wavespeed'
       ? `${WAVESPEED_API_BASE}/${providerModel}`
       : OPENROUTER_VIDEO_ENDPOINT;
@@ -1110,15 +1145,15 @@ module.exports = async function handler(req, res) {
       creditCost,
       creditBalance: deduction.newBalance,
       request: {
-        duration: payload.duration,
+        duration: payload.duration || referenceDance?.billableSeconds || duration,
         resolution: payload.resolution,
-        aspect_ratio: payload.aspect_ratio,
+        aspect_ratio: payload.aspect_ratio || (referenceDance ? 'reference_video' : aspectRatio),
         has_frame_images: Boolean(payload.frame_images?.length),
         frame_image_count: payload.frame_images?.length || 0,
         has_input_references: Boolean(payload.input_references?.length),
         input_reference_count: payload.input_references?.length || 0,
-        has_reference_video: Boolean(payload.reference_videos?.length),
-        text_only: !payload.frame_images?.length && !payload.input_references?.length
+        has_reference_video: Boolean(payload.video || payload.reference_videos?.length),
+        text_only: !payload.frame_images?.length && !payload.input_references?.length && !payload.reference_images?.length
       },
       response: data,
       checkedAt: new Date().toISOString()
@@ -1137,4 +1172,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { buildWaveSpeedPayload, resolveWaveSpeedModel };
+module.exports._test = { buildWaveSpeedPayload, buildWaveSpeedMotionControlPayload, resolveWaveSpeedModel };

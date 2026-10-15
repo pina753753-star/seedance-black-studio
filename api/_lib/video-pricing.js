@@ -61,7 +61,7 @@ function calculateVideoCreditCost(input) {
         error.code = 'reference_dance_variant_not_allowed';
         throw error;
       }
-      return referenceDanceCredits(Number(body.referenceDanceBillableSeconds), duration);
+      return referenceDanceCredits(Number(body.referenceDanceBillableSeconds));
     }
     const creditsPerSecond = seedance25Pricing.creditsPerSecond[resolution]
       || seedance25Pricing.creditsPerSecond['720p'];

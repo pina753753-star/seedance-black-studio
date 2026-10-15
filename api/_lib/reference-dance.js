@@ -6,7 +6,7 @@ const REFERENCE_DANCE_MODEL = 'bytedance/seedance-2.5';
 const REFERENCE_DANCE_MODE = 'reference_to_video';
 const REFERENCE_DANCE_RESOLUTION = '720p';
 const MAX_REFERENCE_DANCE_BYTES = 50 * 1024 * 1024;
-const MIN_REFERENCE_DANCE_DURATION_MS = 2000;
+const MIN_REFERENCE_DANCE_DURATION_MS = 4000;
 const MAX_REFERENCE_DANCE_DURATION_MS = 15000;
 const MIN_REFERENCE_DANCE_OUTPUT_SECONDS = 4;
 const MAX_REFERENCE_DANCE_OUTPUT_SECONDS = 15;
@@ -86,22 +86,20 @@ async function authorizeReferenceDanceAdmin(auth) {
   return { ok: true, admin: data };
 }
 
-function providerCostCents(referenceBillableSeconds, outputSeconds) {
+function providerCostCents(referenceBillableSeconds) {
   if (!Number.isInteger(referenceBillableSeconds)
-      || referenceBillableSeconds < 2
+      || referenceBillableSeconds < 4
       || referenceBillableSeconds > 15) {
     throw error('invalid_reference_video_duration');
   }
-  if (!Number.isInteger(outputSeconds)
-      || outputSeconds < MIN_REFERENCE_DANCE_OUTPUT_SECONDS
-      || outputSeconds > MAX_REFERENCE_DANCE_OUTPUT_SECONDS) {
-    throw error('invalid_output_duration');
-  }
-  return (11 * (referenceBillableSeconds + outputSeconds)) + (2 * outputSeconds);
+  // WaveSpeed Seedance 2.5 Motion Control 720p is billed only by the
+  // reference-video duration at $0.44 per second. Output duration and aspect
+  // ratio follow that video and are not separate provider inputs.
+  return 44 * referenceBillableSeconds;
 }
 
-function referenceDanceCredits(referenceBillableSeconds, outputSeconds) {
-  const cents = providerCostCents(referenceBillableSeconds, outputSeconds);
+function referenceDanceCredits(referenceBillableSeconds) {
+  const cents = providerCostCents(referenceBillableSeconds);
   // Existing Turbo 720p: $6.00 provider cost for 30 seconds -> 550 credits.
   // Keep the same provider-cost-to-credit ratio and round upward to 5 credits.
   return Math.ceil(((cents * 11) / 12) / 5) * 5;
@@ -123,7 +121,7 @@ function validateReadyReferenceDance(row, userId) {
       || durationMs < MIN_REFERENCE_DANCE_DURATION_MS
       || durationMs > MAX_REFERENCE_DANCE_DURATION_MS
       || !Number.isInteger(billable)
-      || billable !== Math.max(2, Math.ceil(durationMs / 1000))) {
+      || billable !== Math.max(4, Math.ceil(durationMs / 1000))) {
     throw error('invalid_reference_video_duration');
   }
   if (row.video_codec !== 'h264' || !SHA256_RE.test(String(row.sha256 || ''))) {
@@ -139,16 +137,11 @@ function validateReadyReferenceDance(row, userId) {
   });
 }
 
-function validateReferenceDanceVariant({ model, mode, resolution, outputSeconds }) {
+function validateReferenceDanceVariant({ model, mode, resolution }) {
   if (model !== REFERENCE_DANCE_MODEL
       || mode !== REFERENCE_DANCE_MODE
       || resolution !== REFERENCE_DANCE_RESOLUTION) {
     throw error('reference_dance_variant_not_allowed');
-  }
-  if (!Number.isInteger(outputSeconds)
-      || outputSeconds < MIN_REFERENCE_DANCE_OUTPUT_SECONDS
-      || outputSeconds > MAX_REFERENCE_DANCE_OUTPUT_SECONDS) {
-    throw error('invalid_output_duration');
   }
   return true;
 }
