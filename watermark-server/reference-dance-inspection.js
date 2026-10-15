@@ -1,6 +1,6 @@
 'use strict';
 
-const MIN_SECONDS = 2;
+const MIN_SECONDS = 4;
 const MAX_SECONDS = 15;
 
 function inspectionError(code) {
