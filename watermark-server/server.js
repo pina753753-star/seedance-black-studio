@@ -735,12 +735,14 @@ function referenceDanceRemainingMs(deadline) {
 function referenceDanceProbe(file, timeoutMs = REFERENCE_DANCE_PROBE_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let command;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      try { command?.kill('SIGKILL'); } catch (_) {}
       reject(referenceDanceError('VIDEO_CHECK_TIMEOUT'));
     }, Math.min(REFERENCE_DANCE_PROBE_TIMEOUT_MS, Math.max(1, timeoutMs)));
-    ffmpeg.ffprobe(file, (err, data) => {
+    command = ffmpeg.ffprobe(file, (err, data) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -767,7 +769,13 @@ async function referenceDanceWithinDeadline(operation, deadline) {
 
 async function storageBlobBuffer(storage, objectPath, deadline) {
   const { data, error } = await referenceDanceWithinDeadline(() => storage.download(objectPath), deadline);
-  if (error || !data) return null;
+  if (error) {
+    const status = Number(error.statusCode || error.status || 0);
+    const message = String(error.message || '').toLowerCase();
+    if (status === 404 || message.includes('object not found') || message === 'not found') return null;
+    throw referenceDanceError('STORAGE_DOWNLOAD_FAILED', error.message);
+  }
+  if (!data) throw referenceDanceError('STORAGE_DOWNLOAD_FAILED');
   const arrayBuffer = await referenceDanceWithinDeadline(() => data.arrayBuffer(), deadline);
   const buffer = Buffer.from(arrayBuffer);
   if (!buffer.length || buffer.length > REFERENCE_DANCE_MAX_BYTES) {
