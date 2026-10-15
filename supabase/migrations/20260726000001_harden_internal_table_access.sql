@@ -1,31 +1,43 @@
 begin;
-alter table public.generated_videos enable row level security;
-drop policy if exists
-  "Allow service role full access to generated videos"
-on public.generated_videos;
-revoke all on table public.generated_videos
-from public, anon, authenticated;
-grant select, insert, update, delete
-on table public.generated_videos
-to service_role;
+do $$
+begin
+  -- This retired table exists on older production databases but is absent
+  -- from clean preview databases. Harden it only where it still exists.
+  if to_regclass('public.generated_videos') is not null then
+    execute 'alter table public.generated_videos enable row level security';
+    execute 'drop policy if exists "Allow service role full access to generated videos" on public.generated_videos';
+    execute 'revoke all on table public.generated_videos from public, anon, authenticated';
+    execute 'grant select, insert, update, delete on table public.generated_videos to service_role';
+  end if;
+end
+$$;
 
 alter table public.user_subscriptions enable row level security;
 alter table public.video_edit_tasks enable row level security;
 alter table public.annual_credit_grant_log enable row level security;
-alter table public.flowvid_video_history enable row level security;
 revoke all on table
   public.user_subscriptions,
   public.video_edit_tasks,
-  public.annual_credit_grant_log,
-  public.flowvid_video_history
+  public.annual_credit_grant_log
 from public, anon, authenticated;
 grant select, insert, update, delete
 on table
   public.user_subscriptions,
   public.video_edit_tasks,
-  public.annual_credit_grant_log,
-  public.flowvid_video_history
+  public.annual_credit_grant_log
 to service_role;
+
+do $$
+begin
+  -- The retired table exists on older production databases but is absent from
+  -- clean preview databases. Harden it only where it still exists.
+  if to_regclass('public.flowvid_video_history') is not null then
+    execute 'alter table public.flowvid_video_history enable row level security';
+    execute 'revoke all on table public.flowvid_video_history from public, anon, authenticated';
+    execute 'grant select, insert, update, delete on table public.flowvid_video_history to service_role';
+  end if;
+end
+$$;
 
 revoke all on schema private
 from public, anon, authenticated;

@@ -1,6 +1,7 @@
 'use strict';
 
 const { getVideoModel, isGenerationEnabledModel } = require('./video-models');
+const { referenceDanceCredits } = require('./reference-dance.js');
 
 const MIN_CREDITS = 50;
 const MAX_CREDITS = 400;
@@ -51,6 +52,17 @@ function calculateVideoCreditCost(input) {
 
   const seedance25Pricing = SEEDANCE_25_PRICING_BY_MODEL[modelId];
   if (seedance25Pricing) {
+    // This field is supplied only after api/_lib/seedance-start.js has loaded
+    // and validated a ready, service-role-only registry row. Callers must not
+    // pass the browser request body through as this trusted value.
+    if (body.referenceDanceBillableSeconds !== undefined && body.referenceDanceBillableSeconds !== null) {
+      if (modelId !== 'bytedance/seedance-2.5' || mode !== 'reference_to_video' || resolution !== '720p') {
+        const error = new Error('Reference dance is not allowed for this variant.');
+        error.code = 'reference_dance_variant_not_allowed';
+        throw error;
+      }
+      return referenceDanceCredits(Number(body.referenceDanceBillableSeconds));
+    }
     const creditsPerSecond = seedance25Pricing.creditsPerSecond[resolution]
       || seedance25Pricing.creditsPerSecond['720p'];
     return roundUpToFive(duration * creditsPerSecond, seedance25Pricing.maxCredits);

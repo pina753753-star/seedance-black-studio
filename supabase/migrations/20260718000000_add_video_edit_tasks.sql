@@ -58,7 +58,8 @@
 --    -> anon_select and auth_select must both be false; service_select true.
 --    (No RLS policies are created for this table — matches the current
 --    direction taken for other internal tables, see
---    20260715_revoke_internal_table_access.sql / 20260715_revoke_legacy_video_history_access.sql.
+--    20260715060039_revoke_internal_table_access.sql /
+--    20260715084713_revoke_legacy_video_history_access.sql.
 --    All access to video_edit_tasks goes through api/video-edit.js and
 --    api/video-edit-status.js, both of which use the service-role client.)
 -- ============================================================
@@ -110,8 +111,8 @@ create index if not exists video_edit_tasks_user_created_idx
 
 -- RLS enabled, no policies: table is service_role-only, same posture as
 -- flowvid_video_history / annual_credit_grant_log / user_subscriptions
--- after 20260715_revoke_internal_table_access.sql and
--- 20260715_revoke_legacy_video_history_access.sql. Users never query this
+-- after 20260715060039_revoke_internal_table_access.sql and
+-- 20260715084713_revoke_legacy_video_history_access.sql. Users never query this
 -- table directly; api/video-edit.js and api/video-edit-status.js (service
 -- role) are the only access paths.
 alter table public.video_edit_tasks enable row level security;
