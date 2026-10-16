@@ -187,7 +187,9 @@ test('Railway inspection fails closed, re-probes the sealed file and samples it'
   assert.match(source, /crypto\.createHash\('sha256'\)/);
   assert.match(source, /processingDeadline = Date\.now\(\) \+ REFERENCE_DANCE_PROCESS_TIMEOUT_MS/);
   assert.match(source, /referenceDanceRemainingMs\(processingDeadline\)/);
-  assert.match(source, /storageBlobBuffer\(storage, stagingPath, processingDeadline\)/);
+  assert.match(source, /signedReferenceDanceDownload\(capabilities\.sourceUrl, processingDeadline\)/);
+  assert.match(source, /storage\.uploadToSignedUrl\(/);
+  assert.match(source, /STORAGE_CAPABILITY_INVALID/);
   const localRequires = [...source.matchAll(/require\(['"]\.\/([^'"]+)['"]\)/g)].map((match) => match[1]);
   for (const requiredFile of localRequires) {
     assert.equal(
@@ -230,6 +232,20 @@ test('retryable inspection failures keep the uploaded object and expose only a s
   assert.match(latest, /\.in\('status', \['uploading', 'checking'\]\)/);
   assert.match(latest, /\.eq\('user_id', auth\.user\.id\)/);
   assert.doesNotMatch(latest, /staging_path|approved_path|review_paths/);
+});
+
+test('Vercel grants Railway only short-lived path-scoped storage capabilities', () => {
+  const confirm = read('api/reference-dance-confirm-upload.js');
+  const railway = read('watermark-server/server.js');
+  assert.match(confirm, /STORAGE_CAPABILITY_TTL_SECONDS = 3 \* 60/);
+  assert.match(confirm, /createSignedUrl\([\s\S]*?STORAGE_CAPABILITY_TTL_SECONDS/);
+  assert.match(confirm, /createSignedUploadUrl\(path, \{ upsert: true \}\)/);
+  assert.match(confirm, /storageCapabilities/);
+  assert.doesNotMatch(confirm, /storageCapabilities[\s\S]{0,300}SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(railway, /source\.host !== base\.host/);
+  assert.match(railway, /decodedSourcePath !== expectedSourcePath/);
+  assert.doesNotMatch(railway, /storage\.remove\(\[stagingPath\]\)/);
+  assert.match(confirm, /await removeObjects\(auth\.supabase, \[row\.staging_path\]\)/);
 });
 
 test('cleanup cron is registered and reference assets are isolated from audio cleanup', () => {

@@ -19,6 +19,8 @@ const {
 } = require('./_lib/reference-dance.js');
 
 const INSPECTION_TIMEOUT_MS = 120000;
+const STORAGE_CAPABILITY_TTL_SECONDS = 3 * 60;
+const DEFAULT_SUPABASE_URL = 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const PERMANENT_INSPECTION_MESSAGES = {
   VIDEO_SIZE_INVALID: '参考動画は50MB以下にしてください。',
   VIDEO_STREAM_MISSING: '動画トラックを確認できませんでした。別のMP4動画を選択してください。',
@@ -73,7 +75,41 @@ function validateInspection(data, userId, assetId) {
   };
 }
 
-async function inspectOnRailway({ userId, assetId, stagingPath }) {
+async function createStorageCapabilities(db, userId, assetId, stagingPath) {
+  const supabaseUrl = String(process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/+$/, '');
+  const publishableKey = String(
+    process.env.SUPABASE_PUBLISHABLE_KEY
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    || process.env.SUPABASE_ANON_KEY
+    || ''
+  );
+  if (!publishableKey) throw new Error('STORAGE_CAPABILITY_NOT_CONFIGURED');
+
+  const approved = approvedPath(userId, assetId);
+  const reviews = Array.from({ length: 5 }, (_, index) => reviewFramePath(userId, assetId, index + 1));
+  const storage = db.storage.from(REFERENCE_DANCE_BUCKET);
+  const { data: source, error: sourceError } = await storage.createSignedUrl(
+    stagingPath,
+    STORAGE_CAPABILITY_TTL_SECONDS
+  );
+  if (sourceError || !source?.signedUrl) throw new Error('STORAGE_DOWNLOAD_CAPABILITY_FAILED');
+
+  const uploads = await Promise.all([approved, ...reviews].map(async (path) => {
+    const { data, error } = await storage.createSignedUploadUrl(path, { upsert: true });
+    if (error || !data?.token) throw new Error('STORAGE_UPLOAD_CAPABILITY_FAILED');
+    return { path, token: data.token };
+  }));
+
+  return {
+    supabaseUrl,
+    publishableKey,
+    sourceUrl: source.signedUrl,
+    approvedUpload: uploads[0],
+    reviewUploads: uploads.slice(1)
+  };
+}
+
+async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilities }) {
   const baseUrl = String(process.env.WATERMARK_SERVER_URL || '').replace(/\/+$/, '');
   const secret = String(process.env.WATERMARK_SECRET || '');
   if (!baseUrl || !secret) throw new Error('reference_dance_inspector_not_configured');
@@ -83,7 +119,7 @@ async function inspectOnRailway({ userId, assetId, stagingPath }) {
     const response = await fetch(`${baseUrl}/reference-dance-inspect`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, assetId, stagingPath }),
+      body: JSON.stringify({ userId, assetId, stagingPath, storageCapabilities }),
       signal: controller.signal
     });
     const raw = await response.text();
@@ -143,7 +179,18 @@ module.exports = async function handler(req, res) {
     }
 
     claimedRow = row;
-    const railwayData = await inspectOnRailway({ userId: auth.user.id, assetId, stagingPath: row.staging_path });
+    const storageCapabilities = await createStorageCapabilities(
+      auth.supabase,
+      auth.user.id,
+      assetId,
+      row.staging_path
+    );
+    const railwayData = await inspectOnRailway({
+      userId: auth.user.id,
+      assetId,
+      stagingPath: row.staging_path,
+      storageCapabilities
+    });
     const inspected = validateInspection(railwayData, auth.user.id, assetId);
     if (!inspected) throw new Error('invalid_inspection_response');
 
@@ -187,6 +234,7 @@ module.exports = async function handler(req, res) {
       updated_at: new Date().toISOString()
     }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking').select('id');
     if (updateError || !updated || updated.length !== 1) throw new Error('reference_video_ready_persist_failed');
+    await removeObjects(auth.supabase, [row.staging_path]);
 
     return res.status(200).json({
       ok: true,
@@ -247,4 +295,10 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { validateInspection, inspectOnRailway, removeObjects, safeInspectionReason };
+module.exports._test = {
+  validateInspection,
+  createStorageCapabilities,
+  inspectOnRailway,
+  removeObjects,
+  safeInspectionReason
+};
