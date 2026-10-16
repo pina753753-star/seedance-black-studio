@@ -218,9 +218,12 @@ test('retryable inspection failures keep the uploaded object and expose only a s
   assert.match(source, /status: 'uploading'[\s\S]*?inspection_error: reason/);
   assert.match(source, /retryable: true/);
   assert.match(source, /\^\(HTTP_\\d\{3\}/);
+  assert.match(source, /inspectionCode \|\| error\?\.message \|\| error\?\.name/);
   assert.match(migration, /add column if not exists inspection_error text/i);
   assert.match(ui, /id="danceRetry"/);
   assert.match(ui, /confirmReferenceDanceAsset/);
+  assert.match(ui, /referenceDanceAsset\.retryable=error\?\.retryable!==false/);
+  assert.match(ui, /if\(previous&&!referenceDanceAsset\?\.retryable\)/);
 });
 
 test('cleanup cron is registered and reference assets are isolated from audio cleanup', () => {
