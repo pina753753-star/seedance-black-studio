@@ -784,9 +784,9 @@ async function confirmReferenceDanceAsset(){
     const token=await getToken();if(!token){location.href='./login.html';return false}
     const response=await fetch('/api/reference-dance-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({assetId:referenceDanceAsset.id})});
     const data=await response.json().catch(()=>({}));
-    if(!response.ok||!data.ok||data.status!=='ready'){const failure=new Error(data.message||data.error||'参考動画を安全に確認できませんでした');failure.retryable=!!data.retryable;throw failure}
+    if(!response.ok||!data.ok||data.status!=='ready'){const failure=new Error(data.message||data.error||'参考動画を安全に確認できませんでした');failure.retryable=data.retryable===true;throw failure}
     referenceDanceAsset.status='ready';referenceDanceAsset.durationMs=Number(data.durationMs||0);referenceDanceAsset.billableSeconds=Number(data.billableSeconds||0);referenceDanceAsset.retryable=false;syncReferenceDanceUi();updateCreditUi();return true;
-  }catch(error){referenceDanceAsset.status='failed';referenceDanceAsset.retryable=!!error?.retryable;referenceDanceAsset.error=error?.message||'参考動画を利用できません';syncReferenceDanceUi();updateCreditUi();return false}
+  }catch(error){referenceDanceAsset.status='failed';referenceDanceAsset.retryable=error?.retryable!==false;referenceDanceAsset.error=error?.message||'参考動画を利用できません';syncReferenceDanceUi();updateCreditUi();return false}
 }
 async function uploadReferenceDance(file){
   if(!file)return;
@@ -804,7 +804,7 @@ async function uploadReferenceDance(file){
     referenceDanceAsset.id=urlData.assetId;
     const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;if(!client)throw new Error('Supabase接続情報が未設定です');
     const{error}=await client.storage.from(urlData.bucket).uploadToSignedUrl(urlData.path,urlData.token,file,{contentType:'video/mp4'});if(error)throw error;
-    const confirmed=await confirmReferenceDanceAsset();if(!confirmed)return;
+    const confirmed=await confirmReferenceDanceAsset();if(!confirmed){if(previous&&!referenceDanceAsset?.retryable){const failedId=referenceDanceAsset?.id||'';referenceDanceAsset=previous;syncReferenceDanceUi();updateCreditUi();if(failedId&&failedId!==previous.id)deleteReferenceDanceAsset(failedId)}return}
     if(previous?.id&&previous.id!==referenceDanceAsset.id)deleteReferenceDanceAsset(previous.id);
   }catch(error){const failedId=referenceDanceAsset?.id||'';if(previous)referenceDanceAsset=previous;else{referenceDanceAsset.status='failed';referenceDanceAsset.retryable=false;referenceDanceAsset.error=error?.message||'参考動画を利用できません'}if(failedId&&failedId!==previous?.id)deleteReferenceDanceAsset(failedId)}
   syncReferenceDanceUi();updateCreditUi();
