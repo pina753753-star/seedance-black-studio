@@ -765,10 +765,54 @@ async function referenceDanceWithinDeadline(operation, deadline) {
   }
 }
 
-async function storageBlobBuffer(storage, objectPath, deadline) {
-  const { data, error } = await referenceDanceWithinDeadline(() => storage.download(objectPath), deadline);
-  if (error || !data) return null;
-  const arrayBuffer = await referenceDanceWithinDeadline(() => data.arrayBuffer(), deadline);
+function validateReferenceDanceStorageCapabilities(capabilities, stagingPath, approvedPath, reviewPaths) {
+  const value = capabilities && typeof capabilities === 'object' ? capabilities : {};
+  let base;
+  let source;
+  try {
+    base = new URL(String(value.supabaseUrl || ''));
+    source = new URL(String(value.sourceUrl || ''));
+  } catch (_) {
+    throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  }
+  if (base.protocol !== 'https:' || source.protocol !== 'https:' || source.host !== base.host) {
+    throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  }
+  if (!/^[a-z0-9-]+\.supabase\.co$/i.test(base.host) || base.pathname !== '/' || base.search || base.hash) {
+    throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  }
+  let decodedSourcePath = '';
+  try { decodedSourcePath = decodeURIComponent(source.pathname); } catch (_) {}
+  const expectedSourcePath = `/storage/v1/object/sign/${REFERENCE_DANCE_BUCKET}/${stagingPath}`;
+  if (!source.searchParams.get('token') || decodedSourcePath !== expectedSourcePath) {
+    throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  }
+  if (typeof value.publishableKey !== 'string' || value.publishableKey.length < 20) {
+    throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  }
+  const approvedUpload = value.approvedUpload;
+  const reviewUploads = Array.isArray(value.reviewUploads) ? value.reviewUploads : [];
+  if (approvedUpload?.path !== approvedPath || typeof approvedUpload?.token !== 'string' || approvedUpload.token.length < 20) {
+    throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  }
+  if (reviewUploads.length !== reviewPaths.length || reviewUploads.some((item, index) => (
+    item?.path !== reviewPaths[index] || typeof item?.token !== 'string' || item.token.length < 20
+  ))) {
+    throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  }
+  return {
+    baseUrl: base.origin,
+    sourceUrl: source.toString(),
+    publishableKey: value.publishableKey,
+    approvedUpload,
+    reviewUploads
+  };
+}
+
+async function signedReferenceDanceDownload(sourceUrl, deadline) {
+  const response = await referenceDanceWithinDeadline(() => fetch(sourceUrl), deadline);
+  if (!response.ok) throw referenceDanceError('STORAGE_DOWNLOAD_FAILED');
+  const arrayBuffer = await referenceDanceWithinDeadline(() => response.arrayBuffer(), deadline);
   const buffer = Buffer.from(arrayBuffer);
   if (!buffer.length || buffer.length > REFERENCE_DANCE_MAX_BYTES) {
     throw referenceDanceError('VIDEO_SIZE_INVALID');
@@ -776,8 +820,17 @@ async function storageBlobBuffer(storage, objectPath, deadline) {
   return buffer;
 }
 
-async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) throw referenceDanceError('SERVICE_NOT_CONFIGURED');
+async function signedReferenceDanceUpload(storage, capability, buffer, contentType, deadline, errorCode) {
+  const { error } = await referenceDanceWithinDeadline(() => storage.uploadToSignedUrl(
+    capability.path,
+    capability.token,
+    buffer,
+    { contentType, upsert: true }
+  ), deadline);
+  if (error) throw referenceDanceError(errorCode, error.message);
+}
+
+async function runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities }) {
   if (!REFERENCE_DANCE_UUID_RE.test(userId) || !REFERENCE_DANCE_UUID_RE.test(assetId)) {
     throw referenceDanceError('INVALID_REQUEST');
   }
@@ -787,22 +840,23 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
 
   const approvedPath = referenceDancePath('approved', userId, assetId);
   const reviewPaths = Array.from({ length: 5 }, (_, i) => `review/${userId}/${assetId}/frame-${i + 1}.jpg`);
+  const capabilities = validateReferenceDanceStorageCapabilities(
+    storageCapabilities,
+    stagingPath,
+    approvedPath,
+    reviewPaths
+  );
   const uid = uuidv4();
   const inputFile = path.join('/tmp', `dance_in_${uid}.mp4`);
   const approvedFile = path.join('/tmp', `dance_approved_${uid}.mp4`);
   const frameFiles = reviewPaths.map((_, i) => path.join('/tmp', `dance_frame_${i + 1}_${uid}.jpg`));
   const tempFiles = [inputFile, approvedFile, ...frameFiles];
-  const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
+  const db = createClient(capabilities.baseUrl, capabilities.publishableKey, { auth: { persistSession: false } });
   const storage = db.storage.from(REFERENCE_DANCE_BUCKET);
   const processingDeadline = Date.now() + REFERENCE_DANCE_PROCESS_TIMEOUT_MS;
 
   try {
-    // A retry after a lost response may find that staging was already removed.
-    // In that case the deterministic, server-only approved object is the safe
-    // recovery source; browser clients never receive an upload token for it.
-    let sourceBuffer = await storageBlobBuffer(storage, stagingPath, processingDeadline);
-    if (!sourceBuffer) sourceBuffer = await storageBlobBuffer(storage, approvedPath, processingDeadline);
-    if (!sourceBuffer) throw referenceDanceError('VIDEO_NOT_FOUND');
+    const sourceBuffer = await signedReferenceDanceDownload(capabilities.sourceUrl, processingDeadline);
     fs.writeFileSync(inputFile, sourceBuffer);
 
     const probe = await referenceDanceProbe(inputFile, referenceDanceRemainingMs(processingDeadline));
@@ -843,20 +897,24 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
       throw referenceDanceError('VIDEO_SIZE_INVALID');
     }
     const sha256 = crypto.createHash('sha256').update(approvedBuffer).digest('hex');
-    const { error: approvedUploadError } = await referenceDanceWithinDeadline(() => storage.upload(approvedPath, approvedBuffer, {
-      contentType: 'video/mp4',
-      upsert: true
-    }), processingDeadline);
-    if (approvedUploadError) throw referenceDanceError('APPROVED_UPLOAD_FAILED', approvedUploadError.message);
+    await signedReferenceDanceUpload(
+      storage,
+      capabilities.approvedUpload,
+      approvedBuffer,
+      'video/mp4',
+      processingDeadline,
+      'APPROVED_UPLOAD_FAILED'
+    );
     for (let i = 0; i < frameFiles.length; i++) {
-      const { error: frameUploadError } = await referenceDanceWithinDeadline(() => storage.upload(reviewPaths[i], fs.readFileSync(frameFiles[i]), {
-        contentType: 'image/jpeg',
-        upsert: true
-      }), processingDeadline);
-      if (frameUploadError) throw referenceDanceError('REVIEW_UPLOAD_FAILED', frameUploadError.message);
+      await signedReferenceDanceUpload(
+        storage,
+        capabilities.reviewUploads[i],
+        fs.readFileSync(frameFiles[i]),
+        'image/jpeg',
+        processingDeadline,
+        'REVIEW_UPLOAD_FAILED'
+      );
     }
-    const { error: stagingDeleteError } = await referenceDanceWithinDeadline(() => storage.remove([stagingPath]), processingDeadline);
-    if (stagingDeleteError) throw referenceDanceError('STAGING_DELETE_FAILED', stagingDeleteError.message);
 
     return {
       ok: true,
@@ -884,12 +942,12 @@ app.post('/reference-dance-inspect', async (req, res) => {
   if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
   const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
   if (auth !== WATERMARK_SECRET) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
-  const { userId, assetId, stagingPath } = req.body || {};
+  const { userId, assetId, stagingPath, storageCapabilities } = req.body || {};
   let acquired = false;
   try {
     await acquireSlot('edit', REFERENCE_DANCE_QUEUE_TIMEOUT_MS);
     acquired = true;
-    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath });
+    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities });
     return res.status(200).json(result);
   } catch (error) {
     console.error('[reference-dance-inspect] failed', error?.publicCode || 'PROCESSING_FAILED', error?.message);
