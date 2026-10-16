@@ -224,6 +224,12 @@ test('retryable inspection failures keep the uploaded object and expose only a s
   assert.match(ui, /confirmReferenceDanceAsset/);
   assert.match(ui, /referenceDanceAsset\.retryable=error\?\.retryable!==false/);
   assert.match(ui, /if\(previous&&!referenceDanceAsset\?\.retryable\)/);
+  assert.match(ui, /reference-dance-latest/);
+  assert.match(ui, /await confirmReferenceDanceAsset\(\)/);
+  const latest = read('api/reference-dance-latest.js');
+  assert.match(latest, /\.in\('status', \['uploading', 'checking'\]\)/);
+  assert.match(latest, /\.eq\('user_id', auth\.user\.id\)/);
+  assert.doesNotMatch(latest, /staging_path|approved_path|review_paths/);
 });
 
 test('cleanup cron is registered and reference assets are isolated from audio cleanup', () => {
