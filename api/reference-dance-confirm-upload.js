@@ -30,6 +30,12 @@ const PERMANENT_INSPECTION_MESSAGES = {
   VIDEO_DIMENSIONS_INVALID: '参考動画の解像度を確認できませんでした。別の動画を選択してください。'
 };
 
+function safeInspectionReason(error) {
+  const raw = String(error?.inspectionCode || error?.name || error?.message || 'unknown').trim();
+  if (/^(HTTP_\d{3}|[A-Z][A-Z0-9_]{2,63}|reference_dance_inspector_not_configured|invalid_inspection_response|review_frame_url_failed|reference_video_moderation_unavailable|reference_video_ready_persist_failed|AbortError)$/.test(raw)) return raw;
+  return 'unknown';
+}
+
 async function removeObjects(db, paths) {
   const safe = [...new Set((paths || []).filter(Boolean))];
   if (!safe.length) return true;
@@ -176,6 +182,7 @@ module.exports = async function handler(req, res) {
       video_codec: inspected.videoCodec,
       sha256: inspected.sha256,
       moderation_categories: [],
+      inspection_error: null,
       expires_at: expiresAt,
       updated_at: new Date().toISOString()
     }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking').select('id');
@@ -220,12 +227,24 @@ module.exports = async function handler(req, res) {
         message: PERMANENT_INSPECTION_MESSAGES[error.inspectionCode] || '参考動画を読み取れませんでした。別のMP4動画を選択してください。'
       });
     }
+    const reason = safeInspectionReason(error);
+    if (claimedRow) {
+      const now = new Date().toISOString();
+      const { error: retryPersistError } = await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
+        status: 'uploading',
+        inspection_error: reason,
+        updated_at: now
+      }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
+      if (retryPersistError) console.error('[reference-dance-confirm] retry state persist failed', retryPersistError.message);
+    }
     return res.status(503).json({
       ok: false,
       error: 'reference_video_check_failed',
-      message: '参考動画を安全に確認できませんでした。時間を空けてもう一度お試しください。'
+      reason,
+      retryable: true,
+      message: `参考動画の検査に失敗しました（${reason}）。動画は保持しているため、再アップロードは不要です。`
     });
   }
 };
 
-module.exports._test = { validateInspection, inspectOnRailway, removeObjects };
+module.exports._test = { validateInspection, inspectOnRailway, removeObjects, safeInspectionReason };
