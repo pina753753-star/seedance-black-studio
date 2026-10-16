@@ -211,6 +211,18 @@ test('permanent inspection failures are separated from retryable failures', () =
   assert.match(confirm, /return res\.status\(422\)/);
 });
 
+test('retryable inspection failures keep the uploaded object and expose only a safe code', () => {
+  const source = read('api/reference-dance-confirm-upload.js');
+  const migration = read('supabase/migrations/20261016000000_add_reference_dance_inspection_error.sql');
+  const ui = read('generate-prod.html');
+  assert.match(source, /status: 'uploading'[\s\S]*?inspection_error: reason/);
+  assert.match(source, /retryable: true/);
+  assert.match(source, /\^\(HTTP_\\d\{3\}/);
+  assert.match(migration, /add column if not exists inspection_error text/i);
+  assert.match(ui, /id="danceRetry"/);
+  assert.match(ui, /confirmReferenceDanceAsset/);
+});
+
 test('cleanup cron is registered and reference assets are isolated from audio cleanup', () => {
   const vercel = JSON.parse(read('vercel.json'));
   assert.equal(vercel.functions['api/reference-dance-confirm-upload.js'].maxDuration, 300);
