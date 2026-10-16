@@ -31,7 +31,7 @@ const PERMANENT_INSPECTION_MESSAGES = {
 };
 
 function safeInspectionReason(error) {
-  const raw = String(error?.inspectionCode || error?.name || error?.message || 'unknown').trim();
+  const raw = String(error?.inspectionCode || error?.message || error?.name || 'unknown').trim();
   if (/^(HTTP_\d{3}|[A-Z][A-Z0-9_]{2,63}|reference_dance_inspector_not_configured|invalid_inspection_response|review_frame_url_failed|reference_video_moderation_unavailable|reference_video_ready_persist_failed|AbortError)$/.test(raw)) return raw;
   return 'unknown';
 }
