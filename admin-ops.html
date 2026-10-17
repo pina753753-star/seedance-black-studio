@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>FlowVid Studio</title>
+<meta name="theme-color" content="#050506">
+<style>*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#050506;color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.gate{min-height:100dvh;display:grid;place-items:center;padding:24px}.card{width:min(100%,420px);border:1px solid rgba(255,255,255,.12);border-radius:22px;background:rgba(255,255,255,.05);padding:20px}.card b{display:block;font-size:18px;margin-bottom:8px}.card p{margin:0;color:rgba(255,255,255,.62);font-size:13px;line-height:1.7}</style>
+</head>
+<body>
+<div class="gate"><div class="card"><b>確認中</b><p>管理者権限を確認しています。</p></div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./auth-config.js?v=admin-aquarium-safe"></script>
+<script>
+(async()=>{
+  const fallback=()=>location.replace('./index.html');
+  try{
+    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
+    if(!client){fallback();return}
+    const {data,error}=await client.auth.getSession();
+    const token=data?.session?.access_token||'';
+    if(error||!token){fallback();return}
+    const response=await fetch('/api/admin-ops-page',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+    if(!response.ok){fallback();return}
+    const html=await response.text();
+    document.open();document.write(html);document.close();
+  }catch(_){fallback()}
+})();
+</script>
+</body>
+</html>
