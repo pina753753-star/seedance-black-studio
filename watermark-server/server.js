@@ -198,8 +198,9 @@ app.get('/', (req, res) => {
 });
 
 app.post('/watermark', async (req, res) => {
+  if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
   const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  if (WATERMARK_SECRET && auth !== WATERMARK_SECRET) {
+  if (auth !== WATERMARK_SECRET) {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
   }
   const { videoUrl } = req.body;
@@ -659,8 +660,9 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
 }
 
 app.post('/edit', async (req, res) => {
+  if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
   const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  if (WATERMARK_SECRET && auth !== WATERMARK_SECRET) {
+  if (auth !== WATERMARK_SECRET) {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
   }
 
@@ -886,8 +888,8 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
 }
 
 app.post('/reference-dance-inspect', async (req, res) => {
-  // Unlike legacy routes, this new endpoint fails closed when the shared
-  // secret is missing; it must never become public because it reads private
+  // This endpoint also fails closed when the shared secret is missing;
+  // it must never become public because it reads private
   // user uploads through the service role.
   if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
   const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
