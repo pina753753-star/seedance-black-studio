@@ -3,6 +3,10 @@
   "outputDirectory": "public",
   "routes": [
     {
+      "src": "^/api/(?:seedance-start(?:-priced)?|_lib/seedance-start|h3-live/start|h3-director/start-session|h3-director/approve-prompt|video-edit|storyboard-prompt|stripe-checkout)(?:\\.js)?/?$",
+      "dest": "/api/maintenance"
+    },
+    {
       "src": "/api/seedance-start",
       "dest": "/api/seedance-start-priced"
     },
