@@ -7,7 +7,13 @@ name: Watermark container verification
     paths:
       - .github/workflows/watermark-container-check.yml
       - watermark-server/**
-      - tests/watermark-security.test.js
+      - tests/watermark-*.test.js
+      - tests/worker-*.test.js
+      - tests/watermark-integration.cjs
+      - tests/maintenance.test.js
+      - api/maintenance.js
+      - maintenance.html
+      - vercel.json
 
 permissions:
   contents: read
@@ -44,13 +50,17 @@ jobs:
           docker build --pull --no-cache --progress=plain \
             --tag "$IMAGE_NAME" --file watermark-server/Dockerfile watermark-server
 
-      - name: Verify the image runtime and dependencies with no network
+      - name: Verify the image runtime, dependencies, and committed worker sources offline
         shell: bash
         run: |
           set -euo pipefail
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --mount "type=bind,source=$PWD,target=/repo,readonly" \
             "$IMAGE_NAME" sh -ec '
+              for source in /repo/watermark-server/*.js /repo/watermark-server/package.json; do
+                cmp "$source" "/app/$(basename "$source")"
+              done
               test "$(node --version)" = "v24.22.1"
               grep -q "^VERSION_CODENAME=bookworm$" /etc/os-release
               node --version
@@ -59,14 +69,34 @@ jobs:
               node -e '\''const fs = require("fs"); const p = require("./package.json"); for (const name of Object.keys(p.dependencies)) { const installed = JSON.parse(fs.readFileSync("./node_modules/" + name + "/package.json", "utf8")); console.log(name + "@" + installed.version); }'\''
             '
 
-      - name: Run the committed regression suite inside the built image
+      - name: Run all worker and maintenance unit tests with the real SDK and zero skips
+        timeout-minutes: 4
         shell: bash
         run: |
           set -euo pipefail
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=512m \
             --mount "type=bind,source=$PWD,target=/repo,readonly" --workdir /repo \
-            "$IMAGE_NAME" node --test --test-reporter=tap tests/watermark-security.test.js
+            --env NODE_PATH=/app/node_modules \
+            "$IMAGE_NAME" node --test --test-concurrency=1 --test-reporter=tap \
+              tests/watermark-security.test.js tests/watermark-download.test.js \
+              tests/watermark-hardening.test.js tests/worker-lifecycle.test.js \
+              tests/worker-probe.test.js tests/worker-storage.test.js \
+              tests/maintenance.test.js | tee "$RUNNER_TEMP/watermark-unit.tap"
+          grep -Fx '# skipped 0' "$RUNNER_TEMP/watermark-unit.tap"
+
+      - name: Run 36 synthetic integration checks against the built worker and dependencies
+        timeout-minutes: 4
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --mount "type=bind,source=$PWD,target=/repo,readonly" --workdir /repo \
+            --env NODE_PATH=/app/node_modules \
+            --env PINA_TEST_WORKER_ROOT=/app --env PINA_TEST_DEPENDENCY_ROOT=/app \
+            "$IMAGE_NAME" node tests/watermark-integration.cjs | tee "$RUNNER_TEMP/watermark-integration.log"
+          grep -E '^RESULT 36/36 checks passed; Node v24\.22\.1;' "$RUNNER_TEMP/watermark-integration.log"
 
       - name: Test real HTTP authentication and synthetic FFmpeg processing offline
         shell: bash
@@ -169,4 +199,4 @@ jobs:
       - name: Summarize verification only
         shell: bash
         run: |
-          printf '%s\n' 'Actual Dockerfile build passed.' 'Node 24.22.1 / Debian Bookworm verified.' 'Committed regression suite and offline HTTP/FFmpeg smoke checks passed.' 'No image push, deployment, real credentials, customer media, or paid API calls.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Actual Dockerfile build passed.' 'Node 24.22.1 / Debian Bookworm verified.' 'Built worker sources match the committed source.' 'All six worker unit suites and maintenance tests passed with zero skips and the real SDK.' '36/36 built-source synthetic integration checks and 21 real HTTP authentication responses passed.' 'Source-exact drawtext, retained audio packets, and full FFmpeg decode passed.' 'No image push, deployment, real credentials, customer media, or paid API calls.' >> "$GITHUB_STEP_SUMMARY"

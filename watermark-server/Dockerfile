@@ -3,6 +3,6 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json ./
 RUN npm install
-COPY server.js reference-dance-inspection.js ./
+COPY server.js reference-dance-inspection.js watermark-download.js worker-storage.js worker-probe.js ./
 EXPOSE 3000
 CMD ["node", "server.js"]

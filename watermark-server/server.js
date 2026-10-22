@@ -7,6 +7,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const { execFile } = require('child_process');
+const { isAllowedWatermarkUrl, downloadWatermarkVideo } = require('./watermark-download.js');
+const { uploadStorageFile, withStorageDeadline } = require('./worker-storage.js');
+const { probeVideoFile } = require('./worker-probe.js');
 const {
   validateReferenceDanceProbe,
   validateReferenceDanceDurationMatch
@@ -16,7 +20,8 @@ const {
 // ffmpeg.setFfmpegPath(ffmpegStatic);
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+// Requests contain URLs/IDs, never media bytes; six long clip URLs fit this cap.
+app.use(express.json({ limit: '64kb' }));
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -38,6 +43,22 @@ const PORT = process.env.PORT || 3000;
 // /edit traffic sharing this container.
 const MAX_CONCURRENT_JOBS = 2;
 const MAX_CONCURRENT_EDIT_JOBS = 1;
+const MAX_QUEUED_JOBS = 8;
+const JOB_QUEUE_TIMEOUT_MS = 20000;
+const MAX_WATERMARK_REQUESTS = 16;
+let activeWatermarkRequests = 0;
+
+function queueError(code) {
+  return Object.assign(new Error(code), { publicCode: code, httpStatus: 429 });
+}
+
+function replyQueueError(res, error) {
+  if (error?.httpStatus === 429) {
+    res.set('Retry-After', String(Math.ceil(JOB_QUEUE_TIMEOUT_MS / 1000)));
+    return res.status(429).json({ ok: false, error: error.publicCode });
+  }
+  return res.status(500).json({ ok: false, error: 'PROCESSING_FAILED' });
+}
 let activeJobs = 0;
 let activeEditJobs = 0;
 const jobQueue = []; // { type: 'watermark' | 'edit', resolve, reject?, timer?, settled? }
@@ -64,11 +85,14 @@ function pumpQueue() {
   }
 }
 
-function acquireSlot(type = 'watermark', timeoutMs = 0) {
+function acquireSlot(type = 'watermark', timeoutMs = JOB_QUEUE_TIMEOUT_MS) {
   if (canRunJob(type)) {
     activeJobs++;
     if (type === 'edit') activeEditJobs++;
     return Promise.resolve();
+  }
+  if (jobQueue.length >= MAX_QUEUED_JOBS) {
+    return Promise.reject(queueError('WORKER_BUSY'));
   }
   return new Promise((resolve, reject) => {
     const item = { type, resolve, reject, timer: null, settled: false };
@@ -87,7 +111,7 @@ function acquireSlot(type = 'watermark', timeoutMs = 0) {
         item.settled = true;
         const index = jobQueue.indexOf(item);
         if (index !== -1) jobQueue.splice(index, 1);
-        reject(Object.assign(new Error('Job queue timed out'), { publicCode: 'VIDEO_CHECK_TIMEOUT' }));
+        reject(queueError('WORKER_QUEUE_TIMEOUT'));
       }, timeoutMs);
     }
   });
@@ -106,6 +130,7 @@ function releaseSlot(type = 'watermark') {
 const FFMPEG_TIMEOUT_MS = 90000;
 
 function runFfmpeg(build, timeoutMs = FFMPEG_TIMEOUT_MS) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.reject(new Error('ffmpeg timed out before start'));
   return new Promise((resolve, reject) => {
     let settled = false;
     const command = build();
@@ -116,6 +141,10 @@ function runFfmpeg(build, timeoutMs = FFMPEG_TIMEOUT_MS) {
       reject(new Error(`ffmpeg timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     command
+      .on('start', () => {
+        // fluent-ffmpeg can finish asynchronous preparation after our timer.
+        if (settled) { try { command.kill('SIGKILL'); } catch (_) {} }
+      })
       .on('end', () => {
         if (settled) return;
         settled = true;
@@ -127,9 +156,53 @@ function runFfmpeg(build, timeoutMs = FFMPEG_TIMEOUT_MS) {
         settled = true;
         clearTimeout(timer);
         reject(err);
-      })
-      .run();
+      });
+    try { command.run(); } catch (error) {
+      settled = true;
+      clearTimeout(timer);
+      try { command.kill('SIGKILL'); } catch (_) {}
+      reject(error);
+    }
   });
+}
+
+const WATERMARK_MAX_OUTPUT_BYTES = 200 * 1024 * 1024;
+const WATERMARK_PROBE_TIMEOUT_MS = 15000;
+
+function watermarkError(code) {
+  return Object.assign(new Error(code), { publicCode: code });
+}
+
+function validateWatermarkProbe(probe) {
+  const video = (Array.isArray(probe?.streams) ? probe.streams : [])
+    .find((stream) => stream?.codec_type === 'video' && !stream.disposition?.attached_pic);
+  const formats = String(probe?.format?.format_name || '').split(',');
+  // Callers persist MP4/MOV/WebM; image/playlist inputs are not generation videos.
+  if (!video || !formats.some((format) => ['mp4', 'mov', 'webm', 'matroska'].includes(format))) {
+    throw watermarkError('VIDEO_FORMAT_INVALID');
+  }
+  const streamIndex = Number(video.index);
+  if (!Number.isSafeInteger(streamIndex) || streamIndex < 0) throw watermarkError('VIDEO_FORMAT_INVALID');
+  const duration = Number(probe?.format?.duration || video.duration || 0);
+  const width = Number(video.width);
+  const height = Number(video.height);
+  if (!Number.isFinite(duration) || duration <= 0 || duration > 180
+      || !Number.isInteger(width) || !Number.isInteger(height)
+      || width < 1 || height < 1 || width > 4096 || height > 4096) {
+    throw watermarkError('VIDEO_LIMIT_EXCEEDED');
+  }
+  return { duration, width, height, streamIndex };
+}
+
+async function probeWatermarkVideo(filePath) {
+  try {
+    const probe = await probeVideoFile({ filePath, timeoutMs: WATERMARK_PROBE_TIMEOUT_MS, execFileImpl: execFile });
+    return validateWatermarkProbe(probe);
+  } catch (error) {
+    if (error.publicCode === 'PROBE_TIMEOUT') throw watermarkError('VIDEO_PROBE_TIMEOUT');
+    if (error.publicCode === 'PROBE_FAILED') throw watermarkError('VIDEO_UNREADABLE');
+    throw error;
+  }
 }
 
 // ---- /watermark de-duplication ----
@@ -144,51 +217,50 @@ const inFlightWatermarks = new Map(); // videoUrl -> Promise<{ok, watermarkedUrl
 
 async function runWatermarkJob(videoUrl) {
   await acquireSlot('watermark');
-  const uid = uuidv4();
-  const inputFile = path.join('/tmp', `in_${uid}.mp4`);
-  const outputFile = path.join('/tmp', `out_${uid}.mp4`);
-
+  let jobDirectory;
   try {
-    const response = await fetch(videoUrl, { timeout: 120000 });
-    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-    const buffer = await response.buffer();
-    fs.writeFileSync(inputFile, buffer);
+    // Own a fresh directory, never delete/overwrite another request's files.
+    jobDirectory = fs.mkdtempSync('/tmp/pina-watermark-');
+    const uid = uuidv4();
+    const inputFile = path.join(jobDirectory, 'input.mp4');
+    const outputFile = path.join(jobDirectory, 'output.mp4');
+    await downloadWatermarkVideo({ url: videoUrl, supabaseUrl: SUPABASE_URL, filePath: inputFile, fetchImpl: fetch });
+    const video = await probeWatermarkVideo(inputFile);
 
     await runFfmpeg(() =>
       ffmpeg(inputFile)
+        .inputOptions('-protocol_whitelist', 'file,pipe')
         // Passed as separate arguments (not a single array) so fluent-ffmpeg
         // does not re-split any option value on internal spaces (it only
         // applies that space-splitting heuristic to array-form calls, and
         // "Pina Studio" contains exactly one space, which previously got
         // split into two separate argv tokens and broke -vf's value).
         .outputOptions(
+          // Encode only the stream we validated, not FFmpeg's automatic choice.
+          '-map', `0:${video.streamIndex}`,
+          '-map', '0:a:0?',
           '-vf', "drawtext=text='Pina Studio':fontsize=28:fontcolor=white@0.85:x=w-tw-20:y=h-th-20:shadowcolor=black@0.8:shadowx=2:shadowy=2",
           '-c:a', 'copy',
-          '-movflags', '+faststart'
+          '-movflags', '+faststart',
+          '-fs', String(WATERMARK_MAX_OUTPUT_BYTES)
         )
         .output(outputFile)
     );
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
-    const fileBuffer = fs.readFileSync(outputFile);
-    const storagePath = `watermarked/${uid}.mp4`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('reference-images')
-      .upload(storagePath, fileBuffer, { contentType: 'video/mp4', upsert: false });
-    if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
-
-    const { data: urlData } = supabase.storage
-      .from('reference-images')
-      .getPublicUrl(storagePath);
-
-    return { ok: true, watermarkedUrl: urlData.publicUrl };
+    // FFmpeg may slightly exceed -fs; never upload a capped or empty result.
+    const outputBytes = fs.statSync(outputFile).size;
+    if (!outputBytes || outputBytes >= WATERMARK_MAX_OUTPUT_BYTES) throw watermarkError('VIDEO_OUTPUT_TOO_LARGE');
+    const { publicUrl } = await uploadStorageFile({
+      createClient, fetchImpl: fetch, supabaseUrl: SUPABASE_URL, key: SUPABASE_SERVICE_KEY,
+      bucket: 'reference-images', objectPath: `watermarked/${uid}.mp4`, filePath: outputFile,
+      contentType: 'video/mp4', upsert: false, timeoutMs: 60000
+    });
+    return { ok: true, watermarkedUrl: publicUrl };
   } catch (err) {
-    console.error('[watermark] error:', err.message);
-    return { ok: false, error: err.message };
+    console.error('[watermark] error:', err.publicCode || 'PROCESSING_FAILED');
+    return { ok: false, error: err.publicCode || 'PROCESSING_FAILED' };
   } finally {
-    try { if (fs.existsSync(inputFile)) fs.unlinkSync(inputFile); } catch (_) {}
-    try { if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile); } catch (_) {}
+    try { if (jobDirectory) fs.rmSync(jobDirectory, { recursive: true, force: true }); } catch (_) {}
     releaseSlot('watermark');
   }
 }
@@ -203,17 +275,29 @@ app.post('/watermark', async (req, res) => {
   if (auth !== WATERMARK_SECRET) {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
   }
-  const { videoUrl } = req.body;
+  const { videoUrl } = req.body || {};
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'videoUrl is required' });
-
-  let jobPromise = inFlightWatermarks.get(videoUrl);
-  if (!jobPromise) {
-    jobPromise = runWatermarkJob(videoUrl).finally(() => inFlightWatermarks.delete(videoUrl));
-    inFlightWatermarks.set(videoUrl, jobPromise);
+  if (!isAllowedWatermarkUrl(videoUrl, SUPABASE_URL)) {
+    return res.status(400).json({ ok: false, error: 'VIDEO_URL_INVALID' });
   }
-
-  const result = await jobPromise;
-  return res.status(result.ok ? 200 : 500).json(result);
+  // Bound waiting HTTP responses too: duplicate requests share a job but still
+  // consume request/socket memory. Keep same-video de-duplication within this cap.
+  if (activeWatermarkRequests >= MAX_WATERMARK_REQUESTS) return replyQueueError(res, queueError('WORKER_BUSY'));
+  activeWatermarkRequests++;
+  const sourceUrl = new URL(videoUrl).href;
+  try {
+    let jobPromise = inFlightWatermarks.get(sourceUrl);
+    if (!jobPromise) {
+      jobPromise = runWatermarkJob(sourceUrl).finally(() => inFlightWatermarks.delete(sourceUrl));
+      inFlightWatermarks.set(sourceUrl, jobPromise);
+    }
+    const result = await jobPromise;
+    return res.status(result.ok ? 200 : 500).json(result);
+  } catch (error) {
+    return replyQueueError(res, error);
+  } finally {
+    activeWatermarkRequests--;
+  }
 });
 
 // ================================================================
@@ -241,7 +325,7 @@ const EDIT_ALLOWED_VIDEO_HOST = getAllowedVideoHost();
 const EDIT_ALLOWED_VIDEO_PATH_PREFIX = '/storage/v1/object/public/reference-images/';
 
 function isAllowedEditVideoUrl(raw) {
-  if (typeof raw !== 'string') return false;
+  if (!isAllowedWatermarkUrl(raw, SUPABASE_URL)) return false;
   let u;
   try {
     u = new URL(raw);
@@ -285,16 +369,15 @@ function assertDeadlineNotPassed(deadline, stage) {
   }
 }
 
-function editProbe(file, deadline) {
-  const timeoutMs = Math.max(1000, Math.min(EDIT_FFPROBE_TIMEOUT_MS, remainingMs(deadline)));
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('ffprobe timed out')), timeoutMs);
-    ffmpeg.ffprobe(file, (err, data) => {
-      clearTimeout(timer);
-      if (err) reject(err);
-      else resolve(data);
-    });
-  });
+async function editProbe(file, deadline) {
+  assertDeadlineNotPassed(deadline, 'probe');
+  const timeoutMs = Math.min(EDIT_FFPROBE_TIMEOUT_MS, remainingMs(deadline));
+  if (timeoutMs <= 0) throw editError('PROCESSING_TIMEOUT');
+  try {
+    return await probeVideoFile({ filePath: file, timeoutMs, execFileImpl: execFile });
+  } catch (error) {
+    throw editError(error.publicCode === 'PROBE_TIMEOUT' ? 'PROCESSING_TIMEOUT' : 'CLIP_UNREADABLE');
+  }
 }
 
 function editParseFps(rFrameRate) {
@@ -305,43 +388,22 @@ function editParseFps(rFrameRate) {
 }
 
 async function editDownload(url, filePath, deadline) {
-  const timeoutMs = Math.max(1000, Math.min(EDIT_DOWNLOAD_TIMEOUT_MS, remainingMs(deadline)));
-  // redirect: 'manual' means a 3xx response is returned as-is (not
-  // followed) instead of being validated against the host allowlist again,
-  // so it simply fails the !response.ok check below rather than letting a
-  // clip source redirect us to an arbitrary off-allowlist host.
-  const response = await fetch(url, { timeout: timeoutMs, redirect: 'manual' });
-  if (!response.ok) throw editError('CLIP_DOWNLOAD_FAILED', `Download failed: ${response.status}`);
-
-  const contentLength = Number(response.headers.get('content-length') || 0);
-  if (contentLength && contentLength > EDIT_MAX_DOWNLOAD_BYTES) {
-    throw editError('CLIP_TOO_LARGE', `clip content-length ${contentLength} exceeds ${EDIT_MAX_DOWNLOAD_BYTES}`);
+  assertDeadlineNotPassed(deadline, 'download');
+  const timeoutMs = Math.min(EDIT_DOWNLOAD_TIMEOUT_MS, remainingMs(deadline));
+  if (timeoutMs <= 0) throw editError('PROCESSING_TIMEOUT');
+  // Preserve /edit's narrower reference-images bucket contract while reusing
+  // the proven streamed byte cap and header+body cancellation lifecycle.
+  if (!isAllowedEditVideoUrl(url)) throw editError('CLIP_DOWNLOAD_FAILED');
+  try {
+    return await downloadWatermarkVideo({
+      url, supabaseUrl: SUPABASE_URL, filePath, fetchImpl: fetch,
+      maxBytes: EDIT_MAX_DOWNLOAD_BYTES, timeoutMs
+    });
+  } catch (error) {
+    if (error.publicCode === 'DOWNLOAD_TIMEOUT') throw editError('PROCESSING_TIMEOUT');
+    if (error.publicCode === 'DOWNLOAD_TOO_LARGE') throw editError('CLIP_TOO_LARGE');
+    throw editError('CLIP_DOWNLOAD_FAILED');
   }
-
-  await new Promise((resolve, reject) => {
-    let total = 0;
-    let rejected = false;
-    const dest = fs.createWriteStream(filePath);
-    const fail = (err) => {
-      if (rejected) return;
-      rejected = true;
-      try { dest.destroy(); } catch (_) {}
-      try { response.body.destroy(); } catch (_) {}
-      reject(err);
-    };
-    response.body.on('data', (chunk) => {
-      total += chunk.length;
-      if (total > EDIT_MAX_DOWNLOAD_BYTES) {
-        fail(editError('CLIP_TOO_LARGE', `clip body exceeded ${EDIT_MAX_DOWNLOAD_BYTES} bytes`));
-      }
-    });
-    response.body.on('error', fail);
-    dest.on('error', fail);
-    dest.on('finish', () => {
-      if (!rejected) resolve();
-    });
-    response.body.pipe(dest);
-  });
 }
 
 // ---- allowlist-based public error messages ----
@@ -381,22 +443,13 @@ function safeEditErrorMessage(err) {
 async function runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId }) {
   // Single deadline for the whole request, created before any work starts.
   const deadline = Date.now() + EDIT_REQUEST_TIMEOUT_MS;
-  // uid is only used to namespace this job's own /tmp scratch files, so
-  // concurrent jobs never collide there. The Storage output path uses
-  // outputId (the caller's video_edit_tasks id — required, validated as a
-  // UUID by the /edit route handler) instead, so the caller can predict
-  // where the finished file will land even if its own HTTP request to us
-  // times out or the connection drops before we respond (see
-  // api/video-edit-status.js's reconciliation check).
-  const uid = uuidv4();
-  const tempFiles = [];
-  const makeTmp = (name) => {
-    const p = path.join('/tmp', `${name}_${uid}.mp4`);
-    tempFiles.push(p);
-    return p;
-  };
+  // Scratch paths belong exclusively to this request. Storage paths remain
+  // deterministic (ownerSegment/outputId) for the existing caller's recovery.
+  let jobDirectory;
+  const makeTmp = (name) => path.join(jobDirectory, `${name}.mp4`);
 
   try {
+    jobDirectory = fs.mkdtempSync('/tmp/pina-edit-');
     // 1) ダウンロード
     const inputFiles = [];
     for (let i = 0; i < clips.length; i++) {
@@ -414,7 +467,8 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
       try {
         data = await editProbe(f, deadline);
       } catch (err) {
-        throw editError('CLIP_UNREADABLE', `probe failed: ${err.message}`);
+        if (err.publicCode === 'PROCESSING_TIMEOUT') throw err;
+        throw editError('CLIP_UNREADABLE');
       }
       const v = (data.streams || []).find((s) => s.codec_type === 'video');
       const a = (data.streams || []).find((s) => s.codec_type === 'audio');
@@ -624,17 +678,21 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
       }
     }
 
-    // 6) Supabase Storage にアップロード（ユーザー/ジョブ単位でパスを分離）
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
-    const fileBuffer = fs.readFileSync(finalFile);
-    const storagePath = `edited/${ownerSegment}/${outputId}.mp4`;
-
-    const { error: uploadError } = await supabase.storage
-      .from(EDIT_BUCKET)
-      .upload(storagePath, fileBuffer, { contentType: 'video/mp4', upsert: false });
-    if (uploadError) throw editError('UPLOAD_FAILED', `Upload failed: ${uploadError.message}`);
-
-    const { data: urlData } = supabase.storage.from(EDIT_BUCKET).getPublicUrl(storagePath);
+    // 6) Stream the completed file with a real abort signal and the remaining
+    // shared request budget. No whole-output readFileSync buffer is retained.
+    assertDeadlineNotPassed(deadline, 'upload');
+    const timeoutMs = Math.min(60000, remainingMs(deadline));
+    if (timeoutMs <= 0) throw editError('PROCESSING_TIMEOUT');
+    let publicUrl;
+    try {
+      ({ publicUrl } = await uploadStorageFile({
+        createClient, fetchImpl: fetch, supabaseUrl: SUPABASE_URL, key: SUPABASE_SERVICE_KEY,
+        bucket: EDIT_BUCKET, objectPath: `edited/${ownerSegment}/${outputId}.mp4`, filePath: finalFile,
+        contentType: 'video/mp4', upsert: false, timeoutMs
+      }));
+    } catch (error) {
+      throw editError(error.publicCode === 'UPLOAD_TIMEOUT' ? 'PROCESSING_TIMEOUT' : 'UPLOAD_FAILED');
+    }
 
     const totalDuration =
       transition === 'crossfade' && plans.length > 1
@@ -643,7 +701,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
 
     return {
       ok: true,
-      editedUrl: urlData.publicUrl,
+      editedUrl: publicUrl,
       duration: Number(totalDuration.toFixed(2)),
       transition,
     };
@@ -651,11 +709,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
     console.error('[edit] error:', err.publicCode || 'UNKNOWN', err.message);
     return { ok: false, error: safeEditErrorMessage(err) };
   } finally {
-    for (const f of tempFiles) {
-      try {
-        if (fs.existsSync(f)) fs.unlinkSync(f);
-      } catch (_) {}
-    }
+    try { if (jobDirectory) fs.rmSync(jobDirectory, { recursive: true, force: true }); } catch (_) {}
   }
 }
 
@@ -695,12 +749,16 @@ app.post('/edit', async (req, res) => {
 
   const ownerSegment = typeof userId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(userId) ? userId : 'unassigned';
 
-  await acquireSlot('edit');
+  let acquired = false;
   let result;
   try {
+    await acquireSlot('edit');
+    acquired = true;
     result = await runEditJob({ clips, transition, transitionDuration, ownerSegment, outputId });
+  } catch (error) {
+    return replyQueueError(res, error);
   } finally {
-    releaseSlot('edit');
+    if (acquired) releaseSlot('edit');
   }
 
   return res.status(result.ok ? 200 : 500).json(result);
@@ -734,56 +792,62 @@ function referenceDanceRemainingMs(deadline) {
   return remaining;
 }
 
-function referenceDanceProbe(file, timeoutMs = REFERENCE_DANCE_PROBE_TIMEOUT_MS) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let command;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { command?.kill('SIGKILL'); } catch (_) {}
-      reject(referenceDanceError('VIDEO_CHECK_TIMEOUT'));
-    }, Math.min(REFERENCE_DANCE_PROBE_TIMEOUT_MS, Math.max(1, timeoutMs)));
-    command = ffmpeg.ffprobe(file, (err, data) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (err) reject(referenceDanceError('VIDEO_UNREADABLE', err.message));
-      else resolve(data);
-    });
-  });
-}
-
-async function referenceDanceWithinDeadline(operation, deadline) {
-  const timeoutMs = referenceDanceRemainingMs(deadline);
-  let timer;
+async function referenceDanceProbe(file, timeoutMs = REFERENCE_DANCE_PROBE_TIMEOUT_MS) {
+  if (timeoutMs <= 0) throw referenceDanceError('VIDEO_CHECK_TIMEOUT');
   try {
-    return await Promise.race([
-      Promise.resolve().then(operation),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(referenceDanceError('VIDEO_CHECK_TIMEOUT')), timeoutMs);
-      })
-    ]);
-  } finally {
-    clearTimeout(timer);
+    return await probeVideoFile({ filePath: file,
+      timeoutMs: Math.min(REFERENCE_DANCE_PROBE_TIMEOUT_MS, timeoutMs), execFileImpl: execFile });
+  } catch (error) {
+    throw referenceDanceError(error.publicCode === 'PROBE_TIMEOUT' ? 'VIDEO_CHECK_TIMEOUT' : 'VIDEO_UNREADABLE');
   }
 }
 
-async function storageBlobBuffer(storage, objectPath, deadline) {
-  const { data, error } = await referenceDanceWithinDeadline(() => storage.download(objectPath), deadline);
+async function referenceDanceWithinDeadline(operation, deadline, maxResponseBytes = 1024 * 1024) {
+  try {
+    return await withStorageDeadline({
+      createClient, fetchImpl: fetch, supabaseUrl: SUPABASE_URL, key: SUPABASE_SERVICE_KEY,
+      timeoutMs: referenceDanceRemainingMs(deadline), maxResponseBytes,
+      operation: (client) => operation(client.storage.from(REFERENCE_DANCE_BUCKET))
+    });
+  } catch (error) {
+    if (error.publicCode === 'STORAGE_TIMEOUT') throw referenceDanceError('VIDEO_CHECK_TIMEOUT');
+    throw error;
+  }
+}
+
+async function storageBlobBuffer(objectPath, deadline) {
+  // The private SDK download and Blob conversion share the same abortable
+  // deadline. This never uses or broadens the public video URL allowlist.
+  const { data, error } = await referenceDanceWithinDeadline(async (storage) => {
+    const result = await storage.download(objectPath);
+    if (result.error || !result.data) return result;
+    return { ...result, data: await result.data.arrayBuffer() };
+  }, deadline, REFERENCE_DANCE_MAX_BYTES);
   if (error) {
     const status = Number(error.statusCode || error.status || 0);
     const message = String(error.message || '').toLowerCase();
     if (status === 404 || message.includes('object not found') || message === 'not found') return null;
-    throw referenceDanceError('STORAGE_DOWNLOAD_FAILED', error.message);
+    throw referenceDanceError('STORAGE_DOWNLOAD_FAILED');
   }
   if (!data) throw referenceDanceError('STORAGE_DOWNLOAD_FAILED');
-  const arrayBuffer = await referenceDanceWithinDeadline(() => data.arrayBuffer(), deadline);
-  const buffer = Buffer.from(arrayBuffer);
-  if (!buffer.length || buffer.length > REFERENCE_DANCE_MAX_BYTES) {
-    throw referenceDanceError('VIDEO_SIZE_INVALID');
-  }
+  const buffer = Buffer.from(data);
+  if (!buffer.length || buffer.length > REFERENCE_DANCE_MAX_BYTES) throw referenceDanceError('VIDEO_SIZE_INVALID');
   return buffer;
+}
+
+async function referenceDanceUpload(filePath, objectPath, contentType, deadline, errorCode) {
+  try {
+    await uploadStorageFile({
+      createClient, fetchImpl: fetch, supabaseUrl: SUPABASE_URL, key: SUPABASE_SERVICE_KEY,
+      bucket: REFERENCE_DANCE_BUCKET, objectPath, filePath, contentType, upsert: true,
+      timeoutMs: referenceDanceRemainingMs(deadline)
+    });
+  } catch (error) {
+    if (error.publicCode === 'UPLOAD_TIMEOUT' || error.publicCode === 'VIDEO_CHECK_TIMEOUT') {
+      throw referenceDanceError('VIDEO_CHECK_TIMEOUT');
+    }
+    throw referenceDanceError(errorCode);
+  }
 }
 
 async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
@@ -797,21 +861,19 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
 
   const approvedPath = referenceDancePath('approved', userId, assetId);
   const reviewPaths = Array.from({ length: 5 }, (_, i) => `review/${userId}/${assetId}/frame-${i + 1}.jpg`);
-  const uid = uuidv4();
-  const inputFile = path.join('/tmp', `dance_in_${uid}.mp4`);
-  const approvedFile = path.join('/tmp', `dance_approved_${uid}.mp4`);
-  const frameFiles = reviewPaths.map((_, i) => path.join('/tmp', `dance_frame_${i + 1}_${uid}.jpg`));
-  const tempFiles = [inputFile, approvedFile, ...frameFiles];
-  const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
-  const storage = db.storage.from(REFERENCE_DANCE_BUCKET);
+  let jobDirectory;
   const processingDeadline = Date.now() + REFERENCE_DANCE_PROCESS_TIMEOUT_MS;
 
   try {
+    jobDirectory = fs.mkdtempSync('/tmp/pina-reference-');
+    const inputFile = path.join(jobDirectory, 'input.mp4');
+    const approvedFile = path.join(jobDirectory, 'approved.mp4');
+    const frameFiles = reviewPaths.map((_, i) => path.join(jobDirectory, `frame-${i + 1}.jpg`));
     // A retry after a lost response may find that staging was already removed.
     // In that case the deterministic, server-only approved object is the safe
     // recovery source; browser clients never receive an upload token for it.
-    let sourceBuffer = await storageBlobBuffer(storage, stagingPath, processingDeadline);
-    if (!sourceBuffer) sourceBuffer = await storageBlobBuffer(storage, approvedPath, processingDeadline);
+    let sourceBuffer = await storageBlobBuffer(stagingPath, processingDeadline);
+    if (!sourceBuffer) sourceBuffer = await storageBlobBuffer(approvedPath, processingDeadline);
     if (!sourceBuffer) throw referenceDanceError('VIDEO_NOT_FOUND');
     fs.writeFileSync(inputFile, sourceBuffer);
 
@@ -848,24 +910,20 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
       );
     }
 
+    const approvedSize = fs.statSync(approvedFile).size;
+    if (!approvedSize || approvedSize > REFERENCE_DANCE_MAX_BYTES) throw referenceDanceError('VIDEO_SIZE_INVALID');
     const approvedBuffer = fs.readFileSync(approvedFile);
     if (!approvedBuffer.length || approvedBuffer.length > REFERENCE_DANCE_MAX_BYTES) {
       throw referenceDanceError('VIDEO_SIZE_INVALID');
     }
     const sha256 = crypto.createHash('sha256').update(approvedBuffer).digest('hex');
-    const { error: approvedUploadError } = await referenceDanceWithinDeadline(() => storage.upload(approvedPath, approvedBuffer, {
-      contentType: 'video/mp4',
-      upsert: true
-    }), processingDeadline);
-    if (approvedUploadError) throw referenceDanceError('APPROVED_UPLOAD_FAILED', approvedUploadError.message);
+    await referenceDanceUpload(approvedFile, approvedPath, 'video/mp4', processingDeadline, 'APPROVED_UPLOAD_FAILED');
     for (let i = 0; i < frameFiles.length; i++) {
-      const { error: frameUploadError } = await referenceDanceWithinDeadline(() => storage.upload(reviewPaths[i], fs.readFileSync(frameFiles[i]), {
-        contentType: 'image/jpeg',
-        upsert: true
-      }), processingDeadline);
-      if (frameUploadError) throw referenceDanceError('REVIEW_UPLOAD_FAILED', frameUploadError.message);
+      await referenceDanceUpload(frameFiles[i], reviewPaths[i], 'image/jpeg', processingDeadline, 'REVIEW_UPLOAD_FAILED');
     }
-    const { error: stagingDeleteError } = await referenceDanceWithinDeadline(() => storage.remove([stagingPath]), processingDeadline);
+    const { error: stagingDeleteError } = await referenceDanceWithinDeadline(
+      (storage) => storage.remove([stagingPath]), processingDeadline
+    );
     if (stagingDeleteError) throw referenceDanceError('STAGING_DELETE_FAILED', stagingDeleteError.message);
 
     return {
@@ -881,9 +939,7 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
       sha256
     };
   } finally {
-    for (const file of tempFiles) {
-      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch (_) {}
-    }
+    try { if (jobDirectory) fs.rmSync(jobDirectory, { recursive: true, force: true }); } catch (_) {}
   }
 }
 
@@ -902,6 +958,7 @@ app.post('/reference-dance-inspect', async (req, res) => {
     const result = await runReferenceDanceInspection({ userId, assetId, stagingPath });
     return res.status(200).json(result);
   } catch (error) {
+    if (error?.httpStatus === 429) return replyQueueError(res, error);
     console.error('[reference-dance-inspect] failed', error?.publicCode || 'PROCESSING_FAILED', error?.message);
     return res.status(422).json({ ok: false, error: error?.publicCode || 'PROCESSING_FAILED' });
   } finally {

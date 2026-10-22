@@ -57,6 +57,10 @@ function loadServer(secret, workerOverrides = {}) {
       if (name === 'fs') return new Proxy({}, { get: (_, method) => forbidden(`fs.${String(method)}`) });
       if (name === 'path') return path;
       if (name === 'crypto') return require('node:crypto');
+      if (name === 'child_process') return { execFile: forbidden('ffprobe') };
+      if (name === './worker-storage.js') return require('../watermark-server/worker-storage.js');
+      if (name === './worker-probe.js') return require('../watermark-server/worker-probe.js');
+      if (name === './watermark-download.js') return require('../watermark-server/watermark-download.js');
       if (name === 'uuid') return { v4: forbidden('uuid') };
       if (name === './reference-dance-inspection.js') return inspection;
       throw new Error(`Unexpected require: ${name}`);
