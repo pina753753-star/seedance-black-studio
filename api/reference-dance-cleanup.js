@@ -13,6 +13,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.s
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const MAX_PER_RUN = 50;
+// Preserve pre-release assets. Filter before ordering/limiting so historical
+// expired rows cannot consume the cleanup batch and starve new uploads.
+const CLEANUP_CREATED_AT_CUTOFF = '2026-10-23T00:00:00.000Z';
 
 function authenticate(req) {
   if (!CRON_SECRET) return false;
@@ -43,6 +46,7 @@ async function handler(req, res) {
   const { data: rows, error: selectError } = await db.from(REFERENCE_DANCE_TABLE)
     .select('id,user_id,status,staging_path,approved_path,review_paths,expires_at,updated_at,last_task_id')
     .lte('expires_at', new Date().toISOString())
+    .gte('created_at', CLEANUP_CREATED_AT_CUTOFF)
     .order('expires_at', { ascending: true })
     .limit(MAX_PER_RUN);
   if (selectError) return res.status(500).json({ ok: false, error: 'Reference video cleanup lookup failed' });

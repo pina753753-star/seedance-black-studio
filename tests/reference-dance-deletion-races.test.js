@@ -8,12 +8,12 @@ const lib = require('../api/_lib/reference-dance.js');
 const USER = '5a951e62-7bc3-46c0-a89b-33fa5eea7bb3';
 const ASSET = '270bf01a-bafd-4255-8ad5-e18a4f1c8c47';
 const root = path.join(__dirname, '..');
-function fixture({ status = 'ready', beforeClaim, afterClaim, activeCount = 0, storageError = false, taskId = null } = {}) {
-  const state = { row: { id: ASSET, user_id: USER, status, staging_path: lib.stagingPath(USER, ASSET), approved_path: lib.approvedPath(USER, ASSET), review_paths: [], last_task_id: taskId, updated_at: '2026-01-01T00:00:00.000Z', expires_at: '2026-01-02T00:00:00.000Z' }, removed: [], claims: 0 };
+function fixture({ status = 'ready', beforeClaim, afterClaim, activeCount = 0, storageError = false, taskId = null, createdAt = '2026-10-23T00:00:00.000Z', historicalRows = 0 } = {}) {
+  const state = { row: { id: ASSET, user_id: USER, status, created_at: createdAt, staging_path: lib.stagingPath(USER, ASSET), approved_path: lib.approvedPath(USER, ASSET), review_paths: [], last_task_id: taskId, updated_at: '2026-01-01T00:00:00.000Z', expires_at: '2026-01-02T00:00:00.000Z' }, removed: [], claims: 0 };
   const db = {
     storage: { from() { return { async remove(paths) { state.removed.push(...paths); return { error: storageError ? { message: 'mock storage failure' } : null }; } }; } },
     from(table) {
-      let operation = 'select', values, countOnly = false, single = false;
+      let operation = 'select', values, countOnly = false, single = false, maxRows = Infinity, orderKey;
       const predicates = [];
       const q = {
         select(_cols, options) { countOnly = options?.count === 'exact'; return q; },
@@ -21,8 +21,9 @@ function fixture({ status = 'ready', beforeClaim, afterClaim, activeCount = 0, s
         delete() { operation = 'delete'; return q; },
         eq(k,v) { predicates.push(r => r[k] === v); return q; },
         is(k,v) { predicates.push(r => r[k] === v); return q; },
+        gte(k,v) { predicates.push(r => r[k] >= v); return q; },
         lte(k,v) { predicates.push(r => r[k] <= v); return q; },
-        in() { return q; }, contains() { return q; }, order() { return q; }, limit() { return q; },
+        in() { return q; }, contains() { return q; }, order(k) { orderKey = k; return q; }, limit(n) { maxRows = n; return q; },
         maybeSingle() { single = true; return q; },
         then(resolve, reject) {
           try {
@@ -37,7 +38,12 @@ function fixture({ status = 'ready', beforeClaim, afterClaim, activeCount = 0, s
             } else if (operation === 'delete') {
               if (matches) state.row = null;
               result = { error: null };
-            } else result = { data: single ? (matches ? { ...state.row } : null) : (matches ? [{ ...state.row }] : []) };
+            } else {
+              const candidates = state.row ? [state.row, ...Array.from({ length: historicalRows }, (_, i) => ({ ...state.row, id: 'historical-' + i, created_at: '2026-10-22T23:59:59.999Z', expires_at: '2025-01-01T00:00:00.000Z' }))] : [];
+              const selected = candidates.filter(r => predicates.every(fn => fn(r)));
+              if (orderKey) selected.sort((a,b) => a[orderKey].localeCompare(b[orderKey]));
+              result = { data: single ? (matches ? { ...state.row } : null) : selected.slice(0, maxRows).map(r => ({ ...r })) };
+            }
             return Promise.resolve(result).then(resolve, reject);
           } catch (e) { return Promise.reject(e).then(resolve, reject); }
         }
@@ -104,4 +110,36 @@ test('cleanup tombstone wins before bind and removes expired object only', async
   const f = fixture({ afterClaim: s => { bindingEligible = s.row.status === 'ready'; } });
   const res = await run('cleanup', f);
   assert.equal(bindingEligible, false); assert.equal(res.body.deleted, 1); assert.equal(f.state.row, null); assert.equal(f.state.removed.length, 7);
+});
+
+
+test('cleanup preserves expired assets created before the release cutoff', async () => {
+  const f = fixture({ createdAt: '2026-10-22T23:59:59.999Z' });
+  const res = await run('cleanup', f);
+  assert.equal(res.body.checked, 0);
+  assert.equal(res.body.deleted, 0);
+  assert.equal(f.state.claims, 0);
+  assert.equal(f.state.removed.length, 0);
+  assert.equal(f.state.row.status, 'ready');
+});
+
+test('cleanup includes assets created exactly at cutoff despite a full historical backlog', async () => {
+  const f = fixture({ historicalRows: 100 });
+  const res = await run('cleanup', f);
+  assert.equal(res.body.checked, 1);
+  assert.equal(res.body.deleted, 1);
+  assert.equal(f.state.row, null);
+  assert.equal(f.state.removed.length, 7);
+});
+
+test('cleanup deletes eligible post-cutoff expired assets normally', async () => {
+  const f = fixture({ createdAt: '2026-10-23T01:00:00.000Z' });
+  const res = await run('cleanup', f);
+  assert.equal(res.body.deleted, 1);
+  assert.equal(f.state.row, null);
+});
+
+test('preserving historical expired storage does not restore generation access', () => {
+  const f = fixture({ createdAt: '2026-10-22T23:59:59.999Z' });
+  assert.throws(() => lib.validateReadyReferenceDance(f.state.row, USER), error => error.code === 'reference_video_expired');
 });
