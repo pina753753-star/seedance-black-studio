@@ -3,18 +3,6 @@
   "outputDirectory": "public",
   "routes": [
     {
-      "src": "^/api/(?:seedance-start(?:-priced)?|_lib/seedance-start|h3-live/start|h3-director/start-session|h3-director/approve-prompt|video-edit|storyboard-prompt|stripe-checkout)(?:\\.js)?/?$",
-      "dest": "/api/maintenance"
-    },
-    {
-      "src": "^/(?:|(?:index|generate(?:-prod|-cool)?|pricing|h3-live|h3-max-beta|h3-director|seedance-reference-test(?:-v5)?|admin-seedance|admin-veo|maintenance)(?:\\.html)?/?)$",
-      "dest": "/maintenance.html",
-      "status": 503,
-      "headers": {
-        "Cache-Control": "no-store"
-      }
-    },
-    {
       "src": "/api/seedance-start",
       "dest": "/api/seedance-start-priced"
     },
