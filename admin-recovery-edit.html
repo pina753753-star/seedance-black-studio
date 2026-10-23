@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Pina 1秒編集確認（管理者限定）</title>
+<style>
+body{font:16px system-ui;max-width:640px;margin:40px auto;padding:20px;line-height:1.8;color:#171717;background:#fafafa}h1{font-size:26px;line-height:1.4}button{display:block;margin:24px 0;padding:16px 20px;border:0;border-radius:10px;background:#231d36;color:white;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}a{color:#493381}video{max-width:100%;background:#111;border-radius:12px}#details{white-space:pre-wrap;overflow-wrap:anywhere}#status{font-weight:600}.notice{border-left:4px solid #9582be;padding:12px;background:#eeeaf5}
+</style>
+</head>
+<body>
+<main>
+<h1>1秒編集確認（管理者限定）</h1>
+<p class="notice">既存動画の冒頭0〜1秒だけを切り出します。新しいAI動画は生成しません。1回・10クレジット。処理・保存のサーバー利用料は別途かかる可能性があります。</p>
+<p>対象は管理者自身の完了済み1〜4秒・2 MiB以下の既存動画からサーバーで選びます。編集範囲とリクエストIDは固定です。本番停止や通常の権限・残高確認は解除しません。2026年10月23日14:20（日本時間）に新規受付を終了します。</p>
+<p>ログインが必要な場合は<a href="./admin-recovery-login.html">管理者ログイン</a>へ。ログイン後は接続確認ページに移動するため、接続確認ボタンは押さずに、この編集確認ページへ戻ってください。</p>
+<button id="edit" type="button">10クレジットで1秒編集を1回実行</button>
+<p id="status" role="status" aria-live="polite">未実行</p>
+<p id="details"></p>
+<video id="output" controls playsinline preload="none" hidden></video>
+<p>送信後は自動再試行しません。結果が不明でも、再実行せずタスクとクレジット記録を確認してください。</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./auth-config.js"></script>
+<script>
+'use strict';
+const HOST='flowvid-studio-git-verify-pina-worker-au-4f7aef-pina-s-projects.vercel.app';
+const expiry=Date.parse('2026-10-23T05:20:00Z');
+const attemptKey='pina-recovery-edit-20261023-v1';
+const resultKey=attemptKey+'-result';
+const btn=document.getElementById('edit');
+const status=document.getElementById('status');
+const details=document.getElementById('details');
+const output=document.getElementById('output');
+let inFlight=false;
+
+function allowedOutput(url,taskId){
+ if(typeof url!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(taskId||''))return false;
+ try{const configured=new URL(window.FLOWVID_AUTH?.supabaseUrl||'');const parsed=new URL(url);const parts=parsed.pathname.split('/');return configured.protocol==='https:'&&!configured.username&&!configured.password&&!configured.search&&!configured.hash&&configured.pathname==='/'&&parsed.origin===configured.origin&&parsed.protocol==='https:'&&!parsed.username&&!parsed.password&&!parsed.search&&!parsed.hash&&parts.length===9&&parts.slice(0,7).join('/')==='/storage/v1/object/public/reference-images/edited'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(parts[7])&&parts[8]===taskId+'.mp4';}catch{return false;}
+}
+function display(result){
+ const lines=[];
+ if(typeof result?.taskId==='string'&&/^[0-9a-f-]{36}$/.test(result.taskId))lines.push('タスクID: '+result.taskId);
+ if(['queued','processing','completed','failed'].includes(result?.status))lines.push('状態: '+result.status);
+ if(typeof result?.creditCost==='number'&&Number.isFinite(result.creditCost))lines.push('記録上の使用クレジット: '+result.creditCost);
+ if(typeof result?.refunded==='boolean')lines.push('返金確認: '+(result.refunded?'済み':'未確認'));
+ if(typeof result?.error==='string'&&/^[a-zA-Z0-9_]{1,80}$/.test(result.error))lines.push('確認コード: '+result.error);
+ details.textContent=lines.join('\n');
+ if(result?.ok===true&&result.status==='completed'){
+  status.textContent='編集処理は完了しました。保存内容・再生・クレジット記録を確認します。';
+  if(allowedOutput(result.editedUrl,result.taskId)){output.src=result.editedUrl;output.hidden=false;}
+  else status.textContent='完了応答がありましたが、再生URLを安全に確認できません。再実行しないでください。';
+ }else if(result?.ok===true&&['queued','processing'].includes(result.status)){
+  status.textContent='受付済みです。処理結果の確認が必要です。再実行しないでください。';
+ }else{
+  status.textContent='完了を確認できませんでした。再実行せずタスクとクレジット記録を確認します。';
+ }
+}
+function initialState(){
+ if(location.hostname!==HOST||location.protocol!=='https:'){btn.disabled=true;status.textContent='この確認機能は指定のPreviewでのみ使用できます。';return;}
+ try{
+  if(sessionStorage.getItem(attemptKey)){
+   btn.disabled=true;status.textContent='送信済み、または結果確認待ちです。再実行しないでください。';
+   const saved=sessionStorage.getItem(resultKey);if(saved){try{display(JSON.parse(saved));}catch{}}
+  }
+ }catch{btn.disabled=true;status.textContent='再実行防止の記録を保存できないため、実行できません。';return;}
+ if(Date.now()>=expiry){btn.disabled=true;status.textContent='この確認機能の新規受付は終了しました。送信済みの場合は結果を確認します。';}
+}
+initialState();
+btn.onclick=async()=>{
+ if(inFlight||btn.disabled)return;
+ inFlight=true;btn.disabled=true;
+ try{
+  if(sessionStorage.getItem(attemptKey))return;
+  if(location.hostname!==HOST||location.protocol!=='https:'||Date.now()>=expiry){status.textContent='この確認機能は利用できません。';return;}
+  const client=typeof window.flowvidSupabaseClient==='function'?window.flowvidSupabaseClient():null;
+  if(!client){status.textContent='認証設定を確認できません。送信していません。';return;}
+  const {data,error}=await client.auth.getSession();
+  if(error||!data?.session?.access_token){status.textContent='管理者ログイン後、このページへ戻ってください。送信していません。';inFlight=false;btn.disabled=false;return;}
+  if(Date.now()>=expiry){status.textContent='この確認機能の新規受付は終了しました。送信していません。';return;}
+  // Set BEFORE fetch. A failed or interrupted response must never re-enable.
+  sessionStorage.setItem(attemptKey,'attempted');
+  if(sessionStorage.getItem(attemptKey)!=='attempted')throw new Error('marker_not_saved');
+  status.textContent='送信中です。再実行せず、このままお待ちください。';
+  const response=await fetch('/api/admin-recovery-edit',{
+   method:'POST',redirect:'error',credentials:'same-origin',cache:'no-store',
+   headers:{'Content-Type':'application/json',Authorization:'Bearer '+data.session.access_token},body:'{}'
+  });
+  const result=await response.json();
+  if(!response.ok)result.ok=false;
+  display(result);
+  try{sessionStorage.setItem(resultKey,JSON.stringify(result));}catch{}
+ }catch{status.textContent='結果を確認できません。再実行せずタスクとクレジット記録を確認します。';}
+};
+</script>
+</body>
+</html>
