@@ -26,7 +26,8 @@ test('Seedance 2.5 standard and Turbo are separate active WaveSpeed models', () 
   assert.deepEqual(turbo.resolutions, ['720p', '1080p']);
   assert.deepEqual(turbo.providerModels, {
     text: 'bytedance/seedance-2.5/text-to-video-turbo',
-    image: 'bytedance/seedance-2.5/image-to-video-turbo'
+    image: 'bytedance/seedance-2.5/image-to-video-turbo',
+    motion: 'bytedance/seedance-2.5/motion-control'
   });
 });
 

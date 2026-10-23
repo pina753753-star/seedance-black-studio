@@ -16,6 +16,7 @@ test('standard and Turbo use separate approved WaveSpeed endpoint IDs and key', 
   assert.match(source, /bytedance\/seedance-2\.5\/image-to-video'/);
   assert.match(source, /bytedance\/seedance-2\.5\/text-to-video-turbo/);
   assert.match(source, /bytedance\/seedance-2\.5\/image-to-video-turbo/);
+  assert.match(source, /bytedance\/seedance-2\.5\/motion-control/);
   assert.match(source, /if \(mode === 'image_to_video'\) payload\.image/);
   assert.match(source, /payload\.reference_images/);
 });

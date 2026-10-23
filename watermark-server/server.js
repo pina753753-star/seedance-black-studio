@@ -850,8 +850,84 @@ async function referenceDanceUpload(filePath, objectPath, contentType, deadline,
   }
 }
 
-async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) throw referenceDanceError('SERVICE_NOT_CONFIGURED');
+// Capabilities are accepted only for the configured project and the exact
+// server-derived paths. They never widen the public-download URL allowlist.
+function validateReferenceDanceStorageCapabilities(value, stagingPath, approvedPath, reviewPaths) {
+  const invalid = () => referenceDanceError('STORAGE_CAPABILITY_INVALID');
+  if (!value || typeof value !== 'object') throw invalid();
+  let base, source, configured;
+  try {
+    base = new URL(value.supabaseUrl);
+    source = new URL(value.sourceUrl);
+    configured = new URL(SUPABASE_URL);
+  } catch (_) { throw invalid(); }
+  if (base.protocol !== 'https:' || base.origin !== configured.origin
+    || !/^[a-z0-9-]+\.supabase\.co$/.test(base.hostname)
+    || base.username || base.password || base.port || base.pathname !== '/' || base.search || base.hash
+    || source.origin !== base.origin || source.username || source.password || source.hash
+    || typeof value.sourceUrl !== 'string'
+    || value.sourceUrl.split('?')[0] !== `${base.origin}/storage/v1/object/sign/${REFERENCE_DANCE_BUCKET}/${stagingPath}`
+    || source.searchParams.getAll('token').length !== 1 || !source.searchParams.get('token')
+    || [...source.searchParams.keys()].some((key) => key !== 'token')) throw invalid();
+  if (typeof value.publishableKey !== 'string' || value.publishableKey.length < 20
+    || /[\r\n]/.test(value.publishableKey)) throw invalid();
+  const validUpload = (item, expected) => item && item.path === expected
+    && typeof item.token === 'string' && item.token.length >= 20 && !/[\r\n]/.test(item.token);
+  if (!validUpload(value.approvedUpload, approvedPath)
+    || !Array.isArray(value.reviewUploads) || value.reviewUploads.length !== reviewPaths.length
+    || value.reviewUploads.some((item, index) => !validUpload(item, reviewPaths[index]))) throw invalid();
+  return { ...value, baseUrl: base.origin };
+}
+
+async function signedReferenceDanceDownload(capabilities, deadline) {
+  try {
+    return await withStorageDeadline({
+      // Use the existing bounded, redirect-rejecting, abortable transport.
+      createClient: (_url, _key, options) => ({ fetch: options.global.fetch }),
+      fetchImpl: fetch, supabaseUrl: capabilities.baseUrl, key: capabilities.publishableKey,
+      timeoutMs: referenceDanceRemainingMs(deadline), maxResponseBytes: REFERENCE_DANCE_MAX_BYTES,
+      operation: async (client) => {
+        const response = await client.fetch(capabilities.sourceUrl);
+        if (!response.ok) throw referenceDanceError('STORAGE_DOWNLOAD_FAILED');
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (!buffer.length) throw referenceDanceError('VIDEO_SIZE_INVALID');
+        return buffer;
+      }
+    });
+  } catch (error) {
+    throw referenceDanceError(error.publicCode === 'STORAGE_TIMEOUT' ? 'VIDEO_CHECK_TIMEOUT' : 'STORAGE_DOWNLOAD_FAILED');
+  }
+}
+
+async function signedReferenceDanceUpload(capabilities, capability, filePath, contentType, deadline, errorCode) {
+  try {
+    await uploadStorageFile({
+      // Adapt only the SDK write method. Keep descriptor-owned streaming,
+      // byte accounting, aborts and acknowledgement limits from main.
+      createClient: (url, key, options) => {
+        const client = createClient(url, key, options);
+        return { storage: { from(bucket) {
+          const storage = client.storage.from(bucket);
+          return {
+            upload(objectPath, body, uploadOptions) {
+              if (objectPath !== capability.path) throw referenceDanceError('STORAGE_CAPABILITY_INVALID');
+              return storage.uploadToSignedUrl(objectPath, capability.token, body, uploadOptions);
+            },
+            getPublicUrl: (objectPath) => storage.getPublicUrl(objectPath)
+          };
+        } } };
+      },
+      fetchImpl: fetch, supabaseUrl: capabilities.baseUrl, key: capabilities.publishableKey,
+      bucket: REFERENCE_DANCE_BUCKET, objectPath: capability.path, filePath, contentType, upsert: true,
+      timeoutMs: referenceDanceRemainingMs(deadline)
+    });
+  } catch (error) {
+    throw referenceDanceError(error.publicCode === 'UPLOAD_TIMEOUT' ? 'VIDEO_CHECK_TIMEOUT' : errorCode);
+  }
+}
+
+async function runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities }) {
+  if (!SUPABASE_URL || (!storageCapabilities && !SUPABASE_SERVICE_KEY)) throw referenceDanceError('SERVICE_NOT_CONFIGURED');
   if (!REFERENCE_DANCE_UUID_RE.test(userId) || !REFERENCE_DANCE_UUID_RE.test(assetId)) {
     throw referenceDanceError('INVALID_REQUEST');
   }
@@ -861,6 +937,9 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
 
   const approvedPath = referenceDancePath('approved', userId, assetId);
   const reviewPaths = Array.from({ length: 5 }, (_, i) => `review/${userId}/${assetId}/frame-${i + 1}.jpg`);
+  const capabilities = storageCapabilities === undefined ? null : validateReferenceDanceStorageCapabilities(
+    storageCapabilities, stagingPath, approvedPath, reviewPaths
+  );
   let jobDirectory;
   const processingDeadline = Date.now() + REFERENCE_DANCE_PROCESS_TIMEOUT_MS;
 
@@ -872,8 +951,10 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
     // A retry after a lost response may find that staging was already removed.
     // In that case the deterministic, server-only approved object is the safe
     // recovery source; browser clients never receive an upload token for it.
-    let sourceBuffer = await storageBlobBuffer(stagingPath, processingDeadline);
-    if (!sourceBuffer) sourceBuffer = await storageBlobBuffer(approvedPath, processingDeadline);
+    let sourceBuffer = capabilities
+      ? await signedReferenceDanceDownload(capabilities, processingDeadline)
+      : await storageBlobBuffer(stagingPath, processingDeadline);
+    if (!sourceBuffer && !capabilities) sourceBuffer = await storageBlobBuffer(approvedPath, processingDeadline);
     if (!sourceBuffer) throw referenceDanceError('VIDEO_NOT_FOUND');
     fs.writeFileSync(inputFile, sourceBuffer);
 
@@ -917,14 +998,23 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath }) {
       throw referenceDanceError('VIDEO_SIZE_INVALID');
     }
     const sha256 = crypto.createHash('sha256').update(approvedBuffer).digest('hex');
-    await referenceDanceUpload(approvedFile, approvedPath, 'video/mp4', processingDeadline, 'APPROVED_UPLOAD_FAILED');
-    for (let i = 0; i < frameFiles.length; i++) {
-      await referenceDanceUpload(frameFiles[i], reviewPaths[i], 'image/jpeg', processingDeadline, 'REVIEW_UPLOAD_FAILED');
+    if (capabilities) {
+      await signedReferenceDanceUpload(capabilities, capabilities.approvedUpload, approvedFile, 'video/mp4', processingDeadline, 'APPROVED_UPLOAD_FAILED');
+      for (let i = 0; i < frameFiles.length; i++) {
+        await signedReferenceDanceUpload(capabilities, capabilities.reviewUploads[i], frameFiles[i], 'image/jpeg', processingDeadline, 'REVIEW_UPLOAD_FAILED');
+      }
+      // The API owns staging deletion after moderation/persistence; scoped
+      // worker tokens intentionally grant no delete permission.
+    } else {
+      await referenceDanceUpload(approvedFile, approvedPath, 'video/mp4', processingDeadline, 'APPROVED_UPLOAD_FAILED');
+      for (let i = 0; i < frameFiles.length; i++) {
+        await referenceDanceUpload(frameFiles[i], reviewPaths[i], 'image/jpeg', processingDeadline, 'REVIEW_UPLOAD_FAILED');
+      }
+      const { error: stagingDeleteError } = await referenceDanceWithinDeadline(
+        (storage) => storage.remove([stagingPath]), processingDeadline
+      );
+      if (stagingDeleteError) throw referenceDanceError('STAGING_DELETE_FAILED', stagingDeleteError.message);
     }
-    const { error: stagingDeleteError } = await referenceDanceWithinDeadline(
-      (storage) => storage.remove([stagingPath]), processingDeadline
-    );
-    if (stagingDeleteError) throw referenceDanceError('STAGING_DELETE_FAILED', stagingDeleteError.message);
 
     return {
       ok: true,
@@ -950,16 +1040,16 @@ app.post('/reference-dance-inspect', async (req, res) => {
   if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
   const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
   if (auth !== WATERMARK_SECRET) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
-  const { userId, assetId, stagingPath } = req.body || {};
+  const { userId, assetId, stagingPath, storageCapabilities } = req.body || {};
   let acquired = false;
   try {
     await acquireSlot('edit', REFERENCE_DANCE_QUEUE_TIMEOUT_MS);
     acquired = true;
-    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath });
+    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities });
     return res.status(200).json(result);
   } catch (error) {
     if (error?.httpStatus === 429) return replyQueueError(res, error);
-    console.error('[reference-dance-inspect] failed', error?.publicCode || 'PROCESSING_FAILED', error?.message);
+    console.error('[reference-dance-inspect] failed', error?.publicCode || 'PROCESSING_FAILED');
     return res.status(422).json({ ok: false, error: error?.publicCode || 'PROCESSING_FAILED' });
   } finally {
     if (acquired) releaseSlot('edit');
