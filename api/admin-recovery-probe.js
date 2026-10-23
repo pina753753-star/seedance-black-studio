@@ -1,6 +1,6 @@
 'use strict';
 // Temporary auth-only diagnostic. Never merge to main.
-const EXPIRES_AT = Date.parse('2026-10-23T00:45:00Z');
+const EXPIRES_AT = Date.parse('2026-10-23T05:20:00Z');
 const BRANCH = 'verify/pina-worker-auth-20261023';
 const ENDPOINT = 'https://seedance-black-studio-production.up.railway.app/watermark';
 function createHandler(deps = {}) {
