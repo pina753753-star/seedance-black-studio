@@ -26,7 +26,9 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false } = {}) {
   if (String(video.codec_name || '').toLowerCase() !== 'h264') throw inspectionError('VIDEO_CODEC_UNSUPPORTED');
 
   const durationSeconds = Number(probe?.format?.duration || video.duration || 0);
-  const durationMs = Math.round(durationSeconds * 1000);
+  // Never round a fractional millisecond down across a billable-second
+  // boundary: provider pricing rounds the exact source duration upward.
+  const durationMs = Math.ceil(durationSeconds * 1000);
   if (!Number.isSafeInteger(durationMs) || durationSeconds < MIN_SECONDS || durationSeconds > MAX_SECONDS) {
     throw inspectionError('VIDEO_DURATION_INVALID');
   }
