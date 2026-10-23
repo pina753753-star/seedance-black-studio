@@ -203,7 +203,7 @@ test('Railway inspection fails closed, re-probes the sealed file and samples it'
 });
 
 test('permanent inspection failures are separated from retryable failures', () => {
-  for (const code of ['VIDEO_CODEC_UNSUPPORTED', 'VIDEO_DURATION_INVALID', 'VIDEO_DURATION_MISMATCH', 'VIDEO_AUDIO_STRIP_FAILED']) {
+  for (const code of ['VIDEO_CODEC_UNSUPPORTED', 'VIDEO_DURATION_INVALID', 'VIDEO_DURATION_MISMATCH', 'VIDEO_AUDIO_STRIP_FAILED', 'VIDEO_FRAMERATE_INVALID', 'VIDEO_HDR_UNSUPPORTED', 'VIDEO_PROFILE_UNSUPPORTED']) {
     assert.equal(isPermanentReferenceDanceInspectionError(code), true);
   }
   for (const code of ['VIDEO_CHECK_TIMEOUT', 'APPROVED_UPLOAD_FAILED', 'HTTP_503']) {

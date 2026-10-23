@@ -959,14 +959,29 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath, stora
     fs.writeFileSync(inputFile, sourceBuffer);
 
     const probe = await referenceDanceProbe(inputFile, referenceDanceRemainingMs(processingDeadline));
-    const inputMetadata = validateReferenceDanceProbe(probe);
+    const inputMetadata = validateReferenceDanceProbe(probe, { allowHevcInput: true });
 
-    // Strip audio and remux into a server-owned path. The provider receives
-    // this sealed copy, never the browser-writable staging object.
+    // Keep the existing H264 copy fast path. Only bounded SDR HEVC input
+    // takes the transcode path; the sealed output remains strictly H264.
     await runFfmpeg(
-      () => ffmpeg(inputFile)
-        .outputOptions('-map', '0:v:0', '-c:v', 'copy', '-an', '-t', String(REFERENCE_DANCE_MAX_SECONDS), '-movflags', '+faststart')
-        .output(approvedFile),
+      () => {
+        const command = ffmpeg(inputFile).inputOptions('-protocol_whitelist', 'file,pipe');
+        if (inputMetadata.videoCodec === 'hevc') {
+          command.inputOptions('-threads', '1');
+          // FFmpeg autorotates before filters. Select the portrait/landscape
+          // bounds from those rotated dimensions, retaining aspect ratio.
+          command.outputOptions(
+            '-map', '0:v:0', '-c:v', 'libx264', '-threads', '2', '-filter_threads', '1',
+            '-preset', 'veryfast', '-crf', '23', '-maxrate', '6M', '-bufsize', '12M',
+            '-vf', "scale=w='min(iw,if(gte(iw,ih),1280,720))':h='min(ih,if(gte(iw,ih),720,1280))':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+            '-pix_fmt', 'yuv420p', '-metadata:s:v:0', 'rotate=0',
+            '-fs', String(REFERENCE_DANCE_MAX_BYTES)
+          );
+        } else {
+          command.outputOptions('-map', '0:v:0', '-c:v', 'copy');
+        }
+        return command.outputOptions('-an', '-t', String(REFERENCE_DANCE_MAX_SECONDS), '-movflags', '+faststart').output(approvedFile);
+      },
       referenceDanceRemainingMs(processingDeadline)
     );
 
