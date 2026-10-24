@@ -40,8 +40,10 @@ module.exports = async function handler(req, res) {
     if (body.rightsConfirmed !== true) {
       return res.status(400).json({ ok: false, error: 'reference_video_rights_required', message: '使用権限と、実在人物のなりすましではないことを確認してください。' });
     }
-    if (contentType !== 'video/mp4' && !filename.toLowerCase().endsWith('.mp4')) {
-      return res.status(415).json({ ok: false, error: 'unsupported_video_type', message: 'MP4形式の動画を選択してください。' });
+    // Filename/MIME admission is only an upload hint. The worker probes the
+    // bytes and seals H.264 MP4 before moderation or generation.
+    if (!['video/mp4', 'video/quicktime'].includes(contentType) && !/[.](mp4|mov)$/.test(filename.toLowerCase())) {
+      return res.status(415).json({ ok: false, error: 'unsupported_video_type', message: 'MP4またはMOV形式の動画を選択してください。' });
     }
     if (!Number.isSafeInteger(byteSize) || byteSize < 1 || byteSize > MAX_REFERENCE_DANCE_BYTES) {
       return res.status(413).json({ ok: false, error: 'video_size_limit', message: '参考動画は50MB以下にしてください。' });
@@ -91,6 +93,8 @@ module.exports = async function handler(req, res) {
       bucket: REFERENCE_DANCE_BUCKET,
       path,
       token: data.token,
+      // Preserve the existing private staging bucket's transport contract;
+      // this does not assert the uploaded bytes are already normalized MP4.
       contentType: 'video/mp4',
       maxBytes: MAX_REFERENCE_DANCE_BYTES,
       expiresAt
