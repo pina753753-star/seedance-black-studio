@@ -2,6 +2,7 @@
 
 const MIN_SECONDS = 4;
 const MAX_SECONDS = 15;
+const MAX_TRIMMABLE_INPUT_SECONDS = 60;
 
 function inspectionError(code) {
   return Object.assign(new Error(code), { publicCode: code });
@@ -14,7 +15,22 @@ function parseFps(value) {
   return Number.isFinite(fps) && fps > 0 && fps <= 120 ? fps : 24;
 }
 
-function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcInput = false } = {}) {
+function referenceDanceDurationDiagnostics(probe) {
+  const safe = value => {
+    if (value === undefined || value === null || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 && number <= 86400 ? number : null;
+  };
+  const streams = Array.isArray(probe?.streams) ? probe.streams : [];
+  const audio = streams.filter(stream => stream?.codec_type === 'audio').map(stream => safe(stream.duration)).filter(value => value !== null);
+  return Object.freeze({
+    containerSeconds: safe(probe?.format?.duration),
+    videoSeconds: safe(streams.find(stream => stream?.codec_type === 'video')?.duration),
+    audioSeconds: audio.length ? Math.max(...audio) : null
+  });
+}
+
+function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcInput = false, allowBoundaryTrim = false } = {}) {
   const streams = Array.isArray(probe?.streams) ? probe.streams : [];
   const video = streams.find((stream) => stream?.codec_type === 'video');
   if (!video) throw inspectionError('VIDEO_STREAM_MISSING');
@@ -28,12 +44,19 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
     throw inspectionError('VIDEO_CODEC_UNSUPPORTED');
   }
 
-  const durationSeconds = Number(probe?.format?.duration || video.duration || 0);
+  const containerDuration = Number(probe?.format?.duration || video.duration || 0);
+  const videoDuration = video.duration === undefined || video.duration === null || video.duration === 'N/A'
+    ? containerDuration : Number(video.duration);
+  // Neither a short container nor a short video stream may conceal the other
+  // exceeding the input ceiling. An audio/container tail is not a free bypass.
+  const durationSeconds = Math.max(containerDuration, videoDuration);
+  const requiresBoundaryTrim = durationSeconds > MAX_SECONDS;
+  const inputLimit = allowBoundaryTrim === true && !requireNoAudio ? MAX_TRIMMABLE_INPUT_SECONDS : MAX_SECONDS;
   // Never round a fractional millisecond down across a billable-second
   // boundary: provider pricing rounds the exact source duration upward.
   const durationMs = Math.ceil(durationSeconds * 1000);
-  if (!Number.isSafeInteger(durationMs) || durationSeconds < MIN_SECONDS || durationSeconds > MAX_SECONDS) {
-    throw inspectionError('VIDEO_DURATION_INVALID');
+  if (!Number.isSafeInteger(durationMs) || durationSeconds < MIN_SECONDS || durationSeconds > inputLimit) {
+    throw Object.assign(inspectionError('VIDEO_DURATION_INVALID'), { durationDiagnostics: referenceDanceDurationDiagnostics(probe) });
   }
   const width = Number(video.width || 0);
   const height = Number(video.height || 0);
@@ -41,7 +64,7 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
     throw inspectionError('VIDEO_DIMENSIONS_INVALID');
   }
   let fps = parseFps(video.r_frame_rate || video.avg_frame_rate);
-  if (codec === 'hevc') {
+  if (codec === 'hevc' || requiresBoundaryTrim) {
     // Bound source decoding, not merely the scaled output. Compressed byte
     // size and duration alone do not bound decoded frame memory or work.
     const codedWidth = Number(video.coded_width || width);
@@ -79,7 +102,9 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
       if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) < 1
         || Number(match[1]) !== Number(match[2])) throw inspectionError('VIDEO_PROFILE_UNSUPPORTED');
     }
-    if (video.pix_fmt !== 'yuv420p' || video.profile !== 'Main'
+    const supportedProfile = codec === 'hevc' ? video.profile === 'Main'
+      : ['Constrained Baseline', 'Baseline', 'Main', 'High'].includes(video.profile);
+    if (video.pix_fmt !== 'yuv420p' || !supportedProfile
       || (Number(video.bits_per_raw_sample || 8) !== 8)) throw inspectionError('VIDEO_PROFILE_UNSUPPORTED');
   }
   return Object.freeze({
@@ -88,7 +113,8 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
     width,
     height,
     fps,
-    videoCodec: codec
+    videoCodec: codec,
+    ...(requiresBoundaryTrim ? { requiresBoundaryTrim: true } : {})
   });
 }
 
@@ -103,4 +129,4 @@ function validateReferenceDanceDurationMatch(inputMetadata, approvedMetadata, ma
   return true;
 }
 
-module.exports = { validateReferenceDanceProbe, validateReferenceDanceDurationMatch };
+module.exports = { validateReferenceDanceProbe, validateReferenceDanceDurationMatch, referenceDanceDurationDiagnostics };
