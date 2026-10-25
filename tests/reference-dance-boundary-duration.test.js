@@ -33,3 +33,13 @@ test('duration diagnostics contain only finite bounded numbers/null and no raw m
     assert.deepEqual(referenceDanceDurationDiagnostics({ format: { duration: value }, streams: [{ codec_type: 'video', duration: value }, { codec_type: 'audio', duration: value }] }), { containerSeconds: null, videoSeconds: null, audioSeconds: null });
   }
 });
+
+test('exact lower boundary and sub-millisecond upper boundaries retain strict output cap', () => {
+  assert.equal(opted(probe('4')).durationMs, 4000);
+  assert.throws(() => opted(probe('3.999999')), { publicCode: 'VIDEO_DURATION_INVALID' });
+  const input = opted(probe('15.000001'));
+  assert.equal(input.requiresBoundaryTrim, true);
+  assert.equal(input.durationMs, 15001);
+  assert.throws(() => validateReferenceDanceProbe(probe('15.000001'), { requireNoAudio: true }), { publicCode: 'VIDEO_DURATION_INVALID' });
+  assert.equal(opted(probe('59.999999')).durationMs, 60000);
+});

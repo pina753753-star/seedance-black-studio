@@ -82,7 +82,7 @@ test('MOV keeps existing authentication, admin, rights and byte-limit barriers',
 });
 function browser() {
   const requests = [], uploaded = [], confirmations = [];
-  const ctx = { referenceDanceAsset: null, syncReferenceDanceUi() {}, updateCreditUi() {},
+  const ctx = { generationRequestInFlight: false, referenceDanceAsset: null, syncReferenceDanceUi() {}, updateCreditUi() {},
     canUseReferenceDance: () => true, getToken: async () => 'synthetic',
     fetch: async (url, options) => { requests.push({ url, body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ ok: true, assetId: ASSET, path: lib.stagingPath(USER, ASSET), token: 'synthetic', bucket: lib.REFERENCE_DANCE_BUCKET }) }; },
     window: { flowvidSupabaseClient: () => ({ storage: { from: () => ({ uploadToSignedUrl: async (...args) => { uploaded.push(args); return {}; } }) } }) },
@@ -115,4 +115,26 @@ test('file picker and help explicitly cover MOV, while inspector remains mandato
   assert.match(html, /MP4／MOV・4〜15秒・最大50MB/);
   assert.match(api, /status: 'uploading'/);
   assert.doesNotMatch(api, /status: 'ready'/);
+});
+
+test('interrupted byte upload cleans only the new asset and restores previous ready selection', async () => {
+  for (const previous of [null, { id: 'previous-ready', status: 'ready', durationMs: 5000 }]) {
+    const b = browser();
+    b.ctx.referenceDanceAsset = previous;
+    const removed = [];
+    b.ctx.deleteReferenceDanceAsset = id => { removed.push(id); };
+    b.ctx.window.flowvidSupabaseClient = () => ({ storage: { from: () => ({
+      uploadToSignedUrl: async () => { throw new Error('synthetic upload interrupted'); }
+    }) } });
+    await b.ctx.uploadReferenceDance({ name: 'dance.mov', type: 'video/quicktime', size: 1024 });
+    assert.deepEqual(removed, [ASSET]);
+    assert.equal(b.confirmations.length, 0);
+    if (previous) {
+      assert.equal(b.ctx.referenceDanceAsset.id, previous.id);
+      assert.equal(b.ctx.referenceDanceAsset.status, 'ready');
+    } else {
+      assert.equal(b.ctx.referenceDanceAsset.status, 'failed');
+      assert.equal(b.ctx.referenceDanceAsset.retryable, false);
+    }
+  }
 });

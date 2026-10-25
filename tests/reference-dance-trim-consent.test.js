@@ -173,3 +173,101 @@ test('reload after a transient failure can explicitly choose trim and retry the 
   assert.equal(b.ctx.referenceDanceAsset.durationMs, 15000);
   assert.equal(b.ctx.referenceDanceAsset.billableSeconds, 15);
 });
+
+test('repeated confirmation cannot race a successful inspection', async () => {
+  const b = browser(true);
+  let release;
+  const token = new Promise(resolve => { release = resolve; });
+  b.ctx.getToken = () => token;
+  const first = b.ctx.confirmReferenceDanceAsset();
+  const second = b.ctx.confirmReferenceDanceAsset();
+  release('synthetic');
+  assert.equal(await first, true);
+  assert.equal(await second, false);
+  assert.equal(b.requests.length, 1);
+  assert.equal(b.ctx.referenceDanceAsset.status, 'ready');
+});
+test('interrupted confirmation retains asset and consent for a successful retry', async () => {
+  const b = browser(true);
+  b.ctx.getToken = async () => 'synthetic';
+  b.ctx.fetch = async () => { throw new Error('synthetic connection interrupted'); };
+  assert.equal(await b.ctx.confirmReferenceDanceAsset(), false);
+  assert.equal(b.ctx.referenceDanceAsset.id, ASSET);
+  assert.equal(b.ctx.referenceDanceAsset.retryable, true);
+  assert.equal(b.$('danceTrim').checked, true);
+  assert.equal(b.$('danceTrim').disabled, false);
+  b.ctx.fetch = async (_url, options) => {
+    assert.equal(JSON.parse(options.body).allowBoundaryTrim, true);
+    return { ok: true, json: async () => ({ ok: true, status: 'ready', durationMs: 15000, billableSeconds: 15 }) };
+  };
+  assert.equal(await b.ctx.confirmReferenceDanceAsset(), true);
+});
+test('busy server response preserves consent while permanent rejection removes retry affordance', async () => {
+  const b = browser(true);
+  b.ctx.getToken = async () => 'synthetic';
+  for (const [error, retryable] of [['reference_video_checking', true], ['reference_video_invalid', false]]) {
+    b.ctx.fetch = async () => ({ ok: false, json: async () => ({ error }) });
+    assert.equal(await b.ctx.confirmReferenceDanceAsset(), false);
+    assert.equal(b.ctx.referenceDanceAsset.retryable, retryable);
+    assert.equal(b.$('danceTrim').checked, true);
+  }
+});
+test('upload events during upload, inspection or generation cannot replace the active asset', async () => {
+  const b = browser(true);
+  const upload = html.slice(html.indexOf('async function uploadReferenceDance(file){'), html.indexOf('function removeReferenceDance(){'));
+  vm.runInContext(upload, b.ctx);
+  for (const [status, generating] of [['uploading', false], ['checking', false], ['ready', true]]) {
+    const asset = { id: ASSET, status };
+    b.ctx.referenceDanceAsset = asset;
+    b.ctx.generationRequestInFlight = generating;
+    await b.ctx.uploadReferenceDance({ name: 'invalid.txt', type: 'text/plain', size: 1 });
+    assert.equal(b.ctx.referenceDanceAsset, asset);
+    assert.equal(b.requests.length, 0);
+  }
+});
+test('completed byte upload can still enter confirmation from uploading state', async () => {
+  const b = browser(true);
+  b.ctx.referenceDanceAsset.status = 'uploading';
+  const pending = b.ctx.confirmReferenceDanceAsset();
+  b.release();
+  assert.equal(await pending, true);
+  assert.equal(b.requests.length, 1);
+  assert.equal(b.ctx.referenceDanceAsset.status, 'ready');
+});
+test('cancelled picker and remove while busy preserve the active upload, then failure removal clears selection', async () => {
+  const b = browser(true);
+  const removed = [];
+  b.ctx.deleteReferenceDanceAsset = id => { removed.push(id); };
+  vm.runInContext(html.slice(html.indexOf('async function uploadReferenceDance(file){'), html.indexOf('\n\nasync function getBalance(){')), b.ctx);
+  for (const status of ['uploading', 'checking']) {
+    const active = { id: ASSET, status };
+    b.ctx.referenceDanceAsset = active;
+    await b.ctx.uploadReferenceDance(undefined);
+    b.ctx.removeReferenceDance();
+    assert.equal(b.ctx.referenceDanceAsset, active);
+    assert.equal(removed.length, 0);
+  }
+  b.ctx.referenceDanceAsset.status = 'failed';
+  b.$('danceFile').value = 'dance.mov';
+  b.ctx.removeReferenceDance();
+  assert.equal(b.ctx.referenceDanceAsset, null);
+  assert.equal(b.$('danceFile').value, '');
+  assert.equal(b.$('danceRights').checked, false);
+  assert.deepEqual(removed, [ASSET]);
+});
+test('fresh page restores server checking state as retryable and busy response leaves retry unlocked', async () => {
+  const b = browser(false);
+  b.ctx.referenceDanceAsset = null;
+  b.ctx.getToken = async () => 'synthetic';
+  b.ctx.fetch = async () => ({ ok: true, json: async () => ({ asset: { id: ASSET, status: 'checking', name: 'dance.mov' } }) });
+  vm.runInContext(html.slice(html.indexOf('async function restoreLatestReferenceDance(){'), html.indexOf('async function loadReferenceDanceAccess(){')), b.ctx);
+  await b.ctx.restoreLatestReferenceDance();
+  assert.equal(b.ctx.referenceDanceAsset.status, 'failed');
+  assert.equal(b.ctx.referenceDanceAsset.retryable, true);
+  assert.equal(b.$('danceTrim').checked, false);
+  b.ctx.fetch = async () => ({ ok: false, json: async () => ({ error: 'reference_video_checking', retryable: true }) });
+  assert.equal(await b.ctx.confirmReferenceDanceAsset(), false);
+  assert.equal(b.ctx.referenceDanceAsset.status, 'failed');
+  assert.equal(b.$('danceRetry').style.display, 'block');
+  assert.equal(b.$('danceTrim').disabled, false);
+});

@@ -791,7 +791,7 @@ function removeReferenceAudio(){if(audioAsset?.status==='uploading'||generationR
 
 async function deleteReferenceDanceAsset(assetId){if(!assetId)return false;try{const token=await getToken();if(!token)return false;const response=await fetch('/api/reference-dance-delete',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({assetId})});return response.ok}catch(_){return false}}
 async function confirmReferenceDanceAsset(){
-  if(!referenceDanceAsset?.id||generationRequestInFlight)return false;
+  if(!referenceDanceAsset?.id||referenceDanceAsset.status==='checking'||generationRequestInFlight)return false;
   referenceDanceAsset.status='checking';referenceDanceAsset.error='';syncReferenceDanceUi();updateCreditUi();
   try{
     const token=await getToken();if(!token){location.href='./login.html';return false}
@@ -802,7 +802,7 @@ async function confirmReferenceDanceAsset(){
   }catch(error){referenceDanceAsset.status='failed';referenceDanceAsset.retryable=error?.retryable!==false;referenceDanceAsset.error=error?.message||'参考動画を利用できません';syncReferenceDanceUi();updateCreditUi();return false}
 }
 async function uploadReferenceDance(file){
-  if(!file)return;
+  if(!file||generationRequestInFlight||['uploading','checking'].includes(referenceDanceAsset?.status))return;
   const type=String(file.type||'').toLowerCase();
   if(!['video/mp4','video/quicktime'].includes(type)&&!/[.](mp4|mov)$/.test(String(file.name||'').toLowerCase())){referenceDanceAsset={status:'failed',name:file.name||'参考動画',error:'MP4またはMOV形式の動画を選択してください'};syncReferenceDanceUi();updateCreditUi();return}
   if(file.size<=0||file.size>50*1024*1024){referenceDanceAsset={status:'failed',name:file.name||'参考動画',error:'参考動画は50MB以下にしてください'};syncReferenceDanceUi();updateCreditUi();return}
