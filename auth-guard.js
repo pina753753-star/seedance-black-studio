@@ -12,12 +12,19 @@
   function entry(client) {
     let value = checks.get(client);
     if (!value) {
-      value = { version: 0, pending: null };
+      value = { version: 0, pending: null, signIn: null };
       checks.set(client, value);
-      client.auth.onAuthStateChange?.((event) => {
+      client.auth.onAuthStateChange?.((event, session) => {
         // Normal getSession refresh may emit TOKEN_REFRESHED. The returned
         // token is verified below; refresh alone does not switch identity.
-        if (['SIGNED_OUT', 'SIGNED_IN', 'USER_UPDATED'].includes(event)) value.version++;
+        // Startup/focus can announce the existing session. Only accept an
+        // event whose token and user match the session actually verified.
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (session?.access_token && session.user?.id) {
+            value.signIn = { token: session.access_token, userId: session.user.id };
+          } else if (event === 'SIGNED_IN') value.version++;
+        }
+        if (['SIGNED_OUT', 'USER_UPDATED'].includes(event)) value.version++;
       });
     }
     return value;
@@ -27,6 +34,7 @@
     const record = entry(client);
     if (record.pending) return record.pending;
     const version = record.version;
+    record.signIn = null;
     let timer;
     const inspect = async () => {
       try {
@@ -45,7 +53,14 @@
     const pending = Promise.race([
       inspect(),
       new Promise(resolve => { timer = setTimeout(() => resolve({ state: 'unavailable' }), 8000); })
-    ]).then(result => record.version === version ? result : { state: 'unavailable' })
+    ]).then(result => {
+      if (record.version !== version) return { state: 'unavailable' };
+      if (result.state === 'confirmed' && record.signIn
+          && (record.signIn.token !== result.token || record.signIn.userId !== result.user.id)) {
+        return { state: 'unavailable' };
+      }
+      return result;
+    })
       .finally(() => { clearTimeout(timer); if (record.pending === pending) record.pending = null; });
     record.pending = pending;
     return pending;
