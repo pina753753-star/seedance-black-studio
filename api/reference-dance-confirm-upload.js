@@ -26,17 +26,35 @@ const DEFAULT_SUPABASE_URL = 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_YbRKnQh1fCVO5VDJyVWfyQ_sNzHqvCE';
 const PERMANENT_INSPECTION_MESSAGES = {
   VIDEO_SIZE_INVALID: '参考動画は50MB以下にしてください。',
-  VIDEO_STREAM_MISSING: '動画トラックを確認できませんでした。別のMP4動画を選択してください。',
-  VIDEO_CONTAINER_INVALID: 'MP4形式の動画を選択してください。',
-  VIDEO_CODEC_UNSUPPORTED: 'H.264または対応するHEVC形式のMP4動画を選択してください。',
-  VIDEO_FRAMERATE_INVALID: 'このHEVC動画のフレームレートには対応していません。60fps以下で書き出してください。',
+  VIDEO_STREAM_MISSING: '動画トラックを確認できませんでした。別のMP4またはMOV動画を選択してください。',
+  VIDEO_CONTAINER_INVALID: 'MP4またはMOV形式の動画を選択してください。',
+  VIDEO_CODEC_UNSUPPORTED: 'H.264または対応するHEVC形式のMP4／MOV動画を選択してください。',
+  VIDEO_FRAMERATE_INVALID: 'この動画のフレームレートには対応していません。60fps以下で書き出してください。',
   VIDEO_HDR_UNSUPPORTED: 'このHDR動画にはまだ対応していません。SDR（HDRなし）で書き出してください。',
-  VIDEO_PROFILE_UNSUPPORTED: 'このHEVC形式にはまだ対応していません。H.264形式で書き出してください。',
+  VIDEO_PROFILE_UNSUPPORTED: 'この動画形式にはまだ対応していません。H.264形式で書き出してください。',
   VIDEO_AUDIO_STRIP_FAILED: '参考動画の音声を安全に除去できませんでした。別の動画を選択してください。',
   VIDEO_DURATION_INVALID: '参考動画は4〜15秒にしてください。',
   VIDEO_DURATION_MISMATCH: '参考動画の長さを安全に確認できませんでした。別の動画を選択してください。',
   VIDEO_DIMENSIONS_INVALID: '参考動画の解像度を確認できませんでした。別の動画を選択してください。'
 };
+
+function safeDurationDiagnostics(value) {
+  const result = {};
+  for (const key of ['containerSeconds', 'videoSeconds', 'audioSeconds']) {
+    const n = value?.[key];
+    result[key] = typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 86400 ? n : null;
+  }
+  return result;
+}
+
+function inspectionMessage(code, diagnostics) {
+  const durations = safeDurationDiagnostics(diagnostics);
+  const values = [durations.containerSeconds, durations.videoSeconds].filter(n => n !== null);
+  if (code === 'VIDEO_DURATION_INVALID' && values.length) {
+    return `読み取った長さは${Math.max(...values).toFixed(3)}秒です。4〜15秒の動画、または「先頭15秒を使う」を選んで60秒以下の動画をアップロードしてください。`;
+  }
+  return PERMANENT_INSPECTION_MESSAGES[code] || '参考動画を読み取れませんでした。別のMP4またはMOV動画を選択してください。';
+}
 
 function safeInspectionReason(error) {
   const raw = String(error?.inspectionCode || error?.message || error?.name || 'unknown').trim();
@@ -89,6 +107,8 @@ function readyResponse(row) {
     durationMs: row.duration_ms,
     billableSeconds: row.billable_seconds,
     sampleCredits: referenceDanceCredits(Number(row.billable_seconds)),
+    sampleCreditsResolution: '720p',
+    sampleCreditsByResolution: { '480p': referenceDanceCredits(Number(row.billable_seconds), '480p'), '720p': referenceDanceCredits(Number(row.billable_seconds)) },
     expiresAt: row.expires_at
   };
 }
@@ -136,7 +156,7 @@ async function createStorageCapabilities(db, userId, assetId, stagingPath) {
   };
 }
 
-async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilities }) {
+async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim = false }) {
   const baseUrl = String(process.env.WATERMARK_SERVER_URL || '').replace(/\/+$/, '');
   const secret = String(process.env.WATERMARK_SECRET || '');
   if (!baseUrl || !secret) throw new Error('reference_dance_inspector_not_configured');
@@ -146,7 +166,7 @@ async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilit
     const response = await fetch(`${baseUrl}/reference-dance-inspect`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, assetId, stagingPath, storageCapabilities }),
+      body: JSON.stringify({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim: allowBoundaryTrim === true }),
       signal: controller.signal
     });
     const raw = await response.text();
@@ -154,7 +174,7 @@ async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilit
     try { data = raw ? JSON.parse(raw) : null; } catch (_) {}
     if (!response.ok || !data?.ok) {
       const code = typeof data?.error === 'string' ? data.error : `HTTP_${response.status}`;
-      throw Object.assign(new Error(code), { inspectionCode: code, inspectionStatus: response.status });
+      throw Object.assign(new Error(code), { inspectionCode: code, inspectionStatus: response.status, durationDiagnostics: safeDurationDiagnostics(data?.durationDiagnostics) });
     }
     return data;
   } finally {
@@ -170,10 +190,12 @@ module.exports = async function handler(req, res) {
 
   let assetId = '';
   let claimedRow = null;
+  let trimConsent = false;
   try {
     const access = await authorizeReferenceDanceAdmin(auth);
     if (!access.ok) return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden' });
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    trimConsent = body.allowBoundaryTrim === true;
     assetId = String(body.assetId || '').trim();
     if (!isUuid(assetId)) return res.status(400).json({ ok: false, error: 'invalid_reference_video_id' });
 
@@ -212,7 +234,8 @@ module.exports = async function handler(req, res) {
       userId: auth.user.id,
       assetId,
       stagingPath: row.staging_path,
-      storageCapabilities
+      storageCapabilities,
+      allowBoundaryTrim: trimConsent
     });
     const inspected = validateInspection(railwayData, auth.user.id, assetId);
     if (!inspected) throw new Error('invalid_inspection_response');
@@ -266,10 +289,37 @@ module.exports = async function handler(req, res) {
       durationMs: inspected.durationMs,
       billableSeconds: inspected.billableSeconds,
       sampleCredits: referenceDanceCredits(inspected.billableSeconds),
+      sampleCreditsResolution: '720p',
+      sampleCreditsByResolution: { '480p': referenceDanceCredits(inspected.billableSeconds, '480p'), '720p': referenceDanceCredits(inspected.billableSeconds) },
+      trimApplied: railwayData.trimApplied === true || railwayData.boundaryTrimmed === true,
+      durationDiagnostics: safeDurationDiagnostics(railwayData.durationDiagnostics),
       expiresAt
     });
   } catch (error) {
     console.error('[reference-dance-confirm] failed', error?.message || String(error), 'assetId:', assetId || null);
+    const durations = safeDurationDiagnostics(error?.durationDiagnostics);
+    const measuredSeconds = Math.max(durations.containerSeconds || 0, durations.videoSeconds || 0);
+    // A reload can lose the browser's trim choice while retaining the upload.
+    // Missing opt-in is recoverable, not permission to delete that source.
+    if (claimedRow && !trimConsent && error?.inspectionCode === 'VIDEO_DURATION_INVALID'
+        && measuredSeconds > 15 && measuredSeconds <= 60) {
+      const { error: retryPersistError } = await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
+        status: 'uploading',
+        inspection_error: 'VIDEO_DURATION_INVALID',
+        updated_at: new Date().toISOString()
+      }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
+      if (retryPersistError) {
+        return res.status(503).json({ ok: false, error: 'reference_video_check_failed', retryable: true, message: '参考動画を保持しています。時間を空けて再検査してください。' });
+      }
+      return res.status(422).json({
+        ok: false,
+        error: 'reference_video_trim_choice_required',
+        reason: 'VIDEO_DURATION_INVALID',
+        retryable: true,
+        durationDiagnostics: durations,
+        message: `読み取った長さは${measuredSeconds.toFixed(3)}秒です。動画は保持しています。「先頭15秒を使う」にチェックしてから再検査してください。`
+      });
+    }
     if (claimedRow && isPermanentReferenceDanceInspectionError(error?.inspectionCode)) {
       const paths = [
         claimedRow.staging_path,
@@ -280,6 +330,7 @@ module.exports = async function handler(req, res) {
       const now = new Date().toISOString();
       const { error: failureError } = await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
         status: 'failed',
+        inspection_error: JSON.stringify({ code: error.inspectionCode, durationDiagnostics: safeDurationDiagnostics(error.durationDiagnostics) }),
         expires_at: now,
         updated_at: now
       }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
@@ -295,7 +346,8 @@ module.exports = async function handler(req, res) {
         ok: false,
         error: 'reference_video_invalid',
         reason: error.inspectionCode,
-        message: PERMANENT_INSPECTION_MESSAGES[error.inspectionCode] || '参考動画を読み取れませんでした。別のMP4動画を選択してください。'
+        durationDiagnostics: safeDurationDiagnostics(error.durationDiagnostics),
+        message: inspectionMessage(error.inspectionCode, error.durationDiagnostics)
       });
     }
     const reason = safeInspectionReason(error);
@@ -323,6 +375,8 @@ module.exports._test = {
   createStorageCapabilities,
   inspectOnRailway,
   removeObjects,
-  safeInspectionReason
+  safeInspectionReason,
+  safeDurationDiagnostics,
+  inspectionMessage
 };
 

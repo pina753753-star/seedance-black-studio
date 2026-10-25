@@ -5,6 +5,7 @@ const REFERENCE_DANCE_TABLE = 'seedance_reference_video_uploads';
 const REFERENCE_DANCE_MODEL = 'bytedance/seedance-2.5';
 const REFERENCE_DANCE_MODE = 'reference_to_video';
 const REFERENCE_DANCE_RESOLUTION = '720p';
+const REFERENCE_DANCE_RATES = Object.freeze({ '480p': 22, '720p': 44 });
 const MAX_REFERENCE_DANCE_BYTES = 50 * 1024 * 1024;
 const MIN_REFERENCE_DANCE_DURATION_MS = 4000;
 const MAX_REFERENCE_DANCE_DURATION_MS = 15000;
@@ -89,20 +90,21 @@ async function authorizeReferenceDanceAdmin(auth) {
   return { ok: true, admin: data };
 }
 
-function providerCostCents(referenceBillableSeconds) {
+function providerCostCents(referenceBillableSeconds, resolution = REFERENCE_DANCE_RESOLUTION) {
+  if (!Object.hasOwn(REFERENCE_DANCE_RATES, resolution)) throw error('reference_dance_variant_not_allowed');
   if (!Number.isInteger(referenceBillableSeconds)
       || referenceBillableSeconds < 4
       || referenceBillableSeconds > 15) {
     throw error('invalid_reference_video_duration');
   }
-  // WaveSpeed Seedance 2.5 Motion Control 720p is billed only by the
-  // reference-video duration at $0.44 per second. Output duration and aspect
+  // WaveSpeed Motion Control charges $0.22/s at 480p and $0.44/s at 720p.
+  // Billing uses only the reference-video duration. Output duration and aspect
   // ratio follow that video and are not separate provider inputs.
-  return 44 * referenceBillableSeconds;
+  return REFERENCE_DANCE_RATES[resolution] * referenceBillableSeconds;
 }
 
-function referenceDanceCredits(referenceBillableSeconds) {
-  const cents = providerCostCents(referenceBillableSeconds);
+function referenceDanceCredits(referenceBillableSeconds, resolution = REFERENCE_DANCE_RESOLUTION) {
+  const cents = providerCostCents(referenceBillableSeconds, resolution);
   // Existing Turbo 720p: $6.00 provider cost for 30 seconds -> 550 credits.
   // Keep the same provider-cost-to-credit ratio and round upward to 5 credits.
   return Math.ceil(((cents * 11) / 12) / 5) * 5;
@@ -157,7 +159,7 @@ function validateReadyReferenceDance(row, userId) {
 function validateReferenceDanceVariant({ model, mode, resolution }) {
   if (model !== REFERENCE_DANCE_MODEL
       || mode !== REFERENCE_DANCE_MODE
-      || resolution !== REFERENCE_DANCE_RESOLUTION) {
+      || !Object.hasOwn(REFERENCE_DANCE_RATES, resolution)) {
     throw error('reference_dance_variant_not_allowed');
   }
   return true;

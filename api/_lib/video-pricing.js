@@ -56,12 +56,12 @@ function calculateVideoCreditCost(input) {
     // and validated a ready, service-role-only registry row. Callers must not
     // pass the browser request body through as this trusted value.
     if (body.referenceDanceBillableSeconds !== undefined && body.referenceDanceBillableSeconds !== null) {
-      if (modelId !== 'bytedance/seedance-2.5' || mode !== 'reference_to_video' || resolution !== '720p') {
+      if (modelId !== 'bytedance/seedance-2.5' || mode !== 'reference_to_video' || !['480p', '720p'].includes(resolution)) {
         const error = new Error('Reference dance is not allowed for this variant.');
         error.code = 'reference_dance_variant_not_allowed';
         throw error;
       }
-      return referenceDanceCredits(Number(body.referenceDanceBillableSeconds));
+      return referenceDanceCredits(Number(body.referenceDanceBillableSeconds), resolution);
     }
     const creditsPerSecond = seedance25Pricing.creditsPerSecond[resolution]
       || seedance25Pricing.creditsPerSecond['720p'];

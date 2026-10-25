@@ -44,7 +44,7 @@
 <div class='drawer' id='drawer'><div class='shade' id='shade'></div><div class='menu'><div class='menuHead'><b>メニュー</b><button class='close' id='close'>×</button></div><a href='./index.html'>ホーム <span>›</span></a><a href='./generate.html'>生成 <span>›</span></a><a href='./h3-live.html'><span style='display:inline-flex;align-items:center;gap:7px'>H3 Live <span style='display:inline-flex;align-items:center;padding:2px 7px;border:1px solid rgba(245,158,11,.65);border-radius:999px;color:#f59e0b;font-size:9px;font-weight:700;line-height:1.35;letter-spacing:.08em'>BETA</span></span> <span>›</span></a><a href='./login.html'>ログイン / 新規登録 <span>›</span></a><a href='./profile.html'>マイページ <span>›</span></a><a href='./pricing.html'>サブスクリプション <span>›</span></a><a href='./pricing.html#credit'>クレジット購入 <span>›</span></a><a href='./help.html'>ヘルプセンター <span>›</span></a><a class='logout' href='./logout.html'>ログアウト <span>›</span></a></div></div>
 <script src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'></script>
 <script src='./auth-config.js?v=4a1f0c1'></script>
-<script src='./auth-guard.js?v=1'></script>
+<script src='./auth-guard.js?v=2'></script>
 <script>
 const d=document.getElementById('drawer');document.getElementById('menuBtn').onclick=()=>d.classList.add('open');document.getElementById('shade').onclick=()=>d.classList.remove('open');document.getElementById('close').onclick=()=>d.classList.remove('open');
 const cfg=window.FLOWVID_AUTH||{};const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;const authReady=Boolean(client);const $=id=>document.getElementById(id);const jpPlan={free:'フリープラン',standard:'スタンダード',premium:'プレミアム',scale:'スケール',ultimate:'アルティメット',team:'チーム'};
@@ -83,7 +83,7 @@ async function initializeConfirmedProfile(){
   _profileAuthCheckRunning=true;
   try{
     if(!authReady){
-      showGuest('SupabaseのURLとanon keyが未設定です。');
+      window.FlowVidAuthGuard?.showUnavailable(client);
       return;
     }
     const guard=window.FlowVidAuthGuard;
@@ -101,7 +101,7 @@ async function initializeConfirmedProfile(){
   }
 }
 initializeConfirmedProfile().catch(()=>{
-  location.replace('./login.html');
+  window.FlowVidAuthGuard?.showUnavailable(client);
 });
 if(client){
   client.auth.onAuthStateChange((event,session)=>{
@@ -112,7 +112,7 @@ if(client){
     if(event==='INITIAL_SESSION'&&_profileInitialized)return;
     setTimeout(()=>{
       initializeConfirmedProfile().catch(()=>{
-        location.replace('./login.html');
+        window.FlowVidAuthGuard?.showUnavailable(client);
       });
     },0);
   });

@@ -22,7 +22,7 @@ function readyRow(overrides = {}) {
 
 // Load the real handler in an isolated module with all network/DB boundaries
 // mocked. No generation, storage write, or credit transaction leaves this test.
-async function runStart({ dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false } = {}) {
+async function runStart({ providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false } = {}) {
   const rpcCalls = [], updates = [], providerCalls = [];
   const db = {
     from(table) {
@@ -55,6 +55,7 @@ async function runStart({ dance = true, row = readyRow(), role = 'admin', settin
       rpcCalls.push({ name, args });
       if (name === 'reserve_generation_task') return { data: { task_id: 'task-1' }, error: null };
       if (name === 'deduct_generation_credits_atomic') return { data: { ok: true, deducted: args.p_credit_cost, new_balance: 4000, from_free: args.p_credit_cost }, error: null };
+      if (name === 'refund_generation_task_atomic') return { data: { ok: true, code: 'refunded' }, error: null };
       if (name === 'release_generation_task') return { data: true, error: null };
       throw new Error(`Unexpected RPC: ${name}`);
     },
@@ -90,13 +91,13 @@ async function runStart({ dance = true, row = readyRow(), role = 'admin', settin
     console: { log() {}, warn() {}, error() {} }, URL,
     fetch: async (url, options) => {
       providerCalls.push({ url, payload: JSON.parse(options.body) });
-      return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 'prediction-1', status: 'created' } }) };
+      return providerFailure ? { ok: false, status: 422, text: async () => 'synthetic rejected input' } : { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 'prediction-1', status: 'created' } }) };
     }
   }, { filename });
   const res = { status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; }, setHeader() {} };
   await module.exports({ method: 'POST', body: {
     prompt: 'Dance naturally', model: 'bytedance/seedance-2.5', mode: 'reference_to_video',
-    resolution: '720p', duration: 5, aspect_ratio: '9:16', reference_url: 'https://example.test/identity.png',
+    resolution, duration: 5, aspect_ratio: '9:16', reference_url: 'https://example.test/identity.png',
     ...(dance ? { reference_video_asset_id: ASSET } : {})
   } }, res);
   return { res, rpcCalls, updates, providerCalls };
@@ -171,4 +172,34 @@ test('asset expiring between validation and retention cannot be resurrected or c
   assert.equal(result.res.body.error, 'reference_video_retention_failed');
   assert.equal(result.rpcCalls.length, 0);
   assert.equal(result.providerCalls.length, 0);
+});
+
+for (const [durationMs, seconds, credits] of [[4000,4,85],[4001,5,105],[15000,15,305]]) {
+  test(`480p real handler charges sealed ${durationMs}ms at ${credits} credits`, async () => {
+    const result = await runStart({ resolution: '480p', row: readyRow({ duration_ms: durationMs, billable_seconds: seconds }) });
+    assert.equal(result.res.code, 202, JSON.stringify(result.res.body));
+    assert.equal(result.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, credits);
+    assert.equal(result.rpcCalls.find(c => c.name === 'deduct_generation_credits_atomic').args.p_credit_cost, credits);
+    assert.equal(result.providerCalls.length, 1);
+    assert.match(result.providerCalls[0].url, /motion-control$/);
+    assert.equal(result.providerCalls[0].payload.resolution, '480p');
+  });
+}
+test('480p cannot admit ordinary Turbo generation or nonadmin dance', async () => {
+  for (const options of [{ dance: false }, { role: 'user' }]) {
+    const result = await runStart({ resolution: '480p', ...options });
+    assert.ok(result.res.code >= 400);
+    assert.equal(result.rpcCalls.length, 0);
+    assert.equal(result.providerCalls.length, 0);
+  }
+});
+
+test('480p rejected provider request refunds the same 85-credit reserved task once', async () => {
+  const result = await runStart({ resolution:'480p', providerFailure:true, row:readyRow({duration_ms:4000,billable_seconds:4}) });
+  assert.equal(result.res.code,502);
+  assert.equal(result.res.body.creditRefunded,85);
+  assert.equal(result.rpcCalls.find(c=>c.name==='deduct_generation_credits_atomic').args.p_credit_cost,85);
+  const refunds=result.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic');
+  assert.equal(refunds.length,1);assert.equal(refunds[0].args.p_task_id,'task-1');
+  assert.equal(result.providerCalls.length,1);
 });
