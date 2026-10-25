@@ -340,11 +340,15 @@ test('リロード後の絵コンテ生成中タスクと完了履歴をDB情報
 
 test('絵コンテ由来のDBマーカーは課金前に保存し、失敗時は生成を開始しない', () => {
   const startApi = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'seedance-start.js'), 'utf8');
-  const marker = startApi.indexOf("settings: { ui_origin: uiOrigin }");
+  const marker = startApi.indexOf("settings: { ...(uiOrigin ? { ui_origin: uiOrigin } : {})");
   const deduction = startApi.indexOf('deduction = await checkAndDeduct', marker);
   const provider = startApi.indexOf('fetch(providerEndpoint', marker);
 
   assert.notEqual(marker, -1);
+  // The same validated storyboard marker now shares its pre-charge update
+  // with server-owned watermark and purchase policy snapshots.
+  assert.match(startApi.slice(marker, deduction), /watermark_required: generationAccess\.watermarkRequired !== false/);
+  assert.match(startApi.slice(marker, deduction), /purchase_access_required: generationAccess\.hasPurchasedAccess === true/);
   assert.ok(marker < deduction);
   assert.ok(marker < provider);
   assert.match(startApi.slice(marker, deduction), /\.eq\('user_id', user\.id\)[\s\S]*?\.eq\('status', 'queued'\)[\s\S]*?\.is\('api_task_id', null\)[\s\S]*?\.select\('id'\)/);

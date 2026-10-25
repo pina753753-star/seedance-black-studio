@@ -13,7 +13,8 @@ const { uploadStorageFile, withStorageDeadline } = require('./worker-storage.js'
 const { probeVideoFile } = require('./worker-probe.js');
 const {
   validateReferenceDanceProbe,
-  validateReferenceDanceDurationMatch
+  validateReferenceDanceDurationMatch,
+  referenceDanceDurationDiagnostics
 } = require('./reference-dance-inspection.js');
 
 // ffmpeg-static is not used; system ffmpeg is used via Dockerfile
@@ -926,7 +927,7 @@ async function signedReferenceDanceUpload(capabilities, capability, filePath, co
   }
 }
 
-async function runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities }) {
+async function runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim = false }) {
   if (!SUPABASE_URL || (!storageCapabilities && !SUPABASE_SERVICE_KEY)) throw referenceDanceError('SERVICE_NOT_CONFIGURED');
   if (!REFERENCE_DANCE_UUID_RE.test(userId) || !REFERENCE_DANCE_UUID_RE.test(assetId)) {
     throw referenceDanceError('INVALID_REQUEST');
@@ -942,6 +943,7 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath, stora
   );
   let jobDirectory;
   const processingDeadline = Date.now() + REFERENCE_DANCE_PROCESS_TIMEOUT_MS;
+  let durationDiagnostics;
 
   try {
     jobDirectory = fs.mkdtempSync('/tmp/pina-reference-');
@@ -959,24 +961,26 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath, stora
     fs.writeFileSync(inputFile, sourceBuffer);
 
     const probe = await referenceDanceProbe(inputFile, referenceDanceRemainingMs(processingDeadline));
-    const inputMetadata = validateReferenceDanceProbe(probe, { allowHevcInput: true });
+    durationDiagnostics = referenceDanceDurationDiagnostics(probe);
+    const inputMetadata = validateReferenceDanceProbe(probe, { allowHevcInput: true, allowBoundaryTrim: allowBoundaryTrim === true });
 
     // Keep the existing H264 copy fast path. Only bounded SDR HEVC input
     // takes the transcode path; the sealed output remains strictly H264.
     await runFfmpeg(
       () => {
         const command = ffmpeg(inputFile).inputOptions('-protocol_whitelist', 'file,pipe');
-        if (inputMetadata.videoCodec === 'hevc') {
+        if (inputMetadata.videoCodec === 'hevc' || inputMetadata.requiresBoundaryTrim) {
           command.inputOptions('-threads', '1');
           // FFmpeg autorotates before filters. Select the portrait/landscape
           // bounds from those rotated dimensions, retaining aspect ratio.
           command.outputOptions(
             '-map', '0:v:0', '-c:v', 'libx264', '-threads', '2', '-filter_threads', '1',
             '-preset', 'veryfast', '-crf', '23', '-maxrate', '6M', '-bufsize', '12M',
-            '-vf', "scale=w='min(iw,if(gte(iw,ih),1280,720))':h='min(ih,if(gte(iw,ih),720,1280))':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+            '-vf', (inputMetadata.requiresBoundaryTrim ? 'trim=duration=15,setpts=PTS-STARTPTS,fps=30,' : '') + "scale=w='min(iw,if(gte(iw,ih),1280,720))':h='min(ih,if(gte(iw,ih),720,1280))':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
             '-pix_fmt', 'yuv420p', '-metadata:s:v:0', 'rotate=0',
             '-fs', String(REFERENCE_DANCE_MAX_BYTES)
           );
+          if (inputMetadata.requiresBoundaryTrim) command.outputOptions('-frames:v', '450');
         } else {
           command.outputOptions('-map', '0:v:0', '-c:v', 'copy');
         }
@@ -989,7 +993,10 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath, stora
     // to the provider. Input container headers are not a billing authority.
     const approvedProbe = await referenceDanceProbe(approvedFile, referenceDanceRemainingMs(processingDeadline));
     const approvedMetadata = validateReferenceDanceProbe(approvedProbe, { requireNoAudio: true });
-    validateReferenceDanceDurationMatch(inputMetadata, approvedMetadata);
+    const expectedDuration = inputMetadata.requiresBoundaryTrim
+      ? { durationMs: Math.min(inputMetadata.durationMs, REFERENCE_DANCE_MAX_SECONDS * 1000) }
+      : inputMetadata;
+    validateReferenceDanceDurationMatch(expectedDuration, approvedMetadata);
     const { durationSeconds: approvedDuration, durationMs, width, height, fps } = approvedMetadata;
 
     const positions = [0.05, 0.25, 0.5, 0.75, 0.95].map((ratio) =>
@@ -1041,8 +1048,14 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath, stora
       height,
       fps: Number(fps.toFixed(3)),
       videoCodec: 'h264',
-      sha256
+      sha256,
+      durationDiagnostics,
+      trimApplied: inputMetadata.requiresBoundaryTrim === true,
+      boundaryTrimmed: inputMetadata.requiresBoundaryTrim === true
     };
+  } catch (error) {
+    if (durationDiagnostics) error.durationDiagnostics = durationDiagnostics;
+    throw error;
   } finally {
     try { if (jobDirectory) fs.rmSync(jobDirectory, { recursive: true, force: true }); } catch (_) {}
   }
@@ -1055,17 +1068,18 @@ app.post('/reference-dance-inspect', async (req, res) => {
   if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
   const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
   if (auth !== WATERMARK_SECRET) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
-  const { userId, assetId, stagingPath, storageCapabilities } = req.body || {};
+  const { userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim } = req.body || {};
   let acquired = false;
   try {
     await acquireSlot('edit', REFERENCE_DANCE_QUEUE_TIMEOUT_MS);
     acquired = true;
-    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities });
+    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim });
     return res.status(200).json(result);
   } catch (error) {
     if (error?.httpStatus === 429) return replyQueueError(res, error);
-    console.error('[reference-dance-inspect] failed', error?.publicCode || 'PROCESSING_FAILED');
-    return res.status(422).json({ ok: false, error: error?.publicCode || 'PROCESSING_FAILED' });
+    const diagnostic = error?.durationDiagnostics;
+    console.error('[reference-dance-inspect] failed', error?.publicCode || 'PROCESSING_FAILED', diagnostic || null);
+    return res.status(422).json({ ok: false, error: error?.publicCode || 'PROCESSING_FAILED', ...(diagnostic ? { durationDiagnostics: diagnostic } : {}) });
   } finally {
     if (acquired) releaseSlot('edit');
   }

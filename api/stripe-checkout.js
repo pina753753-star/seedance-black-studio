@@ -117,20 +117,6 @@ async function getUserFromToken(token) {
   return data.user;
 }
 
-const PAID_PLANS = ['standard', 'premium', 'ultimate', 'team'];
-
-async function getActiveSubscription(db, userId) {
-  const [profileRes, balanceRes] = await Promise.all([
-    db.from('profiles').select('plan').eq('id', userId).maybeSingle(),
-    db.from('credit_balances').select('subscription_expires_at').eq('user_id', userId).maybeSingle()
-  ]);
-  const plan = profileRes.data?.plan || 'free';
-  if (!PAID_PLANS.includes(plan)) return null;
-  const expiresAt = balanceRes.data?.subscription_expires_at;
-  if (!expiresAt || new Date(expiresAt) <= new Date()) return null;
-  return { plan, expiresAt };
-}
-
 // Build a Stripe line_item for a monthly subscription plan.
 // Falls back to price_data only in non-production or when Price ID is missing
 // (avoids silent production misconfiguration).
@@ -321,17 +307,8 @@ async function handler(req, res) {
       const pack = CREDIT_PACKS[id];
       if (!pack) return res.status(400).json({ ok: false, error: 'クレジットパックが見つかりません' });
 
-      const credDb = serviceClient();
-      const activeSub = credDb ? await getActiveSubscription(credDb, user.id) : null;
-      if (!activeSub) {
-        return res.status(403).json({
-          ok: false,
-          error: 'subscription_required',
-          message: '追加クレジットはサブスクリプション会員限定です',
-          redirect: '/pricing.html#monthly'
-        });
-      }
-
+      // Authenticated users may buy packs without a subscription.
+      // Packs add purchased credits only; feature entitlements stay unchanged.
       const metadata = {
         user_id:       user.id,
         user_email:    user.email || '',

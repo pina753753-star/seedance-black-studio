@@ -65,6 +65,7 @@ test('recovery, credit grants and cleanup cron schedules stay unchanged',()=>{
   {path:'/api/wavespeed-reconcile',schedule:'*/5 * * * *'},
   {path:'/api/video-edit-reconcile',schedule:'*/5 * * * *'},
   {path:'/api/reference-audio-cleanup',schedule:'37 * * * *'},
+  {path:'/api/reference-dance-cleanup',schedule:'42 * * * *'},
   {path:'/api/h3-live/image-cleanup',schedule:'47 * * * *'}
  ]);
 });

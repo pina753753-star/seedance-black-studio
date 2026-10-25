@@ -1,3 +1,4 @@
+const { readSubscriptionAccess } = require('./credit-access');
 const { createClient } = require('@supabase/supabase-js');
 const { moderateContent } = require('./openai-moderation.js');
 const { resolveModerationDecision } = require('./moderation-decision.js');
@@ -12,17 +13,31 @@ const {
   REFERENCE_AUDIO_RETENTION_MS,
   REFERENCE_AUDIO_REGISTRY_TABLE
 } = require('./reference-audio.js');
-const { getSeedance25Entitlement } = require('./video-plan-entitlements.js');
+const { getSeedance25Entitlement, getSeedance25SubscriptionEntitlement, hasSeedance25PlanAccess } = require('./video-plan-entitlements.js');
+const {
+  REFERENCE_DANCE_BUCKET,
+  REFERENCE_DANCE_TABLE,
+  REFERENCE_DANCE_RETENTION_MS,
+  REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS,
+  isUuid: isReferenceDanceUuid,
+  authorizeReferenceDanceAdmin,
+  validateReadyReferenceDance,
+  validateReferenceDanceVariant,
+  buildReferenceDanceProviderPrompt
+} = require('./reference-dance.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
 const WAVESPEED_API_BASE = 'https://api.wavespeed.ai/api/v3';
 const SEEDANCE_25_TURBO_MODEL = 'bytedance/seedance-2.5';
 const SEEDANCE_25_STANDARD_MODEL = 'bytedance/seedance-2.5-standard';
+const REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS = 72 * 60 * 60 * 1000;
+const REFERENCE_DANCE_START_MARGIN_MS = (REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS + 10 * 60) * 1000;
 const SEEDANCE_25_MODELS = new Set([SEEDANCE_25_TURBO_MODEL, SEEDANCE_25_STANDARD_MODEL]);
 const WAVESPEED_MODELS = Object.freeze({
   [SEEDANCE_25_TURBO_MODEL]: Object.freeze({
     text: 'bytedance/seedance-2.5/text-to-video-turbo',
-    image: 'bytedance/seedance-2.5/image-to-video-turbo'
+    image: 'bytedance/seedance-2.5/image-to-video-turbo',
+    motion: 'bytedance/seedance-2.5/motion-control'
   }),
   [SEEDANCE_25_STANDARD_MODEL]: Object.freeze({
     text: 'bytedance/seedance-2.5/text-to-video',
@@ -78,13 +93,13 @@ function collectModerationImageUrls(body) {
   return [...new Set(values.map(extractImageUrl).filter(Boolean))];
 }
 
-function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRatio, mode, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls, referenceAudioUrls = [] }) {
+function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRatio, mode, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls, referenceAudioUrls = [], referenceVideoUrls = [] }) {
   const payload = {
     prompt: providerPrompt,
     duration,
     resolution,
     aspect_ratio: aspectRatio,
-    generate_audio: true
+    generate_audio: referenceVideoUrls.length === 0
   };
   const waveReferenceUrls = [
     ...(Array.isArray(frameImages) ? frameImages : []).map(extractImageUrl),
@@ -96,12 +111,36 @@ function buildWaveSpeedPayload({ providerPrompt, duration, resolution, aspectRat
   if (mode === 'image_to_video') payload.image = waveReferenceUrls[0] || '';
   else if (waveReferenceUrls.length) payload.reference_images = [...new Set(waveReferenceUrls)];
   if (referenceAudioUrls.length) payload.reference_audios = [...new Set(referenceAudioUrls)];
+  if (referenceVideoUrls.length) payload.reference_videos = [...new Set(referenceVideoUrls)];
   return payload;
 }
 
-function resolveWaveSpeedModel(model, mode) {
+function collectWaveSpeedReferenceImageUrls({ frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }) {
+  return [...new Set([
+    ...(Array.isArray(frameImages) ? frameImages : []).map(extractImageUrl),
+    firstFrameUrl,
+    ...(Array.isArray(inputReferences) ? inputReferences : []).map(extractImageUrl),
+    ...(Array.isArray(referenceUrls) ? referenceUrls : []).map(extractImageUrl),
+    referenceUrl
+  ].filter(Boolean))];
+}
+
+function buildWaveSpeedMotionControlPayload({ providerPrompt, resolution, referenceVideoUrl, frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }) {
+  return {
+    video: String(referenceVideoUrl || '').trim(),
+    reference_images: collectWaveSpeedReferenceImageUrls({ frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls }),
+    prompt: providerPrompt,
+    resolution,
+    // The inspected upload has already had its audio removed. Keeping audio
+    // generation off therefore produces the silent result promised by the UI.
+    generate_audio: false
+  };
+}
+
+function resolveWaveSpeedModel(model, mode, useMotionControl = false) {
   const providerModels = WAVESPEED_MODELS[model];
   if (!providerModels) return '';
+  if (useMotionControl && mode === 'reference_to_video') return providerModels.motion || '';
   return mode === 'image_to_video' ? providerModels.image : providerModels.text;
 }
 
@@ -393,6 +432,7 @@ module.exports = async function handler(req, res) {
     // Seedance 2.0 defaults for backward compatibility.
     const options = validateVideoGenerationOptions({
       model: body.model,
+      referenceDanceRequested: Boolean(String(body.reference_video_asset_id || '').trim()),
       mode: body.mode,
       resolution: body.resolution,
       aspectRatio: body.aspect_ratio || body.aspectRatio,
@@ -401,9 +441,15 @@ module.exports = async function handler(req, res) {
     if (!options.ok) return res.status(400).json({ ok: false, error: options.error, message: options.message });
     const { resolution, aspectRatio, duration, mode, model } = options;
     const uiOrigin = body.ui_origin === 'storyboard' && mode === 'reference_to_video' ? 'storyboard' : '';
+    const referenceDanceAssetId = String(body.reference_video_asset_id || '').trim();
+    let referenceDance = null;
+    let referenceDanceSignedUrl = '';
     let generationPlan = 'free';
+    let generationAccess;
     if (SEEDANCE_25_MODELS.has(model)) {
-      const entitlement = await getSeedance25Entitlement(db, user.id);
+      const entitlement = referenceDanceAssetId || uiOrigin === 'storyboard' || mode === 'storyboard'
+        ? await getSeedance25SubscriptionEntitlement(db, user.id)
+        : await getSeedance25Entitlement(db, user.id);
       if (!entitlement.ok) {
         return res.status(503).json({
           ok: false,
@@ -415,11 +461,75 @@ module.exports = async function handler(req, res) {
         return res.status(403).json({
           ok: false,
           error: 'seedance_25_plan_required',
-          message: 'Seedance 2.5・1080p・曲アップロードはPremium以上で利用できます。',
+          message: referenceDanceAssetId
+            ? '参考ダンス動画は対象の有効なサブスクで利用できます。'
+            : uiOrigin === 'storyboard' || mode === 'storyboard'
+            ? 'Seedance 2.5の絵コンテは対象の有効なサブスクで利用できます。'
+            : 'Seedance 2.5は対象の有効サブスク、または有効な購入クレジットで利用できます。',
           redirect: '/pricing.html#monthly'
         });
       }
       generationPlan = entitlement.plan;
+      generationAccess = entitlement;
+    }
+if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.id);
+    if (!generationAccess.ok) return res.status(503).json({ ok: false, error: 'plan_check_unavailable' });
+    if (referenceDanceAssetId) {
+      if (!isReferenceDanceUuid(referenceDanceAssetId)) {
+        return res.status(400).json({ ok: false, error: 'invalid_reference_video_id', message: '参考動画を確認できませんでした。もう一度添付してください。' });
+      }
+      try {
+        validateReferenceDanceVariant({ model, mode, resolution });
+      } catch (error) {
+        return res.status(400).json({ ok: false, error: error.code || 'reference_dance_variant_not_allowed', message: '参考ダンス動画はSeedance 2.5 Turbo・リファレンス・480p／720pで利用できます。生成尺と縦横比は参考動画に従います。' });
+      }
+      const adminAccess = await authorizeReferenceDanceAdmin(auth);
+      if (!adminAccess.ok) {
+        return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden', message: '参考ダンス動画は現在、運営テスト専用です。' });
+      }
+      const { data: referenceDanceRow, error: referenceDanceError } = await db
+        .from(REFERENCE_DANCE_TABLE)
+        .select('id,user_id,status,approved_path,size_bytes,duration_ms,billable_seconds,width,height,video_codec,sha256,rights_confirmed_at,expires_at,created_at')
+        .eq('id', referenceDanceAssetId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (referenceDanceError || !referenceDanceRow) {
+        return res.status(400).json({ ok: false, error: 'reference_video_not_found', message: '参考動画を確認できませんでした。もう一度添付してください。' });
+      }
+      try {
+        referenceDance = validateReadyReferenceDance(referenceDanceRow, user.id);
+      } catch (error) {
+        return res.status(400).json({ ok: false, error: error.code || 'reference_video_not_ready', message: '参考動画の安全確認が完了していません。もう一度添付してください。' });
+      }
+      if (collectModerationImageUrls(body).length < 1) {
+        return res.status(400).json({ ok: false, error: 'identity_reference_image_required', message: '人物を維持するための参考画像を1枚以上追加してください。' });
+      }
+      const createdMs = Date.parse(String(referenceDanceRow.created_at || ''));
+      const maxRetentionMs = createdMs + REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS;
+      if (!Number.isFinite(createdMs) || maxRetentionMs - Date.now() < REFERENCE_DANCE_START_MARGIN_MS) {
+        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: '参考動画の安全な保持期間を確認できないため、生成を開始できません。' });
+      }
+      const extendedExpiry = new Date(Math.min(
+        Date.now() + REFERENCE_DANCE_RETENTION_MS,
+        maxRetentionMs
+      )).toISOString();
+      const { data: retainedRows, error: retentionError } = await db.from(REFERENCE_DANCE_TABLE)
+        .update({ expires_at: extendedExpiry, updated_at: new Date().toISOString() })
+        .eq('id', referenceDanceAssetId)
+        .eq('user_id', user.id)
+        .eq('status', 'ready')
+        .gt('expires_at', new Date().toISOString())
+        .select('id');
+      if (retentionError || !retainedRows || retainedRows.length !== 1) {
+        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: '参考動画の安全な保持期間を確認できないため、生成を開始できません。' });
+      }
+      const { data: signedVideo, error: signedVideoError } = await db.storage
+        .from(REFERENCE_DANCE_BUCKET)
+        .createSignedUrl(referenceDance.approvedPath, REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS);
+      if (signedVideoError || !signedVideo?.signedUrl) {
+        return res.status(503).json({ ok: false, error: 'reference_video_unavailable', message: '参考動画を読み込めませんでした。もう一度添付してください。' });
+      }
+      referenceDanceSignedUrl = signedVideo.signedUrl;
     }
     const provider = SEEDANCE_25_MODELS.has(model) ? 'wavespeed' : 'openrouter';
     const apiKey = provider === 'wavespeed'
@@ -434,8 +544,14 @@ module.exports = async function handler(req, res) {
 
     const normalizedAudio = normalizeReferenceAudioPaths(body.reference_audio_paths, user.id);
     const referenceAudioSyncMode = body.reference_audio_sync_mode === 'rhythm' ? 'rhythm' : 'singing';
+    if (normalizedAudio.ok && normalizedAudio.paths.length && !hasSeedance25PlanAccess(generationAccess.plan, generationAccess.subscriptionExpiresAt)) {
+      return res.status(403).json({ ok: false, error: 'reference_audio_plan_required', message: '曲アップロードは対象の有効なサブスクで利用できます。' });
+    }
     if (!normalizedAudio.ok) {
       return res.status(400).json({ ok: false, error: normalizedAudio.error, message: normalizedAudio.message });
+    }
+    if (referenceDance && normalizedAudio.paths.length) {
+      return res.status(400).json({ ok: false, error: 'reference_audio_video_conflict', message: '初期BETAでは参考動画と参照音源を同時に使用できません。' });
     }
     if (normalizedAudio.paths.length && (resolution !== '1080p' || mode === 'image_to_video')) {
       return res.status(400).json({
@@ -516,7 +632,16 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const creditCost = calculateVideoCreditCost({ ...body, mode, duration, resolution, model, plan: generationPlan });
+    // Pass an exact server-built pricing object. Never spread the browser body
+    // into the trusted referenceDanceBillableSeconds field.
+    const creditCost = calculateVideoCreditCost({
+      mode,
+      duration,
+      resolution,
+      model,
+      plan: generationPlan,
+      referenceDanceBillableSeconds: referenceDance?.billableSeconds
+    });
 
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db
@@ -545,7 +670,12 @@ module.exports = async function handler(req, res) {
     // Reserve task atomically via RPC (advisory lock + active check + cooldown check + INSERT).
     // The partial unique index (queued/processing per user) remains as a final defence.
     // Credits and OpenRouter are never touched if reservation is rejected.
-    const taskResult = await createTask(db, { userId: user.id, mode, model, prompt, resolution, duration, aspectRatio, creditCost });
+    const taskResult = await createTask(db, { userId: user.id, mode, model, prompt, resolution,
+      // Motion Control follows the inspected source, not the disabled UI controls.
+      duration: referenceDance ? referenceDance.billableSeconds : duration,
+      aspectRatio: referenceDance ? referenceDance.aspectRatio : aspectRatio,
+      creditCost
+    });
     if (!taskResult.id) {
       // active_generation: queued/processing task exists, or 23505 from concurrent INSERT
       if (taskResult.rejection === 'active_generation' || taskResult.code === '23505') {
@@ -576,14 +706,14 @@ module.exports = async function handler(req, res) {
     // compatibility. Persist only the validated UI origin so pending/history
     // endpoints can restore storyboard tasks after a reload. Fail before any
     // credit deduction or provider request if this required marker cannot be
-    // saved; otherwise an accepted storyboard task would become invisible in
-    // the storyboard UI again.
-    if (uiOrigin) {
+    // saved. Also bind the server-owned purchase and watermark policy before
+    // charging, so a later balance/plan change cannot rewrite this task.
+    {
       let originRows = null;
       let originError = null;
       try {
         const originResult = await db.from('generation_tasks')
-          .update({ settings: { ui_origin: uiOrigin }, updated_at: new Date().toISOString() })
+          .update({ settings: { ...(uiOrigin ? { ui_origin: uiOrigin } : {}), watermark_required: generationAccess.watermarkRequired !== false, purchase_access_required: generationAccess.hasPurchasedAccess === true }, updated_at: new Date().toISOString() })
           .eq('id', taskId)
           .eq('user_id', user.id)
           .eq('status', 'queued')
@@ -597,18 +727,63 @@ module.exports = async function handler(req, res) {
       const originSaved = !originError && Array.isArray(originRows) && originRows.length === 1;
       if (!originSaved) {
         console.error(
-          '[seedance-start] storyboard UI origin save failed, taskId:',
+          '[seedance-start] generation policy save failed, taskId:',
           taskId,
           'updatedRows:',
           Array.isArray(originRows) ? originRows.length : null,
           'error:',
           originError?.message || originError || null
         );
-        await releaseTask(db, user.id, taskId, 'cancelled', 'Storyboard UI origin could not be saved');
+        await releaseTask(db, user.id, taskId, 'cancelled', 'Generation policy could not be saved');
         return res.status(500).json({
           ok: false,
-          error: 'storyboard_origin_save_failed',
-          message: '絵コンテの生成状態を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+          error: 'generation_policy_save_failed',
+          message: '生成の利用条件を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+        });
+      }
+    }
+
+    if (referenceDance) {
+      const danceSettings = {
+        ...(uiOrigin ? { ui_origin: uiOrigin } : {}),
+        // Preserve the same server-owned policy saved before this asset bind.
+        watermark_required: generationAccess.watermarkRequired !== false,
+        purchase_access_required: generationAccess.hasPurchasedAccess === true,
+        reference_dance: {
+          asset_id: referenceDance.assetId,
+          billable_seconds: referenceDance.billableSeconds,
+          duration_ms: referenceDance.durationMs,
+          width: referenceDance.width,
+          height: referenceDance.height
+        }
+      };
+      const { data: settingsRows, error: settingsError } = await db.from('generation_tasks')
+        .update({ settings: danceSettings, updated_at: new Date().toISOString() })
+        .eq('id', taskId)
+        .eq('user_id', user.id)
+        .eq('status', 'queued')
+        .is('api_task_id', null)
+        .select('id');
+      if (settingsError || !settingsRows || settingsRows.length !== 1) {
+        await releaseTask(db, user.id, taskId, 'cancelled', 'Reference dance settings could not be saved');
+        return res.status(500).json({
+          ok: false,
+          error: 'reference_video_settings_save_failed',
+          message: '参考動画の生成設定を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+        });
+      }
+      const { data: boundRows, error: bindError } = await db.from(REFERENCE_DANCE_TABLE)
+        .update({ last_task_id: taskId, used_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', referenceDance.assetId)
+        .eq('user_id', user.id)
+        .eq('status', 'ready')
+        .select('id');
+      if (bindError || !boundRows || boundRows.length !== 1) {
+        await releaseTask(db, user.id, taskId, 'cancelled', 'Reference dance asset could not be bound');
+        return res.status(503).json({
+          ok: false,
+          error: 'reference_video_bind_failed',
+          message: '参考動画を生成へ関連付けられなかったため、生成を開始しませんでした。クレジットは消費されていません。'
         });
       }
     }
@@ -680,8 +855,8 @@ module.exports = async function handler(req, res) {
     // audio does not invent music that may trigger output copyright checks.
     const providerPrompt = buildProviderPrompt({
       model,
-      prompt,
-      generateAudio: true,
+      prompt: referenceDance ? buildReferenceDanceProviderPrompt(prompt) : prompt,
+      generateAudio: !referenceDance,
       hasReferenceAudio: signedAudio.urls.length > 0,
       referenceAudioSyncMode
     });
@@ -696,7 +871,18 @@ module.exports = async function handler(req, res) {
     // 2.5 variants use WaveSpeed's request shape, but their endpoint IDs remain
     // separate so standard and Turbo can never be substituted implicitly.
     const payload = provider === 'wavespeed'
-      ? buildWaveSpeedPayload({
+      ? referenceDance
+        ? buildWaveSpeedMotionControlPayload({
+          providerPrompt,
+          resolution,
+          referenceVideoUrl: referenceDanceSignedUrl,
+          frameImages,
+          inputReferences,
+          firstFrameUrl,
+          referenceUrl,
+          referenceUrls
+        })
+        : buildWaveSpeedPayload({
           providerPrompt,
           duration,
           resolution,
@@ -707,7 +893,8 @@ module.exports = async function handler(req, res) {
           firstFrameUrl,
           referenceUrl,
           referenceUrls,
-          referenceAudioUrls: signedAudio.urls
+          referenceAudioUrls: signedAudio.urls,
+          referenceVideoUrls: referenceDanceSignedUrl ? [referenceDanceSignedUrl] : []
         })
       : {
           model,
@@ -799,7 +986,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    const providerModel = resolveWaveSpeedModel(model, mode);
+    const providerModel = resolveWaveSpeedModel(model, mode, Boolean(referenceDance));
     const providerEndpoint = provider === 'wavespeed'
       ? `${WAVESPEED_API_BASE}/${providerModel}`
       : OPENROUTER_VIDEO_ENDPOINT;
@@ -985,14 +1172,15 @@ module.exports = async function handler(req, res) {
       creditCost,
       creditBalance: deduction.newBalance,
       request: {
-        duration: payload.duration,
+        duration: payload.duration || referenceDance?.billableSeconds || duration,
         resolution: payload.resolution,
-        aspect_ratio: payload.aspect_ratio,
+        aspect_ratio: payload.aspect_ratio || (referenceDance ? 'reference_video' : aspectRatio),
         has_frame_images: Boolean(payload.frame_images?.length),
         frame_image_count: payload.frame_images?.length || 0,
         has_input_references: Boolean(payload.input_references?.length),
         input_reference_count: payload.input_references?.length || 0,
-        text_only: !payload.frame_images?.length && !payload.input_references?.length
+        has_reference_video: Boolean(payload.video || payload.reference_videos?.length),
+        text_only: !payload.frame_images?.length && !payload.input_references?.length && !payload.reference_images?.length
       },
       response: data,
       checkedAt: new Date().toISOString()
@@ -1011,4 +1199,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { buildWaveSpeedPayload, resolveWaveSpeedModel };
+module.exports._test = { buildWaveSpeedPayload, buildWaveSpeedMotionControlPayload, resolveWaveSpeedModel };

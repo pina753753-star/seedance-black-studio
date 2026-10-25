@@ -16,6 +16,7 @@ test('standard and Turbo use separate approved WaveSpeed endpoint IDs and key', 
   assert.match(source, /bytedance\/seedance-2\.5\/image-to-video'/);
   assert.match(source, /bytedance\/seedance-2\.5\/text-to-video-turbo/);
   assert.match(source, /bytedance\/seedance-2\.5\/image-to-video-turbo/);
+  assert.match(source, /bytedance\/seedance-2\.5\/motion-control/);
   assert.match(source, /if \(mode === 'image_to_video'\) payload\.image/);
   assert.match(source, /payload\.reference_images/);
 });
@@ -54,19 +55,19 @@ test('client enables Seedance 2.5 1080p and prefers the saved polling URL', () =
 
 test('generation UI exposes standard and Turbo separately without migrating saved Turbo drafts', () => {
   const source = read('generate-prod.html');
-  assert.match(source, /value="bytedance\/seedance-2\.5-standard">Seedance 2\.5（Premium以上）/);
-  assert.match(source, /value="bytedance\/seedance-2\.5">Seedance 2\.5 Turbo（Premium以上）/);
+  assert.match(source, /value="bytedance\/seedance-2\.5-standard">Seedance 2\.5<\/option>/);
+  assert.match(source, /value="bytedance\/seedance-2\.5">Seedance 2\.5 Turbo<\/option>/);
   assert.match(source, /const SEEDANCE_25_TURBO_MODEL='bytedance\/seedance-2\.5'/);
   assert.match(source, /const SEEDANCE_25_STANDARD_MODEL='bytedance\/seedance-2\.5-standard'/);
   assert.match(source, /const isTurbo=modelId===SEEDANCE_25_TURBO_MODEL/);
   assert.match(source, /const isStandard=modelId===SEEDANCE_25_STANDARD_MODEL/);
-  assert.match(source, /opt480\.disabled=isTurbo;opt480\.hidden=isTurbo/);
+  assert.match(source, /opt480\.disabled=isTurbo&&!dance480;opt480\.hidden=isTurbo&&!dance480/);
   assert.match(source, /opt1080\.disabled=isStandard;opt1080\.hidden=isStandard/);
   assert.match(source, /\[SEEDANCE_25_STANDARD_MODEL\]:\{maxCredits:990,creditsPerSecond:\{'480p':495\/30,'720p':990\/30\}\}/);
   assert.match(source, /\[SEEDANCE_25_TURBO_MODEL\]:\{maxCredits:600,creditsPerSecond:\{'720p':550\/30,'1080p':20\}\}/);
   assert.match(source, /const relevant=\$\('model'\)\?\.value===SEEDANCE_25_TURBO_MODEL/);
   assert.match(source, /Seedance 2\.5 Turbo・1080p：15秒 300クレジット／30秒 600クレジット/);
-  assert.doesNotMatch(source, /value="bytedance\/seedance-2\.5">Seedance 2\.5（Premium以上）/);
+  assert.doesNotMatch(source, /value="bytedance\/seedance-2\.5">Seedance 2\.5<\/option>/);
 });
 
 test('reference audio storage remains private and MP3-only', () => {

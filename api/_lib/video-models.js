@@ -79,11 +79,12 @@ const VIDEO_MODELS = Object.freeze({
     provider: 'wavespeed',
     providerModels: Object.freeze({
       text: 'bytedance/seedance-2.5/text-to-video-turbo',
-      image: 'bytedance/seedance-2.5/image-to-video-turbo'
+      image: 'bytedance/seedance-2.5/image-to-video-turbo',
+      motion: 'bytedance/seedance-2.5/motion-control'
     }),
     status: MODEL_STATUS.ACTIVE,
     enabledForGeneration: true,
-    metadataConfidence: 'live_wavespeed_model_schema_2026-08-29',
+    metadataConfidence: 'live_wavespeed_model_schema_2026-10-15',
     durations: Object.freeze({ type: 'integer_range', min: 4, max: 30, integerOnly: true }),
     resolutions: Object.freeze(['720p', '1080p']),
     aspectRatios: Object.freeze(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9']),
@@ -96,6 +97,7 @@ const VIDEO_MODELS = Object.freeze({
     pricingProfile: 'seedance_2_5_v1',
     notes: Object.freeze([
       'WaveSpeed Turbo schema was verified on 2026-08-29.',
+      'WaveSpeed Motion Control schema was verified on 2026-10-15.',
       'The legacy Pina model ID is intentionally retained for existing Turbo drafts and tasks.',
       'Video and audio references are recorded as capabilities but are not exposed by the normal generation UI.',
       'AI video editing remains a separate application flow and is not enabled by this model entry.'
