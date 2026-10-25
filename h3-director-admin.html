@@ -5,7 +5,7 @@
 <body><div class="wrap"><a href="./admin.html">← 管理画面</a><h1>H3 Max Director 管理</h1>
 <div class="card"><div class="muted">通常H3・Seedanceとは別のスイッチです。有効化すると対象ユーザーが1回440クレジットで60秒のWebRTCライブを開始できます。</div><div class="row"><span>状態</span><strong id="state">確認中</strong></div><div class="row"><span>最終更新</span><strong id="updated">-</strong></div><button id="toggle" disabled>読み込み中</button><div class="muted" id="message"></div></div>
 <div class="card"><h2>要確認セッション</h2><div class="muted">接続結果不明、または5分以上止まった開始処理。課金済み・falセッションありは、fal.ai確認後だけ強制解放できます。</div><div id="alerts">確認中</div></div></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="./auth-config.js?v=4a1f0c1"></script><script src="./auth-guard.js?v=1"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="./auth-config.js?v=4a1f0c1"></script><script src="./auth-guard.js?v=2"></script>
 <script>(function(){
 var client=typeof window.flowvidSupabaseClient==='function'?window.flowvidSupabaseClient():null,current=false,state=document.getElementById('state'),updated=document.getElementById('updated'),toggle=document.getElementById('toggle'),message=document.getElementById('message'),alerts=document.getElementById('alerts');
 function esc(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}

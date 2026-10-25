@@ -1,3 +1,4 @@
+const { readSubscriptionAccess, taskRequiresWatermark } = require('./_lib/credit-access');
 const { createClient } = require('@supabase/supabase-js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
@@ -162,6 +163,8 @@ async function readFlowvidHistory(db, limit, userId) {
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) return { rows: [], error: error.message };
+  const outputAccess = await readSubscriptionAccess(db, userId);
+  const watermarkPending = [];
   const rows = (data || []).map(task => {
     const dur = Number(task.duration_seconds);
     const watermarkedUrl = validVideoUrl(task.watermarked_url || '');
@@ -170,7 +173,10 @@ async function readFlowvidHistory(db, limit, userId) {
     // fal tasks: only display if watermarked_url is valid.
     // (fal tasks set watermarked_url on completion — missing means processing not finished.)
     // OpenRouter tasks: keep existing behavior (watermarked_url preferred, output_url fallback).
-    if (task.api_provider === 'fal' && !watermarkedUrl) return null;
+    if ((task.api_provider === 'fal' || taskRequiresWatermark(task, outputAccess)) && !watermarkedUrl) {
+      if (task.api_task_id) watermarkPending.push({ jobId: task.api_task_id, prompt: task.prompt || '', createdAt: task.created_at });
+      return null;
+    }
 
     return {
       id: task.id,
@@ -191,7 +197,7 @@ async function readFlowvidHistory(db, limit, userId) {
     };
   });
   const normalized = await Promise.all(rows.map(r => (r ? normalizeHistoryRow(r) : null)));
-  return { rows: normalized.filter(Boolean), error: null };
+  return { rows: normalized.filter(Boolean), watermarkPending, error: null };
 }
 
 module.exports = async function handler(req, res) {
@@ -229,6 +235,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       rows,
+      watermarkPending: history.watermarkPending || [],
       sources: {
         generation_tasks: { count: history.rows.length, error: history.error },
         hidden_broken_job_ids: Array.from(BROKEN_JOB_IDS)

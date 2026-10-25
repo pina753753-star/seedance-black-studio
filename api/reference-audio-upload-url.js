@@ -8,7 +8,7 @@ const {
   REFERENCE_AUDIO_RETENTION_MS,
   REFERENCE_AUDIO_REGISTRY_TABLE
 } = require('./_lib/reference-audio.js');
-const { getSeedance25Entitlement } = require('./_lib/video-plan-entitlements.js');
+const { getSeedance25SubscriptionEntitlement: getSeedance25Entitlement } = require('./_lib/video-plan-entitlements.js');
 
 const ACCEPTED_CLIENT_MIME_TYPES = new Set(['audio/mpeg', 'audio/mp3']);
 

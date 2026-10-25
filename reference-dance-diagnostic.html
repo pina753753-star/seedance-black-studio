@@ -1,0 +1,30 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pina Studio 接続確認</title></head><body>
+<h1>管理者用の接続確認</h1><p>既存ログインで接続を確認します。動画処理やキー変更は行いません。</p>
+<button id="check" type="button" disabled>接続を確認</button><pre id="result" role="status" aria-live="polite">準備中</pre>
+<script src="./auth-config.js?v=4a1f0c1"></script>
+<script>
+'use strict';
+const button=document.getElementById('check'), result=document.getElementById('result');
+const expectedOrigin='https://flowvid-studio-git-verify-pina-worker-au-4f7aef-pina-s-projects.vercel.app';
+let busy=false;
+if(location.origin===expectedOrigin){button.disabled=false;result.textContent='確認待ち'}else{result.textContent='この接続先では実行できません'}
+button.onclick=async()=>{
+  if(busy||location.origin!==expectedOrigin)return;
+  busy=true;button.disabled=true;result.textContent='確認中';
+  try{
+    const cfg=window.FLOWVID_AUTH||{};
+    if(typeof cfg.supabaseUrl!=='string'||!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(cfg.supabaseUrl))throw new Error();
+    // Read the existing SDK default session key only; never refresh, persist,
+    // remove sessions, or consume authentication callbacks in this diagnostic.
+    const projectRef=new URL(cfg.supabaseUrl).hostname.split('.')[0];
+    const session=JSON.parse(window.localStorage.getItem('sb-'+projectRef+'-auth-token')||'null');
+    if(!session||typeof session.access_token!=='string'||!session.access_token
+       ||typeof session.expires_at!=='number'||!Number.isFinite(session.expires_at)
+       ||session.expires_at*1000<=Date.now()){result.textContent='既存ログインを確認できません';return}
+    const response=await fetch('/api/reference-dance-worker-diagnostic',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-Pina-Diagnostic':'1',Authorization:'Bearer '+session.access_token},body:'{}'});
+    const checked=await response.json();
+    const project=typeof checked.projectOrigin==='string'&&/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(checked.projectOrigin)?checked.projectOrigin:'確認できません';
+    result.textContent=(checked.authenticated===true?'認証一致（動画処理なし）':'認証未確認')+'\nAPI接続先: '+project;
+  }catch(_){result.textContent='接続を確認できません'}finally{busy=false;button.disabled=false}
+};
+</script></body></html>

@@ -35,6 +35,16 @@ function isConfirmed(user) {
   return Boolean(user && (user.email_confirmed_at || user.confirmed_at));
 }
 
+function authLookupFailure(error) {
+  const invalid = error?.name === 'AuthApiError'
+    && ['bad_jwt', 'invalid_jwt', 'session_not_found', 'user_not_found', 'refresh_token_not_found', 'refresh_token_already_used'].includes(error.code);
+  return { ok: false, status: invalid ? 401 : 503, body: {
+    ok: false,
+    error: invalid ? 'UNAUTHORIZED' : 'AUTH_VERIFICATION_UNAVAILABLE',
+    message: invalid ? 'ログインが必要です。' : 'ログインを確認できません。時間をおいて再確認してください。'
+  } };
+}
+
 async function requireConfirmedAuth(req) {
   const token = bearerToken(req);
 
@@ -67,17 +77,7 @@ async function requireConfirmedAuth(req) {
     const { data, error } = await supabase.auth.getUser(token);
     const user = data?.user || null;
 
-    if (error || !user) {
-      return {
-        ok: false,
-        status: 401,
-        body: {
-          ok: false,
-          error: 'UNAUTHORIZED',
-          message: 'ログインが必要です。'
-        }
-      };
-    }
+    if (error || !user) return authLookupFailure(error);
 
     if (!isConfirmed(user)) {
       return {
@@ -92,16 +92,8 @@ async function requireConfirmedAuth(req) {
     }
 
     return { ok: true, user, token, supabase };
-  } catch (_) {
-    return {
-      ok: false,
-      status: 401,
-      body: {
-        ok: false,
-        error: 'UNAUTHORIZED',
-        message: 'ログインが必要です。'
-      }
-    };
+  } catch (error) {
+    return authLookupFailure(error);
   }
 }
 

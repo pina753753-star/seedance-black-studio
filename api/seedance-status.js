@@ -1,3 +1,5 @@
+const { randomUUID } = require('node:crypto');
+const { readSubscriptionAccess, taskRequiresWatermark } = require('./_lib/credit-access');
 const { createClient } = require('@supabase/supabase-js');
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
 
@@ -228,7 +230,7 @@ async function creditDeltaCharge(db, userId, taskId, amount) {
 
 // Atomically claims the completed task, settles the credit delta, and
 // writes credit metadata to generation_tasks.settings.credit_settlement.
-async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
+async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl, watermarkedUrl = null) {
   if (!db || !resolvedJobId) return null;
   try {
     const { data: task } = await db
@@ -250,7 +252,7 @@ async function processFinalCredits(db, resolvedJobId, costUsd, videoUrl) {
     // both succeed: the second caller finds status='completed' and gets 0 rows.
     const { data: claimed } = await db
       .from('generation_tasks')
-      .update({ status: 'completed', output_url: videoUrl, ...settingsUpdate, updated_at: new Date().toISOString() })
+      .update({ status: 'completed', output_url: watermarkedUrl || videoUrl, ...(watermarkedUrl ? { watermarked_url: watermarkedUrl } : {}), ...settingsUpdate, updated_at: new Date().toISOString() })
       .eq('id', task.id)
       .in('status', ['queued', 'processing'])
       .select('id');
@@ -729,7 +731,40 @@ async function verifyPublicObject(publicUrl) {
   }
 }
 
-async function persistVideo({ jobId, videoUrl, apiKey }) {
+// Restore legacy completed outputs on an explicit owned status request. Never
+// charge/refund again, and never return the old raw source during finishing.
+async function finishLegacyWatermark(db, task) {
+  if (!isSupabasePublicUrl(task.output_url || '')) return { ok: false };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const response = await fetch(`${process.env.WATERMARK_SERVER_URL}/watermark`, {
+      method: 'POST', redirect: 'error', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.WATERMARK_SECRET || ''}` },
+      body: JSON.stringify({ videoUrl: task.output_url, jobId: task.api_task_id })
+    });
+    if (!response.ok) return { ok: false };
+    const data = await response.json();
+    const url = validWatermarkUrl(data?.watermarkedUrl || '');
+    if (!url) return { ok: false };
+    const saved = await db.from('generation_tasks').update({
+      watermarked_url: url,
+      output_url: url,
+      settings: { ...(task.settings || {}), watermark_required: true },
+      updated_at: new Date().toISOString()
+    }).eq('id', task.id).eq('user_id', task.user_id).eq('status', 'completed').select('id');
+    if (saved.error || !Array.isArray(saved.data) || saved.data.length !== 1) return { ok: false };
+    return { ok: true, url };
+  } catch (_) { return { ok: false }; }
+  finally { clearTimeout(timer); }
+}
+
+async function cleanupWatermarkInput(storage) {
+  if (!storage?.path?.startsWith('watermark-inputs/')) return;
+  try { await dbClient()?.storage.from(VIDEO_BUCKET).remove([storage.path]); } catch (_) {}
+}
+
+async function persistVideo({ jobId, videoUrl, apiKey, ephemeralRaw = false }) {
   if (!videoUrl) {
     return { ok: false, videoUrl, error: 'No video URL found yet' };
   }
@@ -764,15 +799,18 @@ async function persistVideo({ jobId, videoUrl, apiKey }) {
 
   const ext = extFromContentType(contentType);
   const safeJobId = String(jobId || Date.now()).replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
-  const path = `generated-videos/${safeJobId}.${ext}`;
+  const path = ephemeralRaw ? `watermark-inputs/${randomUUID()}.${ext}` : `generated-videos/${safeJobId}.${ext}`;
 
-  const upload = await db.storage.from(VIDEO_BUCKET).upload(path, buffer, { contentType, cacheControl: '31536000', upsert: true });
+  const upload = await db.storage.from(VIDEO_BUCKET).upload(path, buffer, { contentType, cacheControl: ephemeralRaw ? '0' : '31536000', upsert: !ephemeralRaw });
   if (upload.error) return { ok: false, videoUrl, error: upload.error.message, bucket: VIDEO_BUCKET, path };
 
   const { data } = db.storage.from(VIDEO_BUCKET).getPublicUrl(path);
   const publicUrl = data?.publicUrl || videoUrl;
   const publicCheck = await verifyPublicObject(publicUrl);
-  if (!publicCheck.ok) return { ok: false, videoUrl: publicUrl, originalUrl: videoUrl, error: 'Uploaded object is not publicly readable as video', bucket: VIDEO_BUCKET, path, publicCheck };
+  if (!publicCheck.ok) {
+    if (ephemeralRaw) await cleanupWatermarkInput({ path });
+    return { ok: false, error: 'Uploaded object is not publicly readable as video', publicCheck };
+  }
 
   return { ok: true, videoUrl: publicUrl, originalUrl: videoUrl, bucket: VIDEO_BUCKET, path, contentType, bytes: buffer.length, publicCheck };
 }
@@ -902,7 +940,7 @@ module.exports = async function handler(req, res) {
   if (requestedJobId) {
     const result = await ownershipDb
       .from('generation_tasks')
-      .select('id,user_id,api_task_id,polling_url,api_provider')
+      .select('id,user_id,api_task_id,polling_url,api_provider,settings,status,output_url,watermarked_url')
       .eq('user_id', auth.user.id)
       .eq('api_task_id', requestedJobId)
       .order('created_at', { ascending: false })
@@ -915,7 +953,7 @@ module.exports = async function handler(req, res) {
   if (!ownedTask && !ownershipError && pollingUrl) {
     const result = await ownershipDb
       .from('generation_tasks')
-      .select('id,user_id,api_task_id,polling_url,api_provider')
+      .select('id,user_id,api_task_id,polling_url,api_provider,settings,status,output_url,watermarked_url')
       .eq('user_id', auth.user.id)
       .eq('polling_url', pollingUrl)
       .order('created_at', { ascending: false })
@@ -936,6 +974,21 @@ module.exports = async function handler(req, res) {
       error: 'generation_task_not_found',
       message: 'この生成タスクを確認できません。'
     });
+  }
+
+  const outputAccess = typeof ownedTask.settings?.watermark_required === 'boolean'
+    ? null : await readSubscriptionAccess(ownershipDb, auth.user.id);
+  const requiresWatermark = taskRequiresWatermark(ownedTask, outputAccess);
+  if (ownedTask.status === 'completed') {
+    const savedUrl = requiresWatermark ? validWatermarkUrl(ownedTask.watermarked_url || '')
+      : (ownedTask.output_url || ownedTask.watermarked_url || '');
+    if (!savedUrl && requiresWatermark) {
+      const finish = await finishLegacyWatermark(ownershipDb, ownedTask);
+      if (!finish.ok) return res.status(503).json({ ok: false, error: 'watermark_finish_required', message: '透かしの仕上げを完了できませんでした。時間をおいて再試行してください。クレジットは消費していません。' });
+      return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl: finish.url, jobId: ownedTask.api_task_id });
+    }
+    if (!savedUrl) return res.status(503).json({ ok: false, error: 'artifact_unavailable' });
+    return res.status(200).json({ ok: true, done: true, status: 'completed', videoUrl: savedUrl, jobId: ownedTask.api_task_id });
   }
 
   const provider = ownedTask.api_provider === 'wavespeed' ? 'wavespeed' : 'openrouter';
@@ -1003,7 +1056,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (!videoUrl && rawVideoUrl) {
-      storage = await persistVideo({ jobId: resolvedJobId, videoUrl: rawVideoUrl, apiKey });
+      storage = await persistVideo({ jobId: resolvedJobId, videoUrl: rawVideoUrl, apiKey, ephemeralRaw: requiresWatermark });
       if (storage?.ok && storage.videoUrl) videoUrl = storage.videoUrl;
     }
 
@@ -1160,31 +1213,9 @@ module.exports = async function handler(req, res) {
     // Hoisted so the response-sanitization step below (which strips raw,
     // unwatermarked video URLs from non-videoUrl fields) knows the plan even
     // though it's only determined inside the done-branch.
-    let isFreeUser = false;
+    const isFreeUser = requiresWatermark;
 
     if (done) {
-      // Determine plan BEFORE claiming completion, so free users can be gated on
-      // watermark success. Paid users are looked up the same way but take the
-      // pre-existing immediate-completion path unchanged.
-      let gateUserId = null;
-      const dbGate = dbClient();
-      if (dbGate) {
-        const { data: gateTask } = await dbGate
-          .from('generation_tasks')
-          .select('user_id')
-          .eq('api_task_id', resolvedJobId)
-          .in('status', ['queued', 'processing'])
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        gateUserId = gateTask?.user_id || null;
-        if (gateUserId) {
-          const PAID_PLANS = ['standard', 'premium', 'ultimate', 'team', 'scale'];
-          const { data: profile } = await dbGate.from('profiles').select('plan').eq('id', gateUserId).maybeSingle();
-          isFreeUser = !profile || !PAID_PLANS.includes(profile.plan);
-        }
-      }
-
       if (!isFreeUser) {
         // Paid path: unchanged — complete immediately, no watermark attempt.
         finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
@@ -1221,8 +1252,16 @@ module.exports = async function handler(req, res) {
           console.log('[watermark] caught error:', wmError);
         }
 
+        await cleanupWatermarkInput(storage);
+
         if (wmSuccessUrl) {
-          finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl).catch(() => null);
+          responseVideoUrl = wmSuccessUrl;
+          finalCreditsResult = await processFinalCredits(dbClient(), resolvedJobId, costUsd, videoUrl, wmSuccessUrl).catch(() => null);
+          if (!finalCreditsResult) {
+            // Another poll/refund or an unavailable DB must never fall back
+            // to the unwatermarked source. Re-read the owned task next poll.
+            return res.status(200).json({ ok: true, done: false, jobStatus: 'processing', jobId: resolvedJobId, watermarkPending: true });
+          }
           if (finalCreditsResult) {
             const dbWm = dbClient();
             if (dbWm) {
@@ -1332,7 +1371,7 @@ module.exports = async function handler(req, res) {
     // dropped. Paid-plan responses are returned exactly as before.
     const responseStorage = storage ? { ...storage, rawVideoUrl, usedFallbackContentUrl: Boolean(fallbackContentUrl) } : null;
     const responseData = data;
-    const shouldMaskRawUrls = done && isFreeUser;
+    const shouldMaskRawUrls = isFreeUser;
     const safeStorage = shouldMaskRawUrls ? null : responseStorage;
     const safeResponseData = shouldMaskRawUrls ? sanitizeOpenRouterDataForFreeUser(data) : responseData;
 
@@ -1356,7 +1395,7 @@ module.exports = async function handler(req, res) {
       checkedAt: new Date().toISOString()
     });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', statusUrl, checkedAt: new Date().toISOString() });
+    return res.status(500).json({ ok: false, error: requiresWatermark ? 'status_lookup_failed' : (error?.message || 'Unknown error'), statusUrl, checkedAt: new Date().toISOString() });
   }
 };
 
@@ -1364,6 +1403,8 @@ module.exports = async function handler(req, res) {
 // CRON_SECRET-protected WaveSpeed reconciliation route. These helpers never
 // expose credentials to the browser.
 module.exports._reconcileHelpers = {
+  cleanupWatermarkInput,
+  finishLegacyWatermark,
   findVideoUrl,
   normalizeStatus,
   isCompletedStatus,

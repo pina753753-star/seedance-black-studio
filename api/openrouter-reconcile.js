@@ -22,6 +22,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const { sweepWatermarkInputs } = require('./_lib/watermark-input-cleanup');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -77,6 +78,13 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
   }
 
+  // Independent Storage-only cleanup; existing refund work starts immediately.
+  const watermarkCleanupPromise = sweepWatermarkInputs(db, { videoBucket: process.env.FLOWVID_VIDEO_BUCKET || 'reference-images' })
+    .catch(() => ({ ok: false, error: 'watermark_cleanup_failed' }))
+    .then(result => {
+      if (!result.ok) console.error('[openrouter-reconcile] watermark_cleanup_failed', { scanned: result.scanned || 0, deleted: result.deleted || 0, failedTargets: result.failedTargets || 0 });
+      return result;
+    });
   const startedAt = Date.now();
   const results = { checked: 0, refunded: 0, already_settled: 0, failed: 0, errors: [] };
 
@@ -92,7 +100,7 @@ module.exports = async function handler(req, res) {
 
     if (fetchErr) {
       console.error('[openrouter-reconcile] fetch error:', fetchErr.message);
-      return res.status(500).json({ ok: false, error: fetchErr.message });
+      return res.status(500).json({ ok: false, error: fetchErr.message, watermarkCleanup: await watermarkCleanupPromise });
     }
 
     console.log(`[openrouter-reconcile] found ${(staleTasks || []).length} stale task(s) (>2h, queued/processing)`);
@@ -118,11 +126,12 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       elapsed_ms: elapsed,
+      watermarkCleanup: await watermarkCleanupPromise,
       ...results,
       ...(results.errors.length > 0 ? { errors: results.errors } : {})
     });
   } catch (err) {
     console.error('[openrouter-reconcile] unexpected error:', err?.message);
-    return res.status(500).json({ ok: false, error: err?.message || 'Unknown error' });
+    return res.status(500).json({ ok: false, error: err?.message || 'Unknown error', watermarkCleanup: await watermarkCleanupPromise });
   }
 };

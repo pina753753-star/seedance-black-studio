@@ -18,6 +18,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
 .audioSyncChoice{display:none;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.audioSyncOption{display:grid;grid-template-columns:minmax(0,1fr) 30px;gap:5px}.audioSyncChoice label{display:flex;align-items:center;gap:7px;border:1px solid rgba(255,255,255,.09);border-radius:11px;padding:9px 10px;color:#cbd0d8;font-size:11px;font-weight:700}.audioSyncChoice input{accent-color:#8ed8ff}.audioSyncInfoButton{width:30px;min-height:30px;padding:0;border:0;background:transparent;color:#bfe9ff;font-size:14px;font-weight:800;cursor:pointer}.audioSyncInfo{display:none;grid-column:1/-1;border:1px solid rgba(142,216,255,.22);border-radius:11px;background:#161b23;color:#cbd0d8;padding:10px 12px;font-size:11px;line-height:1.7}@media(max-width:430px){.audioSyncChoice{grid-template-columns:1fr}}
+.danceRef{display:none;margin:0 0 12px;background:#101319;border:1px solid rgba(196,181,253,.3);border-radius:15px;padding:12px}.danceRefTop{display:flex;gap:10px;align-items:center}.dancePick{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:138px;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800}.dancePick input{position:absolute;inset:0;opacity:0}.danceInfo{min-width:0;flex:1}.danceName{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:800}.danceNote{color:#9f96b5;font-size:11px;line-height:1.5;margin-top:3px}.danceRetry{display:none;border:1px solid rgba(167,139,250,.55);border-radius:10px;background:#29243a;color:#fff;padding:8px 10px;font-size:11px;font-weight:800;white-space:nowrap}.danceRemove{display:none;width:32px;height:32px;border:0;border-radius:50%;background:#2b303a;color:#fff;font-size:18px}.danceRights{display:flex;align-items:flex-start;gap:8px;margin-top:10px;color:#c8cad6;font-size:11px;line-height:1.6}.danceRights input{margin-top:3px;accent-color:#a78bfa}.danceHelp{margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.07);color:#aeb4bf;font-size:11px;line-height:1.65}
 *{box-sizing:border-box}body{margin:0;background:#000;color:#fff;font-family:'Noto Sans JP',-apple-system,BlinkMacSystemFont,sans-serif}.wrap{max-width:760px;margin:auto;padding:22px 12px 70px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.brand{display:flex;gap:12px;align-items:center;text-decoration:none;color:#fff}.logo{width:44px;height:44px;border-radius:16px;background:linear-gradient(135deg,#fff,#7dd3fc,#8b5cf6);display:grid;place-items:center;color:#050506;font-weight:800}.brand b{font-size:25px;font-weight:800;letter-spacing:-.04em}.home{width:44px;height:44px;border-radius:50%;background:#1b2029;color:#fff;display:grid;place-items:center;border:0;cursor:pointer;font-size:22px}.tabs{display:grid;grid-template-columns:repeat(5,1fr);background:#1b1f27;border-radius:17px;overflow:hidden;margin-bottom:14px}.tabs button{border:0;background:transparent;color:#777;padding:12px 4px;font-size:11px;font-weight:700}.tabs .on{background:#343742;color:#fff}.card,.now,.done,.old{background:#1b1e25;border:1px solid rgba(255,255,255,.08);border-radius:22px;padding:14px}.assets{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}.add,.thumb{height:104px;border-radius:15px;background:#101319;border:1px solid rgba(255,255,255,.07);overflow:hidden;position:relative}.add{display:grid;place-items:center;text-align:center;font-weight:700}.add input{position:absolute;inset:0;opacity:0}.add b{display:block;font-size:34px;font-weight:600}.add span{font-size:13px;color:#aaa}.thumb img{width:100%;height:100%;object-fit:cover}.thumb small{position:absolute;left:7px;bottom:7px;background:rgba(0,0,0,.65);border-radius:8px;padding:3px 6px;font-size:11px}.thumb .remove{position:absolute;right:6px;top:6px;width:26px;height:26px;border:0;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:18px;font-weight:900;line-height:1;display:grid;place-items:center}.thumbOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}.thumbSpin{width:26px;height:26px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#8ed8ff;animation:s 1s linear infinite}.thumbCheck{position:absolute;left:6px;top:6px;width:22px;height:22px;border-radius:50%;background:#22c55e;color:#04240f;font-size:13px;font-weight:900;display:grid;place-items:center;line-height:1}.thumbFail{background:rgba(127,29,29,.55);flex-direction:column;gap:6px}.thumbFailMark{width:26px;height:26px;border-radius:50%;background:#ef4444;color:#fff;font-size:15px;font-weight:900;display:grid;place-items:center;line-height:1}.thumbOverlay .retry{border:0;border-radius:999px;background:#fff;color:#050506;font-size:10px;font-weight:800;padding:4px 9px;cursor:pointer}#uploadProgress{font-size:12px;color:#9ca3af;line-height:1.7;margin:-2px 0 12px}.audioRef{display:none;margin:0 0 12px;background:#101319;border:1px solid rgba(142,216,255,.2);border-radius:15px;padding:12px}.audioRefTop{display:flex;gap:10px;align-items:center}.audioPick{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:118px;border-radius:12px;background:#202631;padding:11px 13px;font-size:13px;font-weight:800}.audioPick input{position:absolute;inset:0;opacity:0}.audioInfo{min-width:0;flex:1}.audioName{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:800}.audioNote{color:#8b93a1;font-size:11px;line-height:1.5;margin-top:3px}.audioHelp{margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,.07);color:#aeb4bf;font-size:11px;line-height:1.65}.audioRemove{display:none;width:32px;height:32px;border:0;border-radius:50%;background:#2b303a;color:#fff;font-size:18px}.prompt{background:#111319;border:1px solid rgba(255,255,255,.07);border-radius:18px;overflow:hidden}textarea{width:100%;min-height:178px;border:0;background:transparent;color:#fff;padding:16px;font-size:16px;line-height:1.65;outline:0;resize:vertical;font-weight:500}textarea::placeholder{color:#666}.tools{display:flex;gap:14px;border-top:1px solid rgba(255,255,255,.06);padding:11px 14px}.tools button{border:0;background:transparent;color:#bbb;font-weight:700}.tools button:last-child{margin-left:auto}.settings{margin-top:12px;background:#1b1e25;border:1px solid rgba(255,255,255,.08);border-radius:17px;overflow:hidden}summary{list-style:none;padding:16px 18px;font-weight:800;display:flex;justify-content:space-between}summary:after{content:'⌄';font-size:24px}.settings[open] summary:after{transform:rotate(180deg)}.settingsBody{padding:0 14px 14px;display:grid;gap:10px}.field label{display:block;color:#999;font-size:12px;margin-bottom:6px;font-weight:700}.field select{width:100%;background:#0e1117;color:#fff;border:1px solid rgba(255,255,255,.1);border-radius:13px;padding:12px}.create{width:100%;border:0;border-radius:18px;margin-top:16px;padding:18px 14px;background:linear-gradient(90deg,#eee8ff,#8ed8ff);font-size:21px;font-weight:800;color:#050506}.create:disabled{opacity:.55}.mini{display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:12px;color:#777;font-size:12px}.pill{display:inline-flex;background:rgba(134,239,172,.08);border:1px solid rgba(134,239,172,.25);color:#dcfce7;border-radius:999px;padding:7px 10px;font-weight:800}.pill.bad{background:rgba(251,113,133,.1);border-color:rgba(251,113,133,.3);color:#fecdd3}.now,.done{display:none;margin-top:16px}.show{display:block}.row{display:flex;justify-content:space-between;align-items:center}.spin{width:22px;height:22px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#8ed8ff;animation:s 1s linear infinite}@keyframes s{to{transform:rotate(360deg)}}.bar{height:8px;background:#0d1015;border-radius:999px;overflow:hidden;margin-top:12px}.bar span{display:block;height:100%;width:42%;background:linear-gradient(90deg,#fff,#8ed8ff,#8b5cf6);animation:m 1.2s ease-in-out infinite alternate}@keyframes m{to{transform:translateX(138%)}}.pt-bar{height:5px;background:#0d1015;border-radius:999px;overflow:hidden;margin-top:8px}.pt-bar span{display:block;height:100%;width:40%;background:linear-gradient(90deg,#fff,#8ed8ff,#8b5cf6);border-radius:999px;animation:pt-slide 1.4s ease-in-out infinite alternate}@keyframes pt-slide{from{transform:translateX(0)}to{transform:translateX(150%)}}@media(prefers-reduced-motion:reduce){.pt-bar span{animation:none;transform:translateX(75%)}}.job{margin-top:9px;color:#777;font-size:11px;word-break:break-all}.log{display:none!important}.done video{width:100%;max-height:420px;background:#000;border-radius:16px}.head,.section{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.icons{display:flex;gap:8px;margin-top:10px}.icon{width:43px;height:38px;border:0;border-radius:12px;background:#2b303a;color:#fff;text-decoration:none;display:grid;place-items:center;font-size:18px}.section{margin:22px 2px 10px}.section h2{font-size:17px;margin:0;font-weight:800}.section button{border:1px solid rgba(255,255,255,.08);background:#1b2029;color:#fff;border-radius:13px;padding:8px 10px;font-weight:700}.history{display:grid;gap:12px;background:#050b12}.oldTop{margin-bottom:9px;color:#aaa;font-weight:700}.empty{border:1px dashed rgba(255,255,255,.1);border-radius:18px;padding:18px;text-align:center;color:#888}#pendingSection{margin-top:20px}@media(min-width:620px){.assets{grid-template-columns:repeat(5,1fr)}.settingsBody{grid-template-columns:1fr 1fr}}.drawer{position:fixed;inset:0;z-index:20;display:none}.drawer.open{display:block}.shade{position:absolute;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(8px)}.menu{position:absolute;right:12px;top:12px;width:min(340px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.08);border-radius:28px;background:#000;padding:18px}.menuHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.menuClose{border:0;background:rgba(255,255,255,.08);color:#fff;border-radius:50%;width:38px;height:38px;font-size:24px;cursor:pointer}.menu a{display:flex;justify-content:space-between;color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.045);border-radius:18px;padding:15px;margin-top:8px;font-weight:500;font-size:14px}.menu .logout{border-color:rgba(251,113,133,.28)!important;background:rgba(251,113,133,.08)!important}
 
 #history{display:grid;gap:14px}#history .old{padding:12px;border-radius:20px;display:grid;gap:10px;background:#13161e;border:1px solid rgba(255,255,255,.09)}#history .fv-prompt-wrap{min-width:0}#history .fv-prompt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:#c8cad6;font-weight:700;line-height:1.4;font-size:14px;cursor:pointer;-webkit-user-select:none;user-select:none}#history .fv-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;color:#6b7280;font-size:11px;font-weight:700}#history .fv-chip{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:2px 7px;background:rgba(255,255,255,.04)}#history .fv-chip-mode{background:rgba(139,92,246,.18);border-color:rgba(139,92,246,.4);color:#c4b5fd}#history .fv-video-frame{width:100%;height:168px!important;max-height:168px!important;background:#050506;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}#history .fv-video-frame video{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;background:#000;border-radius:0;display:block;pointer-events:none}#history .fv-expand-btn{position:absolute;bottom:8px;right:8px;width:30px;height:30px;border:0;border-radius:8px;background:rgba(0,0,0,.62);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);color:rgba(255,255,255,.9);font-size:14px;display:grid;place-items:center;cursor:pointer;z-index:1;-webkit-tap-highlight-color:transparent}#history .fv-actions-row{display:flex;gap:7px}#history .fv-action{flex:1;height:36px;min-width:0;border:0;border-radius:10px;background:#1e2230;color:#b8bcc8;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:700;padding:0 10px;cursor:pointer;white-space:nowrap}#history .fv-action svg{flex-shrink:0;opacity:.8}#history .fv-fav-btn.on{background:rgba(251,191,36,.14);color:#fde68a;border:1px solid rgba(251,191,36,.22)}#history .fv-delete-one{background:transparent;color:#fca5a5;border:1px solid rgba(251,113,133,.3)}#history .fv-save[disabled]{opacity:.5}@media(max-width:520px){#history .fv-video-frame{height:168px!important}#history .old{padding:10px}#history .fv-actions-row{gap:5px}#history .fv-action{font-size:11px;padding:0 8px;gap:4px}}
@@ -67,10 +68,11 @@
 <div class="assets" id="assets"><label class="add"><input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple><div><b>＋</b><span id="assetsLabel">画像追加</span></div></label></div>
 <div id="uploadProgress" style="display:none"></div>
 <div class="audioRef" id="audioReference"><div class="audioRefTop"><label class="audioPick"><input id="audioFile" type="file" accept="audio/mpeg,.mp3"><span>♪ 曲を添付</span></label><div class="audioInfo"><div class="audioName" id="audioName">MP3・最大15MB</div><div class="audioNote" id="audioNote">Seedance 2.5・1080pで@audio1として使用します</div></div><button class="audioRemove" id="audioRemove" type="button" aria-label="音源を削除">×</button></div><div class="audioSyncChoice" id="audioSyncChoice" role="radiogroup" aria-label="音源の合わせ方"><div class="audioSyncOption"><label><input type="radio" name="audioSyncMode" value="singing" checked>歌唱に合わせる</label><button class="audioSyncInfoButton" type="button" aria-label="歌唱に合わせるの説明" aria-controls="audioSyncInfo" aria-expanded="false" onclick="toggleAudioSyncInfo('singing',this)">ⓘ</button></div><div class="audioSyncOption"><label><input type="radio" name="audioSyncMode" value="rhythm">リズム・雰囲気に合わせる</label><button class="audioSyncInfoButton" type="button" aria-label="リズム・雰囲気に合わせるの説明" aria-controls="audioSyncInfo" aria-expanded="false" onclick="toggleAudioSyncInfo('rhythm',this)">ⓘ</button></div><div class="audioSyncInfo" id="audioSyncInfo" role="status" aria-live="polite"></div></div><div class="audioHelp">曲を添付しただけではクレジットは消費されません。動画と同じ長さに切り出したMP3がおすすめです。長い曲を添付して「何秒から」と指定すると、使用位置がずれる場合があります。</div></div>
+<div class="danceRef" id="danceReference"><div class="danceRefTop"><label class="dancePick"><input id="danceFile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov"><span>♬ ダンス動画</span></label><div class="danceInfo"><div class="danceName" id="danceName">MP4／MOV・4〜15秒・最大50MB</div><div class="danceNote" id="danceNote">運営専用BETA</div></div><button class="danceRetry" id="danceRetry" type="button">再検査</button><button class="danceRemove" id="danceRemove" type="button" aria-label="参考動画を削除">×</button></div><label class="danceRights"><input type="checkbox" id="danceTrim">15秒を超える場合は先頭15秒を使う（元動画は変更しません・最大60秒）</label><label class="danceRights"><input id="danceRights" type="checkbox"><span>自分で作成した動画、または使用許可のある動画です。実在人物へのなりすましには使用しません。</span></label><div class="danceHelp">動画の音声は削除し、動き・テンポ・カメラをMotion Controlで参照します。生成尺と縦横比は参考動画に従い、結果は無音です。人物画像を1枚以上追加してください。</div></div>
 <div class="prompt"><textarea id="prompt" placeholder="キャラクター、商品、シーン、動きを入力してください。"></textarea></div>
-<details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5-standard">Seedance 2.5（Premium以上）</option><option value="bytedance/seedance-2.5">Seedance 2.5 Turbo（Premium以上）</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
+<details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5-standard">Seedance 2.5</option><option value="bytedance/seedance-2.5">Seedance 2.5 Turbo</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
 <button class="create" id="create">作成する ✦ 80</button>
-<div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="planWarning" style="display:none;margin-top:10px;background:rgba(232,203,116,.07);border:1px solid rgba(232,203,116,.28);border-radius:14px;padding:12px 16px;color:#f4d98d;font-size:13px;font-weight:700;line-height:1.6">Seedance 2.5・1080p・曲アップロードはPremium以上で利用できます。<br><a href="./pricing.html#monthly" style="color:#fff;text-decoration:underline">プランを見る →</a></div><div id="seedance25Promo" style="display:none;margin-top:10px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.24);border-radius:14px;padding:12px 16px;color:#cceeff;font-size:12px;font-weight:700;line-height:1.7">公開記念価格（期間限定）<br>Seedance 2.5 Turbo・1080p：15秒 300クレジット／30秒 600クレジット<br><span style="color:#9ca3af;font-weight:500">終了前にサイト内でお知らせします。</span></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
+<div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="planWarning" style="display:none;margin-top:10px;background:rgba(232,203,116,.07);border:1px solid rgba(232,203,116,.28);border-radius:14px;padding:12px 16px;color:#f4d98d;font-size:13px;font-weight:700;line-height:1.6">通常のSeedance 2.5生成は購入クレジットまたは対象の有効なサブスクで利用できます。単体購入はウォーターマーク付きです。曲アップロード・Seedance 2.5の絵コンテは有効なPremium以上のサブスクが必要です。<br><a href="./pricing.html#monthly" style="color:#fff;text-decoration:underline">プランを見る →</a></div><div id="seedance25Promo" style="display:none;margin-top:10px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.24);border-radius:14px;padding:12px 16px;color:#cceeff;font-size:12px;font-weight:700;line-height:1.7">公開記念価格（期間限定）<br>Seedance 2.5 Turbo・1080p：15秒 300クレジット／30秒 600クレジット<br><span style="color:#9ca3af;font-weight:500">終了前にサイト内でお知らせします。</span></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
 <div class="mini"></div>
 <pre class="log" id="log"></pre>
 </section>
@@ -125,6 +127,7 @@
   <p style="color:#9ca3af;font-size:12px;line-height:1.7;margin:0 0 14px">過去の動画から素材を選ぶと編集リストに追加されます。同じ動画を何度でも追加でき、最大6クリップまでつなげられます。</p>
   <div id="veLoading" style="display:none;color:#888;font-size:13px;padding:16px 0;text-align:center"><div class="spin" style="margin:0 auto 10px"></div>読み込み中…</div>
   <div id="veEmpty" class="empty" style="display:none">編集できる動画がまだありません。</div>
+  <div id="veWatermarkPending" style="display:none;margin:12px 0;color:#c8cad6">透かし付きの仕上げが必要な動画があります。<a href="./profile.html" style="color:#9fcaff">マイページの履歴で「透かし付きで仕上げる」</a>を押してから、編集一覧を開き直してください。</div>
   <div id="veList" class="history"></div>
 
   <div class="section"><h2 style="font-size:15px">編集リスト</h2></div>
@@ -164,15 +167,9 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="./auth-config.js?v=4a1f0c1"></script>
+<script src="./auth-guard.js?v=2"></script>
 <script>
-(async function(){
-  try{
-    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
-    if(!client){location.href='./login.html';return}
-    const{data}=await client.auth.getSession();
-    if(!data?.session){location.href='./login.html';return}
-  }catch(_){location.href='./login.html'}
-})();
+window.FlowVidAuthGuard.requireConfirmedUser(window.flowvidSupabaseClient?.());
 </script>
 <script src="./flowvid-history.js?v=112"></script>
 <script src="./flowvid-open-inline.js?v=3"></script>
@@ -213,18 +210,26 @@ let uploadQueueRunning=false;
 let imgAsset=null;
 let imgUploadRunning=false;
 let audioAsset=null;
+let referenceDanceAccess=false;
+let referenceDanceAccessPending=true;
+let referenceDanceAsset=null;
 let generationRequestInFlight=false;
 let activePlan='free';
 let seedance25Access=false;
-const SEEDANCE_25_ALLOWED_PLANS=['premium','ultimate','team','scale'];
+let referenceAudioAccess=false;
+let storyboard25Access=false;
+let generationAccessLoaded=false;
+let generationAccessRequest=0;
 // mode(image_to_video/reference_to_video)に応じた「現在表示・判定対象の画像リスト」を返す。
 // updateCreditUi()/updateUploadProgressUi()/start()の状態チェックで共通利用する。
 function currentModeAssetList(){return mode==='image_to_video'?(imgAsset?[imgAsset]:[]):assets}
-function canUseReferenceAudio(){return seedance25Access&&isSeedance25Model($('model')?.value)&&$('resolution')?.value==='1080p'&&mode!=='image_to_video'&&mode!=='video_edit'}
+function canUseReferenceAudio(){return referenceAudioAccess&&isSeedance25Model($('model')?.value)&&$('resolution')?.value==='1080p'&&mode!=='image_to_video'&&mode!=='video_edit'}
 function getReferenceAudioSyncMode(){return document.querySelector('input[name="audioSyncMode"]:checked')?.value==='rhythm'?'rhythm':'singing'}
 const AUDIO_SYNC_INFO={singing:'歌ってるキャラクターが映る動画向けです。曲の歌詞・メロディ・歌声をできるだけそのまま保ち、キャラクターの口の動きや表情を曲に同期させます。',rhythm:'歌ってる人が映らない、ダンスやアクション動画向けです。歌詞の再現よりも、曲のビート・強拍・展開に合わせて、動き・カメラワーク・カット割りを合わせます。'};
 function toggleAudioSyncInfo(kind,button){const panel=$('audioSyncInfo');if(!panel)return;const alreadyOpen=panel.style.display==='block'&&panel.dataset.kind===kind;document.querySelectorAll('.audioSyncInfoButton').forEach(el=>el.setAttribute('aria-expanded','false'));if(alreadyOpen){panel.style.display='none';panel.textContent='';panel.dataset.kind='';return}panel.textContent=AUDIO_SYNC_INFO[kind]||'';panel.dataset.kind=kind;panel.style.display=panel.textContent?'block':'none';if(panel.textContent)button?.setAttribute('aria-expanded','true')}
-function syncReferenceAudioUi(){const panel=$('audioReference');if(!panel)return;const relevant=$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode!=='image_to_video'&&mode!=='video_edit';panel.style.display=(relevant||audioAsset)?'block':'none';const usable=canUseReferenceAudio();$('audioFile').disabled=!usable||audioAsset?.status==='uploading'||generationRequestInFlight;$('audioRemove').style.display=audioAsset&&audioAsset.status!=='uploading'&&!generationRequestInFlight?'block':'none';$('audioName').textContent=audioAsset?.name||'MP3・最大15MB';const syncChoice=$('audioSyncChoice');if(syncChoice)syncChoice.style.display=audioAsset?.status==='completed'?'grid':'none';document.querySelectorAll('input[name="audioSyncMode"]').forEach(input=>{input.disabled=generationRequestInFlight});if(audioAsset?.status==='uploading')$('audioNote').textContent='音源を安全にアップロード中…';else if(audioAsset?.status==='completed')$('audioNote').textContent=generationRequestInFlight?'生成受付中・音源を安全に保持しています':'添付完了・プロンプトでは @audio1 として指定できます';else if(audioAsset?.status==='failed')$('audioNote').textContent=audioAsset.error||'アップロードに失敗しました';else if(!seedance25Access)$('audioNote').textContent='曲アップロードはPremium以上で利用できます';else $('audioNote').textContent=usable?'Seedance 2.5 Turbo・1080pで@audio1として使用します':'音源を使うには解像度を1080pにしてください'}
+function syncReferenceAudioUi(){const panel=$('audioReference');if(!panel)return;const relevant=$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode!=='image_to_video'&&mode!=='video_edit';panel.style.display=(relevant||audioAsset)?'block':'none';const usable=canUseReferenceAudio();$('audioFile').disabled=!usable||audioAsset?.status==='uploading'||generationRequestInFlight;$('audioRemove').style.display=audioAsset&&audioAsset.status!=='uploading'&&!generationRequestInFlight?'block':'none';$('audioName').textContent=audioAsset?.name||'MP3・最大15MB';const syncChoice=$('audioSyncChoice');if(syncChoice)syncChoice.style.display=audioAsset?.status==='completed'?'grid':'none';document.querySelectorAll('input[name="audioSyncMode"]').forEach(input=>{input.disabled=generationRequestInFlight});if(audioAsset?.status==='uploading')$('audioNote').textContent='音源を安全にアップロード中…';else if(audioAsset?.status==='completed')$('audioNote').textContent=generationRequestInFlight?'生成受付中・音源を安全に保持しています':'添付完了・プロンプトでは @audio1 として指定できます';else if(audioAsset?.status==='failed')$('audioNote').textContent=audioAsset.error||'アップロードに失敗しました';else if(!referenceAudioAccess)$('audioNote').textContent='曲アップロードは有効なPremium以上のサブスクで利用できます';else $('audioNote').textContent=usable?'Seedance 2.5 Turbo・1080pで@audio1として使用します':'音源を使うには解像度を1080pにしてください';if(typeof syncReferenceDanceUi==='function')syncReferenceDanceUi()}
+function canUseReferenceDance(){return referenceDanceAccess&&$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode==='reference_to_video'&&['480p','720p'].includes($('resolution')?.value)&&!sbLocked&&!!$('danceRights')?.checked}
+function syncReferenceDanceUi(){if($('danceTrim'))$('danceTrim').disabled=generationRequestInFlight||['uploading','checking','ready'].includes(referenceDanceAsset?.status);const panel=$('danceReference');if(!panel)return;const relevant=referenceDanceAccess&&$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode==='reference_to_video';panel.style.display=(relevant||referenceDanceAsset)?'block':'none';const busy=['uploading','checking'].includes(referenceDanceAsset?.status)||generationRequestInFlight;const usable=canUseReferenceDance();$('danceFile').disabled=!usable||busy;$('danceRights').disabled=busy||!!referenceDanceAsset;$('danceRetry').style.display=referenceDanceAsset?.status==='failed'&&referenceDanceAsset?.retryable&&referenceDanceAsset?.id&&!generationRequestInFlight?'block':'none';$('danceRemove').style.display=referenceDanceAsset&&!busy?'block':'none';$('danceName').textContent=referenceDanceAsset?.name||'MP4／MOV・4〜15秒・最大50MB';if(referenceDanceAsset?.status==='uploading')$('danceNote').textContent='非公開領域へアップロード中…';else if(referenceDanceAsset?.status==='checking')$('danceNote').textContent='形式・長さ・安全性を検査中…';else if(referenceDanceAsset?.status==='ready')$('danceNote').textContent=generationRequestInFlight?'生成受付中・参考動画を保持しています':`検査完了・${(Number(referenceDanceAsset.durationMs||0)/1000).toFixed(3)}秒${referenceDanceAsset.trimApplied?'（先頭15秒を使用）':''}・Motion Controlで動きを参照します`;else if(referenceDanceAsset?.status==='failed')$('danceNote').textContent=referenceDanceAsset.error||'参考動画を利用できません';else if(!referenceDanceAccess)$('danceNote').textContent='運営専用BETA';else if(!$('danceRights')?.checked)$('danceNote').textContent='権利確認にチェックすると選択できます';else if(!['480p','720p'].includes($('resolution')?.value))$('danceNote').textContent='参考動画BETAは480p・720pに対応しています';else $('danceNote').textContent=usable?'人物画像を追加してから生成してください':'Seedance 2.5 Turboのリファレンスタブで利用できます'}
 let sbFile=null;
 let sbResizedBase64='';
 let sbLocked=false;
@@ -236,11 +241,23 @@ function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt
 function modeName(m){return m==='text_to_video'?'テキストから動画':m==='image_to_video'?'画像から動画':m==='storyboard'?'絵コンテ':'リファレンス'}
 function notice(t,b=false){}
 function log(x,b=false){}
-function getPlan(){return localStorage.getItem('flowvidPlan')||localStorage.getItem('plan')||'free'}
-function isPaid(){return /^(paid|pro|premium|business|creator)$/i.test(getPlan())}
-function hasActiveSeedance25Plan(plan,expiresAt){const normalized=String(plan||'free').toLowerCase();const expiresMs=Date.parse(String(expiresAt||''));return SEEDANCE_25_ALLOWED_PLANS.includes(normalized)&&Number.isFinite(expiresMs)&&expiresMs>Date.now()}
-function syncSeedance25PlanUi(){const selectedModel=$('model')?.value;const isSeedance25=isSeedance25Model(selectedModel);const locked=isSeedance25&&!seedance25Access;const warning=$('planWarning');if(warning)warning.style.display=locked?'block':'none';const promo=$('seedance25Promo');if(promo)promo.style.display=selectedModel===SEEDANCE_25_TURBO_MODEL&&$('resolution')?.value==='1080p'?'block':'none';syncReferenceAudioUi();updateCreditUi();if(typeof sbSyncPlanAccess==='function')sbSyncPlanAccess()}
-async function loadGenerationPlan(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return;if(!window.__flowvidUserClient)window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return;const[profileResult,balanceResult]=await Promise.all([window.__flowvidUserClient.from('profiles').select('plan').eq('id',user.id).maybeSingle(),window.__flowvidUserClient.from('credit_balances').select('subscription_expires_at').eq('user_id',user.id).maybeSingle()]);if(profileResult.error||balanceResult.error)return;activePlan=String(profileResult.data?.plan||'free').toLowerCase();seedance25Access=hasActiveSeedance25Plan(activePlan,balanceResult.data?.subscription_expires_at);localStorage.setItem('flowvidPlan',activePlan)}finally{syncSeedance25PlanUi()}}
+function canUseSelectedSeedance25(){return sbLocked?storyboard25Access:seedance25Access}
+function syncSeedance25PlanUi(){const selectedModel=$('model')?.value;const isSeedance25=isSeedance25Model(selectedModel);const locked=isSeedance25&&!canUseSelectedSeedance25();const warning=$('planWarning');if(warning)warning.style.display=locked?'block':'none';const promo=$('seedance25Promo');if(promo)promo.style.display=selectedModel===SEEDANCE_25_TURBO_MODEL&&$('resolution')?.value==='1080p'?'block':'none';syncReferenceAudioUi();syncReferenceDanceUi();updateCreditUi();if(typeof sbSyncPlanAccess==='function')sbSyncPlanAccess()}
+async function loadGenerationPlan(){
+  const request=++generationAccessRequest;
+  seedance25Access=false;referenceAudioAccess=false;storyboard25Access=false;generationAccessLoaded=false;
+  try{
+    const token=await getToken();if(!token)return false;
+    const response=await fetch('/api/credit-access',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+    const data=await response.json();
+    if(request!==generationAccessRequest)return false;
+    if(!response.ok||data?.ok!==true)return false;
+    seedance25Access=data.seedance25===true;
+    referenceAudioAccess=data.referenceAudio===true;storyboard25Access=data.storyboard25===true;generationAccessLoaded=true;
+    return true;
+  }catch(_){return false}
+  finally{if(request===generationAccessRequest)syncSeedance25PlanUi()}
+}
 // 絵コンテ確定プレビュー中(sbLocked)は、内部modeが一時的にreference_to_videoになっていても
 // 通常タブの下書き(referenceUrls/prompt_<mode>)へは一切書き込まない。絵コンテタブ選択中
 // (mode==='storyboard')も同様に、タブ選択状態(d.mode)だけは記録しつつ画像・プロンプトは
@@ -269,7 +286,8 @@ function clearAcceptedGenerationInputs(submission){
   }
   const currentAssetIds=currentModeAssetList().map(a=>a.id);
   const currentAudioId=typeof audioAsset==='undefined'?'':(audioAsset?.id||'');
-  const inputsUnchanged=mode===submission.mode&&promptEl?.value===submission.rawPrompt&&JSON.stringify(currentAssetIds)===JSON.stringify(submission.assetIds)&&currentAudioId===(submission.audioId||'');
+  const currentReferenceDanceId=typeof referenceDanceAsset==='undefined'?'':(referenceDanceAsset?.id||'');
+  const inputsUnchanged=mode===submission.mode&&promptEl?.value===submission.rawPrompt&&JSON.stringify(currentAssetIds)===JSON.stringify(submission.assetIds)&&currentAudioId===(submission.audioId||'')&&currentReferenceDanceId===(submission.referenceDanceId||'');
   if(!inputsUnchanged)return;
   const draftAfterSubmit=readDraft();
   promptEl.value='';
@@ -291,6 +309,7 @@ function clearAcceptedGenerationInputs(submission){
   localStorage.setItem(DRAFT_KEY,JSON.stringify(draftAfterSubmit));
   if(imagesCleared&&$('file'))$('file').value='';
   if(submission.audioId&&typeof audioAsset!=='undefined'&&audioAsset?.id===submission.audioId){audioAsset=null;if($('audioFile'))$('audioFile').value='';syncReferenceAudioUi()}
+  if(submission.referenceDanceId&&typeof referenceDanceAsset!=='undefined'&&referenceDanceAsset?.id===submission.referenceDanceId){referenceDanceAsset=null;if($('danceFile'))$('danceFile').value='';if($('danceRights'))$('danceRights').checked=false;syncReferenceDanceUi()}
   if(imagesCleared||submission.mode==='text_to_video')renderAssets();
 }
 const SEEDANCE_25_TURBO_MODEL='bytedance/seedance-2.5';
@@ -309,6 +328,7 @@ function creditEstimate(){const duration=Number($('duration')?.value||5);const r
   // 通常のリファレンスタブは画像の内容にかかわらず実際のアップロード完了枚数(urls.length)、
   // image_to_videoは1枚、text_to_videoは0枚とする。
   const refs=mode==='text_to_video'?0:(sbLocked?1:(mode==='image_to_video'?1:urls.length));
+  if(referenceDanceAsset?.status==='ready'&&canUseReferenceDance()){const billableReferenceSeconds=Number(referenceDanceAsset.billableSeconds||0);return Math.ceil((((($('resolution').value==='480p'?22:44)*billableReferenceSeconds)*11/12))/5)*5}
   const seedance25Pricing=SEEDANCE_25_PRICING[model];if(seedance25Pricing){const creditsPerSecond=seedance25Pricing.creditsPerSecond[resolution]||seedance25Pricing.creditsPerSecond['720p'];return roundUpToFive(duration*creditsPerSecond,seedance25Pricing.maxCredits);}const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12),maxCredits);let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);}
 function updateCreditUi(){
   const c=creditEstimate();
@@ -322,12 +342,14 @@ function updateCreditUi(){
     const imageMode=!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video');
     const list=currentModeAssetList();
     const blockedByAudio=!!audioAsset&&(!canUseReferenceAudio()||audioAsset.status!=='completed');
+    const blockedByDance=(!!referenceDanceAsset&&(!canUseReferenceDance()||referenceDanceAsset.status!=='ready'))||($('model')?.value===SEEDANCE_25_TURBO_MODEL&&$('resolution')?.value==='480p'&&referenceDanceAsset?.status!=='ready');
     const blockedByImage=imageMode&&(list.some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed')||list.filter(a=>a.status==='completed').length===0);
-    if(isSeedance25Model($('model')?.value)&&!seedance25Access){
+    if(isSeedance25Model($('model')?.value)&&!canUseSelectedSeedance25()){
       btn.disabled=true;
-      btn.textContent='Premium以上で利用できます';
+      btn.textContent=sbLocked?'絵コンテは有効なPremium以上が必要です':'購入クレジットまたは対象サブスクが必要です';
     }else{
       btn.disabled=blockedByAudio||blockedByImage;
+      if(blockedByDance)btn.disabled=true;
       btn.textContent='作成する ✦ '+c;
     }
   }
@@ -342,9 +364,12 @@ function ensureGenerationModelOptions(){
 function syncSelectModelCapabilities(modelId,durationId,resolutionId,aspectId){
   const is25=isSeedance25Model(modelId);
   const isTurbo=modelId===SEEDANCE_25_TURBO_MODEL;
+  const danceForm=resolutionId==='resolution'&&!sbLocked&&mode==='reference_to_video';
+  const dance480=danceForm&&referenceDanceAccess;
+  const preservePending480=danceForm&&referenceDanceAccessPending;
   const isStandard=modelId===SEEDANCE_25_STANDARD_MODEL;
   const durationEl=$(durationId);if(durationEl){const current=Number(durationEl.value);const allowed=is25?Array.from({length:27},(_,i)=>i+4):[5,8,10,15];durationEl.replaceChildren(...allowed.map(sec=>{const option=document.createElement('option');option.value=String(sec);option.textContent=sec+'秒';return option}));durationEl.value=String(allowed.includes(current)?current:5)}
-  const resolutionEl=$(resolutionId);if(resolutionEl){const opt1080=Array.from(resolutionEl.options).find(o=>o.value==='1080p');if(opt1080){opt1080.disabled=isStandard;opt1080.hidden=isStandard}const opt480=Array.from(resolutionEl.options).find(o=>o.value==='480p');if(opt480){opt480.disabled=isTurbo;opt480.hidden=isTurbo}if((isTurbo&&resolutionEl.value==='480p')||(isStandard&&resolutionEl.value==='1080p'))resolutionEl.value='720p'}
+  const resolutionEl=$(resolutionId);if(resolutionEl){const opt1080=Array.from(resolutionEl.options).find(o=>o.value==='1080p');if(opt1080){opt1080.disabled=isStandard;opt1080.hidden=isStandard}const opt480=Array.from(resolutionEl.options).find(o=>o.value==='480p');if(opt480){opt480.disabled=isTurbo&&!dance480;opt480.hidden=isTurbo&&!dance480}if((isTurbo&&!dance480&&!preservePending480&&resolutionEl.value==='480p')||(isStandard&&resolutionEl.value==='1080p'))resolutionEl.value='720p'}
   const aspectEl=$(aspectId);if(aspectEl){const optWide=Array.from(aspectEl.options).find(o=>o.value==='21:9');if(optWide){optWide.disabled=!is25;optWide.hidden=!is25}if(!is25&&aspectEl.value==='21:9')aspectEl.value='16:9'}
 }
 function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?.value||'';return r==='1080p'&&(m==='bytedance/seedance-2.0-fast'||m==='bytedance/seedance-2.0-lite')&&mode==='reference_to_video'}
@@ -394,7 +419,7 @@ function setMode(m){
     $('file').multiple=m==='reference_to_video';
     const savedPrompt=readDraft()['prompt_'+m]||'';
     $('prompt').value=savedPrompt;
-    syncReferenceAudioUi();updateCreditUi();syncComboWarning();
+    syncReferenceAudioUi();syncReferenceDanceUi();updateCreditUi();syncComboWarning();
     renderAssets();
   }
   localStorage.setItem('flowvidGenerateMode',m);
@@ -737,7 +762,22 @@ function failed(d){const s=String(d?.jobStatus||d?.status||d?.response?.status||
 function normalizeHistoryItem(it){const url=it?.url||it?.video_url||it?.video_uri||it?.src||'';if(!/^https?:\/\//.test(url))return null;if(/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(url))return null;return{url,prompt:String(it.prompt||it.settings?.prompt||'').trim(),mode:it.mode||mode,jobId:it.jobId||it.job_id||'',createdAt:it.createdAt||it.created_at||new Date().toISOString()}}
 function save(item){const current=JSON.parse(localStorage.getItem('flowvidHistory')||'[]').map(normalizeHistoryItem).filter(Boolean);const next=normalizeHistoryItem(item);if(next&&!current.some(v=>v.url===next.url))current.unshift(next);localStorage.setItem('flowvidHistory',JSON.stringify(current.slice(0,20)))}
 
-async function getToken(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return '';if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data}=await window.__flowvidUserClient.auth.getSession();return data?.session?.access_token||''}catch(_){return ''}}
+async function getToken(){return window.FlowVidAuthGuard.getVerifiedToken(window.flowvidSupabaseClient?.())}
+
+async function restoreLatestReferenceDance(){
+  if(!referenceDanceAccess||referenceDanceAsset)return;
+  try{
+    const token=await getToken();if(!token)return;
+    const response=await fetch('/api/reference-dance-latest',{headers:{Authorization:'Bearer '+token}});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok||!data?.asset?.id||referenceDanceAsset)return;
+    const ready=data.asset.status==='ready';
+    referenceDanceAsset={id:data.asset.id,status:ready?'ready':'failed',name:data.asset.name||'前回の参考動画',durationMs:Number(data.asset.durationMs||0),billableSeconds:Number(data.asset.billableSeconds||0),retryable:!ready,error:ready?'':'前回の参考動画を保持しています。15秒を超える場合は「先頭15秒を使う」にチェックしてから再検査してください。'};
+    if($('danceRights'))$('danceRights').checked=true;
+    syncReferenceDanceUi();updateCreditUi();
+  }catch(_){}
+}
+async function loadReferenceDanceAccess(){try{const token=await getToken();if(!token)return;const response=await fetch('/api/reference-dance-access',{headers:{Authorization:'Bearer '+token}});const data=await response.json().catch(()=>({}));referenceDanceAccess=response.ok&&data.allowed===true;if(referenceDanceAccess)await restoreLatestReferenceDance()}catch(_){referenceDanceAccess=false}finally{referenceDanceAccessPending=false;syncComboWarning();syncReferenceDanceUi();updateCreditUi()}}
 
 async function uploadReferenceAudio(file){
   if(!file)return;
@@ -763,12 +803,81 @@ async function uploadReferenceAudio(file){
 async function deleteReferenceAudioPath(path){if(!path)return false;try{const token=await getToken();if(!token)return false;const response=await fetch('/api/reference-audio-delete',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({path})});return response.ok}catch(_){return false}}
 function removeReferenceAudio(){if(audioAsset?.status==='uploading'||generationRequestInFlight)return;const path=audioAsset?.path||'';audioAsset=null;if($('audioFile'))$('audioFile').value='';syncReferenceAudioUi();updateCreditUi();if(path)deleteReferenceAudioPath(path)}
 
+async function deleteReferenceDanceAsset(assetId){if(!assetId)return false;try{const token=await getToken();if(!token)return false;const response=await fetch('/api/reference-dance-delete',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({assetId})});return response.ok}catch(_){return false}}
+async function confirmReferenceDanceAsset(){
+  if(!referenceDanceAsset?.id||referenceDanceAsset.status==='checking'||generationRequestInFlight)return false;
+  referenceDanceAsset.status='checking';referenceDanceAsset.error='';syncReferenceDanceUi();updateCreditUi();
+  try{
+    const token=await getToken();if(!token){location.href='./login.html';return false}
+    const response=await fetch('/api/reference-dance-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({assetId:referenceDanceAsset.id,allowBoundaryTrim:$('danceTrim')?.checked===true})});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok||!data.ok||data.status!=='ready'){const failure=new Error(data.message||data.error||'参考動画を安全に確認できませんでした');failure.retryable=data.retryable===true||data.error==='reference_video_checking';throw failure}
+    referenceDanceAsset.status='ready';referenceDanceAsset.trimApplied=data.trimApplied===true||data.boundaryTrimmed===true;referenceDanceAsset.durationMs=Number(data.durationMs||0);referenceDanceAsset.billableSeconds=Number(data.billableSeconds||0);referenceDanceAsset.retryable=false;syncReferenceDanceUi();updateCreditUi();return true;
+  }catch(error){referenceDanceAsset.status='failed';referenceDanceAsset.retryable=error?.retryable!==false;referenceDanceAsset.error=error?.message||'参考動画を利用できません';syncReferenceDanceUi();updateCreditUi();return false}
+}
+async function uploadReferenceDance(file){
+  if(!file||generationRequestInFlight||['uploading','checking'].includes(referenceDanceAsset?.status))return;
+  const type=String(file.type||'').toLowerCase();
+  if(!['video/mp4','video/quicktime'].includes(type)&&!/[.](mp4|mov)$/.test(String(file.name||'').toLowerCase())){referenceDanceAsset={status:'failed',name:file.name||'参考動画',error:'MP4またはMOV形式の動画を選択してください'};syncReferenceDanceUi();updateCreditUi();return}
+  if(file.size<=0||file.size>50*1024*1024){referenceDanceAsset={status:'failed',name:file.name||'参考動画',error:'参考動画は50MB以下にしてください'};syncReferenceDanceUi();updateCreditUi();return}
+  if(!canUseReferenceDance()){syncReferenceDanceUi();updateCreditUi();return}
+  const previous=referenceDanceAsset?.status==='ready'?{...referenceDanceAsset}:null;
+  referenceDanceAsset={id:'',status:'uploading',name:file.name||'参考動画',billableSeconds:0,error:''};syncReferenceDanceUi();updateCreditUi();
+  try{
+    const token=await getToken();if(!token){location.href='./login.html';return}
+    const urlResponse=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({filename:file.name,contentType:type||'video/mp4',byteSize:file.size,rightsConfirmed:true})});
+    const urlData=await urlResponse.json().catch(()=>({}));
+    if(!urlResponse.ok||!urlData.ok||!urlData.assetId||!urlData.path||!urlData.token)throw new Error(urlData.message||urlData.error||'参考動画のアップロードを開始できませんでした');
+    referenceDanceAsset.id=urlData.assetId;
+    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;if(!client)throw new Error('Supabase接続情報が未設定です');
+    const{error}=await client.storage.from(urlData.bucket).uploadToSignedUrl(urlData.path,urlData.token,file,{contentType:'video/mp4'});if(error)throw error;
+    const confirmed=await confirmReferenceDanceAsset();if(!confirmed){if(previous&&!referenceDanceAsset?.retryable){const failedId=referenceDanceAsset?.id||'';referenceDanceAsset=previous;syncReferenceDanceUi();updateCreditUi();if(failedId&&failedId!==previous.id)deleteReferenceDanceAsset(failedId)}return}
+    if(previous?.id&&previous.id!==referenceDanceAsset.id)deleteReferenceDanceAsset(previous.id);
+  }catch(error){const failedId=referenceDanceAsset?.id||'';if(previous)referenceDanceAsset=previous;else{referenceDanceAsset.status='failed';referenceDanceAsset.retryable=false;referenceDanceAsset.error=error?.message||'参考動画を利用できません'}if(failedId&&failedId!==previous?.id)deleteReferenceDanceAsset(failedId)}
+  syncReferenceDanceUi();updateCreditUi();
+}
+function removeReferenceDance(){if(['uploading','checking'].includes(referenceDanceAsset?.status)||generationRequestInFlight)return;const assetId=referenceDanceAsset?.id||'';referenceDanceAsset=null;if($('danceFile'))$('danceFile').value='';if($('danceRights'))$('danceRights').checked=false;syncReferenceDanceUi();updateCreditUi();if(assetId)deleteReferenceDanceAsset(assetId)}
+
 async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return null;if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return null;const{data}=await window.__flowvidUserClient.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',user.id).maybeSingle();return Number(data?.free_credits||0)+Number(data?.subscription_credits||0)+Number(data?.purchased_credits||0)}catch(_){return null}}
 
 function showCreditShortage(needed,balance){const el=$('creditStatus');if(!el)return;const shortage=needed-balance;el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><div style="color:#fca5a5;font-weight:800;font-size:15px">クレジットが足りません</div><button type="button" onclick="hideCreditStatus()" aria-label="閉じる" style="background:none;border:none;color:#9ca3af;font-size:20px;line-height:1;cursor:pointer;padding:0 4px;flex-shrink:0">×</button></div><div style="color:#d1d5db;font-size:13px;line-height:1.9;margin-bottom:12px">必要: '+needed+' cr<br>現在: '+balance+' cr<br>不足: '+shortage+' cr</div><a href="./pricing.html#credit" style="display:inline-block;background:linear-gradient(90deg,#eee8ff,#8ed8ff);color:#050506;border-radius:12px;padding:10px 18px;font-weight:800;text-decoration:none;font-size:14px">クレジットを購入 →</a>';el.style.display='block';setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50)}
 function hideCreditStatus(){const el=$('creditStatus');if(el)el.style.display='none'}
 
-async function start(){if(isSeedance25Model($('model')?.value)&&!seedance25Access){syncSeedance25PlanUi();$('planWarning')?.scrollIntoView({behavior:'smooth',block:'nearest'});return}if(audioAsset&&(!canUseReferenceAudio()||audioAsset.status!=='completed'))return;if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&currentModeAssetList().some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;persistDraft();hideCreditStatus();if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return;}const rawPrompt=$('prompt').value;const prompt=rawPrompt.trim();if(!prompt)return;const hasRequiredImage=mode==='text_to_video'?true:(sbLocked?!!sbGenerationImageUrl:(mode==='image_to_video'?!!(imgAsset&&imgAsset.status==='completed'&&imgAsset.url):!!urls.length));if(!hasRequiredImage)return;if($('create').disabled||generationRequestInFlight)return;$('create').disabled=true;const token=await getToken();if(!token){location.href='./login.html';return}const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){$('create').disabled=false;showCreditShortage(c,balance);return}const tmpId='tmp_'+Date.now();_activePtId=tmpId;const uiMode=sbLocked?'storyboard':mode;_ptInsertCard({id:tmpId,prompt,mode,ui_mode:uiMode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};if(sbLocked)body.ui_origin='storyboard';if(audioAsset?.status==='completed'){body.reference_audio_paths=[audioAsset.path];body.reference_audio_sync_mode=getReferenceAudioSyncMode()}if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}const submission={mode,rawPrompt,storyboardLocked:sbLocked,storyboardImageUrl:sbLocked?sbGenerationImageUrl:'',assetIds:sbLocked?[]:currentModeAssetList().map(a=>a.id),audioId:audioAsset?.id||''};generationRequestInFlight=true;syncReferenceAudioUi();try{const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}_ptShowAccepted(realId);_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl,ui_mode:uiMode});clearAcceptedGenerationInputs(submission);loadPendingTasks()}catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}finally{generationRequestInFlight=false;syncReferenceAudioUi()}}
+async function start(){
+  if(isSeedance25Model($('model')?.value)&&!canUseSelectedSeedance25()){syncSeedance25PlanUi();$('planWarning')?.scrollIntoView({behavior:'smooth',block:'nearest'});return}
+  if(audioAsset&&(!canUseReferenceAudio()||audioAsset.status!=='completed'))return;
+  if(referenceDanceAsset&&(!canUseReferenceDance()||referenceDanceAsset.status!=='ready'))return;
+  if(!sbLocked&&(mode==='image_to_video'||mode==='reference_to_video')&&currentModeAssetList().some(a=>a.status==='pending'||a.status==='uploading'||a.status==='failed'))return;
+  persistDraft();hideCreditStatus();
+  if(isComboBlocked()){const el=$('comboWarning');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'nearest'});}return}
+  const rawPrompt=$('prompt').value;const prompt=rawPrompt.trim();if(!prompt)return;
+  const hasRequiredImage=mode==='text_to_video'?true:(sbLocked?!!sbGenerationImageUrl:(mode==='image_to_video'?!!(imgAsset&&imgAsset.status==='completed'&&imgAsset.url):!!urls.length));if(!hasRequiredImage)return;
+  if($('create').disabled||generationRequestInFlight)return;$('create').disabled=true;
+  const token=await getToken();if(!token){location.href='./login.html';return}
+  const c=updateCreditUi();const balance=await getBalance();if(balance!==null&&balance<c){$('create').disabled=false;showCreditShortage(c,balance);return}
+  const tmpId='tmp_'+Date.now();_activePtId=tmpId;const uiMode=sbLocked?'storyboard':mode;
+  _ptInsertCard({id:tmpId,prompt,mode,ui_mode:uiMode,aspect_ratio:$('aspect')?.value||'9:16',duration_seconds:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',created_at:new Date().toISOString(),_sending:true});
+  const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};
+  if(sbLocked)body.ui_origin='storyboard';
+  if(audioAsset?.status==='completed'){body.reference_audio_paths=[audioAsset.path];body.reference_audio_sync_mode=getReferenceAudioSyncMode()}
+  if(referenceDanceAsset?.status==='ready'){body.reference_video_asset_id=referenceDanceAsset.id;body.reference_video_rights_confirmed=true}
+  if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';
+  if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}
+  const submission={mode,rawPrompt,storyboardLocked:sbLocked,storyboardImageUrl:sbLocked?sbGenerationImageUrl:'',assetIds:sbLocked?[]:currentModeAssetList().map(a=>a.id),audioId:audioAsset?.id||'',referenceDanceId:referenceDanceAsset?.id||''};
+  generationRequestInFlight=true;syncReferenceAudioUi();syncReferenceDanceUi();
+  try{
+    const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});const data=await res.json();
+    if(res.status===401){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}
+    if(res.status===402){$('create').disabled=false;_ptRemove(tmpId);_activePtId='';const _bal=data?.balance!=null?data.balance:(await getBalance()??0);showCreditShortage(data?.required||c,_bal);return}
+    const jobId=data.jobId||extractJobId(data.response)||extractJobId(data)||'';const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data)||'';
+    if(jobId)localStorage.setItem('flowvidLastSeedanceJobId',jobId);if(pollingUrl)localStorage.setItem('flowvidLastSeedancePollingUrl',pollingUrl);
+    const realId=data.taskId||jobId||tmpId;if(realId!==tmpId){_ptUpdateCardId(tmpId,realId);_activePtId=realId;}$('create').disabled=false;
+    if(!res.ok){const errMsg=(data?.message||data?.error)||('生成開始に失敗しました（'+res.status+'）');_ptFail(_activePtId,errMsg,data?.refunded===true);_activePtId='';return}
+    if(!jobId&&!pollingUrl){_ptFail(_activePtId,'生成IDを取得できませんでした。しばらくしてからリロードしてください。',undefined);_activePtId='';return}
+    _ptShowAccepted(realId);_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl,ui_mode:uiMode});clearAcceptedGenerationInputs(submission);loadPendingTasks();
+  }catch(e){$('create').disabled=false;_ptFail(_activePtId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}
+  finally{generationRequestInFlight=false;syncReferenceAudioUi()}
+}
 
 
 function restoreDraft(){draft=readDraft();const p=draft['prompt_'+mode]||'';if(p)$('prompt').value=p;[['model',draft.model],['aspect',draft.aspect],['duration',draft.duration],['resolution',draft.resolution]].forEach(([id,val])=>{if($(id)&&val)$(id).value=val});setAssetsFromUrls(Array.isArray(draft.referenceUrls)?draft.referenceUrls.filter(Boolean):urls)}
@@ -1069,7 +1178,7 @@ function veApplyDeleteRange(clipId){
   veSelected.splice(idx,1,front,back);
   veRenderList();veRenderBar();
 }
-async function veLoadVideos(){$('veLoading').style.display='block';$('veList').innerHTML='';$('veEmpty').style.display='none';$('veError').style.display='none';$('veResult').style.display='none';$('veProcessing').style.display='none';const token=await getToken();if(!token){location.href='./login.html';return}try{const res=await fetch('/api/generated-videos?limit=50',{headers:{'Authorization':'Bearer '+token}});if(res.status===401){location.href='./login.html';return}const data=await res.json();veVideos=(data.rows||[]).filter(r=>r.video_url&&r.status==='completed');veRenderList()}catch(_){$('veEmpty').style.display='block';$('veEmpty').textContent='読み込みに失敗しました。もう一度お試しください。'}finally{$('veLoading').style.display='none'}}
+async function veLoadVideos(){$('veWatermarkPending').style.display='none';$('veLoading').style.display='block';$('veList').innerHTML='';$('veEmpty').style.display='none';$('veError').style.display='none';$('veResult').style.display='none';$('veProcessing').style.display='none';const token=await getToken();if(!token){location.href='./login.html';return}try{const res=await fetch('/api/generated-videos?limit=50',{headers:{'Authorization':'Bearer '+token}});if(res.status===401){location.href='./login.html';return}const data=await res.json();if(!res.ok||data?.ok===false)throw new Error('history_unavailable');$('veWatermarkPending').style.display=Array.isArray(data.watermarkPending)&&data.watermarkPending.length?'block':'none';veVideos=(data.rows||[]).filter(r=>r.video_url&&r.status==='completed');veRenderList()}catch(_){$('veEmpty').style.display='block';$('veEmpty').textContent='読み込みに失敗しました。もう一度お試しください。'}finally{$('veLoading').style.display='none'}}
 
 // ---- スライダーUI同期・プレビューシーク（veSelectedが正本、DOMは都度同期）----
 function veUpdateSliderDom(card,clip){if(!card||!clip)return;const dur=clip.duration||5;const startInput=card.querySelector('.ve-range-start');const endInput=card.querySelector('.ve-range-end');const bar=card.querySelector('[data-ve-range-bar]');const startLbl=card.querySelector('[data-ve-start-label]');const endLbl=card.querySelector('[data-ve-end-label]');const durLbl=card.querySelector('[data-ve-dur-label]');const startOnTop=clip.start>dur/2;if(startInput){startInput.max=String(dur);startInput.value=String(clip.start);startInput.style.zIndex=startOnTop?'3':'2'}if(endInput){endInput.max=String(dur);endInput.value=String(clip.end);endInput.style.zIndex=startOnTop?'2':'3'}if(bar){const sp=dur>0?clip.start/dur*100:0;const ep=dur>0?clip.end/dur*100:100;bar.style.left=sp+'%';bar.style.right=(100-ep)+'%'}if(startLbl)startLbl.textContent=veFmtTime(clip.start);if(endLbl)endLbl.textContent=veFmtTime(clip.end);if(durLbl)durLbl.textContent='使用: '+veFmtTime(clip.end-clip.start)}
@@ -1214,6 +1323,10 @@ $('assets').addEventListener('click',e=>{
 $('file').onchange=e=>addAssets(e.target.files);
 $('audioFile').onchange=e=>uploadReferenceAudio(e.target.files?.[0]);
 $('audioRemove').onclick=removeReferenceAudio;
+$('danceFile').onchange=e=>uploadReferenceDance(e.target.files?.[0]);
+$('danceRemove').onclick=removeReferenceDance;
+$('danceRetry').onclick=confirmReferenceDanceAsset;
+$('danceRights').onchange=()=>{syncReferenceDanceUi();updateCreditUi()};
 let generationStartGuard=false;
 async function guardedStart(){
   if(generationStartGuard)return;
@@ -1248,7 +1361,7 @@ if(!sbRestored){
   // 最初からvideo_editへ復元する。
   if(q==='video_edit'){onVideoEditTab()}else{setMode(['image_to_video','text_to_video','storyboard','reference_to_video'].includes(q)?q:'text_to_video')}
 }
-renderAssets();syncReferenceAudioUi();updateCreditUi();syncComboWarning();loadGenerationPlan();
+renderAssets();syncReferenceAudioUi();syncReferenceDanceUi();updateCreditUi();syncComboWarning();loadGenerationPlan();loadReferenceDanceAccess();
 
 // ---- pending tasks ----
 const _pendingPollers={};
@@ -1353,10 +1466,10 @@ function sbUpdateCreditEstimate(){
 // 生成前に同じ組み合わせを防ぐ。1080p固定でプロンプトを作成した後に
 // 生成側で弾かれる事態を避ける。
 function sbSyncPlanAccess(){
-  const locked=isSeedance25Model($('sbModel')?.value)&&!seedance25Access;
+  const locked=isSeedance25Model($('sbModel')?.value)&&!storyboard25Access;
   const btn=$('sbAnalyzeBtn');
   if(!btn)return;
-  if(locked){btn.disabled=true;btn.textContent='Seedance 2.5はPremium以上で利用できます'}
+  if(locked){btn.disabled=true;btn.textContent='Seedance 2.5の絵コンテは有効なPremium以上で利用できます'}
   else if(!btn.textContent.includes('作成中')){btn.disabled=!sbFile;btn.textContent='プロンプトを作る ✦'}
 }
 function sbSyncResolutionLock(){
@@ -1428,7 +1541,7 @@ function sbResizeToBase64(dataUrl){
 
 $('sbAnalyzeBtn').onclick=async()=>{
   if(!sbFile)return;
-  if(isSeedance25Model($('sbModel')?.value)&&!seedance25Access){sbSyncPlanAccess();return}
+  if(isSeedance25Model($('sbModel')?.value)&&!storyboard25Access){sbSyncPlanAccess();return}
   const token=await getToken();
   if(!token){location.href='./login.html';return}
   $('sbNotice').style.display='none';

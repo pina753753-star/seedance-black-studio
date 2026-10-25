@@ -11,33 +11,24 @@ function hasSeedance25PlanAccess(plan, subscriptionExpiresAt, nowMs = Date.now()
 }
 
 async function getSeedance25Entitlement(db, userId) {
-  let profileResult;
-  let balanceResult;
-  try {
-    [profileResult, balanceResult] = await Promise.all([
-      db.from('profiles').select('plan').eq('id', userId).maybeSingle(),
-      db.from('credit_balances').select('subscription_expires_at').eq('user_id', userId).maybeSingle()
-    ]);
-  } catch (_) {
-    return { ok: false, allowed: false, plan: 'free', error: 'plan_lookup_failed' };
-  }
+  const { getCreditAccess } = require('./credit-access');
+  const access = await getCreditAccess(db, userId, { paidPlans: SEEDANCE_25_ALLOWED_PLANS });
+  if (!access.ok) return { ok: false, allowed: false, plan: 'free', error: access.error };
+  return access;
+}
 
-  if (profileResult?.error || balanceResult?.error || !profileResult || !balanceResult) {
-    return { ok: false, allowed: false, plan: 'free', error: 'plan_lookup_failed' };
-  }
-
-  const plan = String(profileResult.data?.plan || 'free').trim().toLowerCase();
-  const subscriptionExpiresAt = balanceResult.data?.subscription_expires_at || null;
-  return {
-    ok: true,
-    allowed: hasSeedance25PlanAccess(plan, subscriptionExpiresAt),
-    plan,
-    subscriptionExpiresAt
-  };
+// Add-on features keep the original subscription-only gate. Purchase access
+// applies to normal generation models, not independent audio or storyboard.
+async function getSeedance25SubscriptionEntitlement(db, userId) {
+  const { readSubscriptionAccess } = require('./credit-access');
+  const access = await readSubscriptionAccess(db, userId);
+  if (!access.ok) return { ok: false, allowed: false, plan: 'free', error: access.error };
+  return { ...access, allowed: access.accountStatus === 'active' && hasSeedance25PlanAccess(access.plan, access.subscriptionExpiresAt) };
 }
 
 module.exports = {
   SEEDANCE_25_ALLOWED_PLANS,
   hasSeedance25PlanAccess,
-  getSeedance25Entitlement
+  getSeedance25Entitlement,
+  getSeedance25SubscriptionEntitlement
 };

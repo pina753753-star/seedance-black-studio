@@ -1,3 +1,4 @@
+const { readSubscriptionAccess, taskRequiresWatermark } = require('./_lib/credit-access');
 'use strict';
 
 /**
@@ -117,23 +118,24 @@ async function reconcileTask(db, task) {
 
   const rawVideoUrl = findVideoUrl(data);
   if (!rawVideoUrl) return { state: 'processing', providerStatus: status, resultPending: true };
-  const storage = await persistVideo({ jobId: task.api_task_id, videoUrl: rawVideoUrl, apiKey: WAVESPEED_API_KEY });
+  const access = typeof task.settings?.watermark_required === 'boolean'
+    ? null : await readSubscriptionAccess(db, task.user_id);
+  const isFreeUser = taskRequiresWatermark(task, access);
+  const storage = await persistVideo({ jobId: task.api_task_id, videoUrl: rawVideoUrl, apiKey: WAVESPEED_API_KEY, ephemeralRaw: isFreeUser });
   if (!storage?.ok || !storage.videoUrl) return { state: 'retry', error: storage?.error || 'video_persist_failed' };
 
-  const PAID_PLANS = ['standard', 'premium', 'ultimate', 'team', 'scale'];
-  const { data: profile } = await db.from('profiles').select('plan').eq('id', task.user_id).maybeSingle();
-  const isFreeUser = !profile || !PAID_PLANS.includes(profile.plan);
   let responseVideoUrl = storage.videoUrl;
 
   if (isFreeUser) {
     const watermark = await applyWatermark(db, task, storage.videoUrl);
+    await require('./seedance-status')._reconcileHelpers.cleanupWatermarkInput(storage);
     if (!watermark.ok) return watermark.final
       ? { state: 'failed', refunded: watermark.refunded }
       : { state: 'processing', watermarkPending: true };
     responseVideoUrl = watermark.watermarkedUrl;
   }
 
-  const completed = await processFinalCredits(db, task.api_task_id, null, storage.videoUrl);
+  const completed = await processFinalCredits(db, task.api_task_id, null, storage.videoUrl, isFreeUser ? responseVideoUrl : null);
   if (!completed) {
     const { data: currentTask, error: currentTaskError } = await db.from('generation_tasks')
       .select('status')
@@ -159,7 +161,7 @@ async function handler(req, res) {
   if (!db) return res.status(500).json({ ok: false, error: 'Missing Supabase configuration' });
 
   const { data: tasks, error } = await db.from('generation_tasks')
-    .select('id,user_id,status,api_task_id,polling_url,created_at')
+    .select('id,user_id,status,api_task_id,polling_url,created_at,settings')
     .eq('api_provider', 'wavespeed')
     .in('status', ['queued', 'processing'])
     .order('created_at', { ascending: true })

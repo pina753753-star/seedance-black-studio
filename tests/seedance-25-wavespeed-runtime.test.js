@@ -24,7 +24,7 @@ try {
   Module._load = originalLoad;
 }
 
-const { buildWaveSpeedPayload, resolveWaveSpeedModel } = startHandler._test;
+const { buildWaveSpeedPayload, buildWaveSpeedMotionControlPayload, resolveWaveSpeedModel } = startHandler._test;
 const {
   normalizeStatus, isCompletedStatus, isFailedStatus, findVideoUrl,
   fetchJsonWithTimeout, fetchActualProviderCost, ACTUAL_COST_FETCH_TIMEOUT_MS
@@ -86,6 +86,30 @@ test('WaveSpeed image-to-video payload uses only the first image', () => {
   });
   assert.equal(payload.image, 'https://example.com/first.png');
   assert.equal('reference_images' in payload, false);
+});
+
+test('Motion Control uses the dedicated endpoint and exact video/image schema', () => {
+  const payload = buildWaveSpeedMotionControlPayload({
+    providerPrompt: 'match the movement',
+    resolution: '720p',
+    referenceVideoUrl: 'https://storage.example.com/dance.mp4?token=secret',
+    frameImages: [],
+    inputReferences: [],
+    firstFrameUrl: '',
+    referenceUrl: 'https://example.com/character.png',
+    referenceUrls: [{ image_url: { url: 'https://example.com/character.png' } }]
+  });
+  assert.deepEqual(payload, {
+    video: 'https://storage.example.com/dance.mp4?token=secret',
+    reference_images: ['https://example.com/character.png'],
+    prompt: 'match the movement',
+    resolution: '720p',
+    generate_audio: false
+  });
+  assert.equal('duration' in payload, false);
+  assert.equal('aspect_ratio' in payload, false);
+  assert.equal('reference_videos' in payload, false);
+  assert.equal(resolveWaveSpeedModel('bytedance/seedance-2.5', 'reference_to_video', true), 'bytedance/seedance-2.5/motion-control');
 });
 
 test('standard and Turbo resolve to different WaveSpeed endpoints for every generation mode', () => {
