@@ -26,7 +26,37 @@ app.use(express.json({ limit: '64kb' }));
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+// Optional overlap is temporary: remove WATERMARK_SECRET_PREVIOUS after callers
+// have migrated. A previous secret alone must never enable the worker.
 const WATERMARK_SECRET = process.env.WATERMARK_SECRET || '';
+const WATERMARK_SECRET_PREVIOUS = process.env.WATERMARK_SECRET_PREVIOUS || '';
+const workerSecretDigest = (secret) => typeof secret === 'string' && secret.trim()
+  ? crypto.createHash('sha256').update(secret, 'utf8').digest() : null;
+const workerCurrentDigest = workerSecretDigest(WATERMARK_SECRET);
+const workerPreviousDigest = workerSecretDigest(WATERMARK_SECRET_PREVIOUS);
+
+function authorizeWorkerRequest(req, res, unauthorizedError = 'Unauthorized') {
+  if (!workerCurrentDigest) {
+    res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
+    return false;
+  }
+  const header = req.headers?.authorization;
+  const match = typeof header === 'string' ? /^Bearer[ \t]+(\S+)[ \t]*$/i.exec(header) : null;
+  if (!match) {
+    res.status(401).json({ ok: false, error: unauthorizedError });
+    return false;
+  }
+  const candidate = crypto.createHash('sha256').update(match[1], 'utf8').digest();
+  // Hashes have equal lengths. Always compare both slots (including a dummy
+  // current slot when overlap is disabled), without short-circuiting on a match.
+  const currentMatches = crypto.timingSafeEqual(candidate, workerCurrentDigest);
+  const previousMatches = crypto.timingSafeEqual(candidate, workerPreviousDigest || workerCurrentDigest);
+  if (!(currentMatches || (workerPreviousDigest !== null && previousMatches))) {
+    res.status(401).json({ ok: false, error: unauthorizedError });
+    return false;
+  }
+  return true;
+}
 const PORT = process.env.PORT || 3000;
 
 // ---- concurrency guard shared by /watermark and /edit ----
@@ -271,11 +301,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/watermark', async (req, res) => {
-  if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
-  const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  if (auth !== WATERMARK_SECRET) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized' });
-  }
+  if (!authorizeWorkerRequest(req, res)) return;
   const { videoUrl } = req.body || {};
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'videoUrl is required' });
   if (!isAllowedWatermarkUrl(videoUrl, SUPABASE_URL)) {
@@ -715,11 +741,7 @@ async function runEditJob({ clips, transition, transitionDuration, ownerSegment,
 }
 
 app.post('/edit', async (req, res) => {
-  if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
-  const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  if (auth !== WATERMARK_SECRET) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized' });
-  }
+  if (!authorizeWorkerRequest(req, res)) return;
 
   const { clips, transition = 'cut', transitionDuration, userId, taskId } = req.body || {};
 
@@ -1065,9 +1087,7 @@ app.post('/reference-dance-inspect', async (req, res) => {
   // This endpoint also fails closed when the shared secret is missing;
   // it must never become public because it reads private
   // user uploads through the service role.
-  if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
-  const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-  if (auth !== WATERMARK_SECRET) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+  if (!authorizeWorkerRequest(req, res, 'UNAUTHORIZED')) return;
   const { userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim } = req.body || {};
   let acquired = false;
   try {

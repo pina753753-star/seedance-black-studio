@@ -16,7 +16,7 @@ const TASK_ID = '11111111-1111-4111-8111-111111111111';
 // Execute the real route handlers in isolation. No packages are installed,
 // no socket is opened, and network, storage and ffmpeg calls fail the test.
 // Only the expensive worker functions are replaced with controlled fixtures.
-function loadServer(secret, workerOverrides = {}) {
+function loadServer(secret, workerOverrides = {}, previousSecret) {
   const routes = new Map();
   const jobs = [];
   const sideEffects = [];
@@ -38,6 +38,7 @@ function loadServer(secret, workerOverrides = {}) {
   ffmpeg.ffprobe = forbidden('ffprobe');
   const env = { SUPABASE_URL: 'https://unit-test.supabase.co' };
   if (secret !== undefined) env.WATERMARK_SECRET = secret;
+  if (previousSecret !== undefined) env.WATERMARK_SECRET_PREVIOUS = previousSecret;
   const workers = {
     watermark: async (videoUrl) => ({ ok: true, watermarkedUrl: `${CLIP_URL}?watermarked=1` }),
     edit: async (job) => ({ ok: true, videoUrl: `${CLIP_URL}?edited=1` }),
@@ -203,3 +204,66 @@ test('runtime configuration selects the verified Node 24 security release', () =
   assert.match(dockerfile, /^FROM node:24\.22\.1-bookworm-slim\n/);
   assert.equal(pkg.engines.node, '>=24.22.1 <25');
 });
+
+const ROTATED_SECRET = 'synthetic-new-secret-with-different-length';
+const rotationBodies = {
+  '/watermark': { videoUrl: CLIP_URL },
+  '/edit': { clips: [{ videoUrl: CLIP_URL }], userId: TASK_ID, taskId: TASK_ID },
+  '/reference-dance-inspect': { userId: TASK_ID, assetId: TASK_ID, stagingPath: 'fixture' }
+};
+for (const [route, body] of Object.entries(rotationBodies)) {
+  test(`${route}: current and previous secret both reach the existing worker during overlap`, async () => {
+    for (const token of [ROTATED_SECRET, SECRET]) {
+      const server = loadServer(ROTATED_SECRET, {}, SECRET);
+      const result = await server.request(route, { authorization: `Bearer ${token}`, body });
+      assert.equal(result.status, 200);
+      assert.equal(server.jobs.length, 1);
+      assert.deepEqual(server.sideEffects, []);
+      assert.equal(server.activeJobs(), 0);
+    }
+  });
+  test(`${route}: missing, empty or whitespace current secret fails closed even with previous configured`, async () => {
+    for (const current of [undefined, '', '   ']) {
+      const server = loadServer(current, {}, SECRET);
+      const result = await server.request(route, { authorization: `Bearer ${SECRET}`, forbidBodyRead: true });
+      assert.equal(result.status, 503);
+      assert.deepEqual(server.jobs, []);
+      assert.deepEqual(server.sideEffects, []);
+      assert.equal(server.activeJobs(), 0);
+    }
+  });
+  test(`${route}: retiring previous secret rejects old callers before work while new callers remain valid`, async () => {
+    for (const previous of [undefined, '', '   ']) {
+      const server = loadServer(ROTATED_SECRET, {}, previous);
+      assert.equal((await server.request(route, { authorization: `Bearer ${SECRET}`, forbidBodyRead: true })).status, 401);
+      assert.equal(server.jobs.length, 0);
+      assert.equal((await server.request(route, { authorization: `Bearer ${ROTATED_SECRET}`, body })).status, 200);
+    }
+  });
+  test(`${route}: rollback to old current secret remains possible without enabling arbitrary tokens`, async () => {
+    const server = loadServer(SECRET, {}, ROTATED_SECRET);
+    for (const token of [SECRET, ROTATED_SECRET]) {
+      assert.equal((await server.request(route, { authorization: `Bearer ${token}`, body })).status, 200);
+    }
+    const retired = loadServer(SECRET);
+    assert.equal((await retired.request(route, { authorization: `Bearer ${ROTATED_SECRET}`, forbidBodyRead: true })).status, 401);
+    assert.equal((await retired.request(route, { authorization: `Bearer ${SECRET}`, body })).status, 200);
+  });
+  test(`${route}: malformed and incorrect credentials never reach body, queues or external work`, async () => {
+    const server = loadServer(ROTATED_SECRET, {}, SECRET);
+    for (const authorization of [undefined, '', SECRET, `Basic ${SECRET}`, 'Bearer ',
+      'Bearer wrong', `Bearer ${SECRET} extra`, `Bearer ${SECRET},${ROTATED_SECRET}`,
+      `Bearer ${SECRET.slice(0, -1)}`, `Bearer ${SECRET}x`, ['Bearer', SECRET]]) {
+      const result = await server.request(route, { authorization, forbidBodyRead: true });
+      assert.equal(result.status, 401);
+      assert.equal(JSON.stringify(result).includes(SECRET), false);
+    }
+    assert.deepEqual(server.jobs, []);
+    assert.deepEqual(server.sideEffects, []);
+    assert.equal(server.activeJobs(), 0);
+  });
+  test(`${route}: identical overlap keys and case-insensitive Bearer scheme remain valid`, async () => {
+    const server = loadServer(SECRET, {}, SECRET);
+    assert.equal((await server.request(route, { authorization: `bearer ${SECRET}`, body })).status, 200);
+  });
+}
