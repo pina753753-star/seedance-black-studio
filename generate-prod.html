@@ -166,15 +166,9 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="./auth-config.js?v=4a1f0c1"></script>
+<script src="./auth-guard.js?v=2"></script>
 <script>
-(async function(){
-  try{
-    const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;
-    if(!client){location.href='./login.html';return}
-    const{data}=await client.auth.getSession();
-    if(!data?.session){location.href='./login.html';return}
-  }catch(_){location.href='./login.html'}
-})();
+window.FlowVidAuthGuard.requireConfirmedUser(window.flowvidSupabaseClient?.());
 </script>
 <script src="./flowvid-history.js?v=112"></script>
 <script src="./flowvid-open-inline.js?v=3"></script>
@@ -748,7 +742,7 @@ function failed(d){const s=String(d?.jobStatus||d?.status||d?.response?.status||
 function normalizeHistoryItem(it){const url=it?.url||it?.video_url||it?.video_uri||it?.src||'';if(!/^https?:\/\//.test(url))return null;if(/openrouter\.ai\/api\/v1\/videos\/[^/?#]+\/?(?:[?#].*)?$/i.test(url))return null;return{url,prompt:String(it.prompt||it.settings?.prompt||'').trim(),mode:it.mode||mode,jobId:it.jobId||it.job_id||'',createdAt:it.createdAt||it.created_at||new Date().toISOString()}}
 function save(item){const current=JSON.parse(localStorage.getItem('flowvidHistory')||'[]').map(normalizeHistoryItem).filter(Boolean);const next=normalizeHistoryItem(item);if(next&&!current.some(v=>v.url===next.url))current.unshift(next);localStorage.setItem('flowvidHistory',JSON.stringify(current.slice(0,20)))}
 
-async function getToken(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return '';if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data}=await window.__flowvidUserClient.auth.getSession();return data?.session?.access_token||''}catch(_){return ''}}
+async function getToken(){return window.FlowVidAuthGuard.getVerifiedToken(window.flowvidSupabaseClient?.())}
 
 async function restoreLatestReferenceDance(){
   if(!referenceDanceAccess||referenceDanceAsset)return;
