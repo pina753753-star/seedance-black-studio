@@ -431,6 +431,7 @@ module.exports = async function handler(req, res) {
     // Seedance 2.0 defaults for backward compatibility.
     const options = validateVideoGenerationOptions({
       model: body.model,
+      referenceDanceRequested: Boolean(String(body.reference_video_asset_id || '').trim()),
       mode: body.mode,
       resolution: body.resolution,
       aspectRatio: body.aspect_ratio || body.aspectRatio,
@@ -469,7 +470,7 @@ module.exports = async function handler(req, res) {
       try {
         validateReferenceDanceVariant({ model, mode, resolution });
       } catch (error) {
-        return res.status(400).json({ ok: false, error: error.code || 'reference_dance_variant_not_allowed', message: '参考ダンス動画はSeedance 2.5 Turbo・リファレンス・720pで利用できます。生成尺と縦横比は参考動画に従います。' });
+        return res.status(400).json({ ok: false, error: error.code || 'reference_dance_variant_not_allowed', message: '参考ダンス動画はSeedance 2.5 Turbo・リファレンス・480p／720pで利用できます。生成尺と縦横比は参考動画に従います。' });
       }
       const adminAccess = await authorizeReferenceDanceAdmin(auth);
       if (!adminAccess.ok) {

@@ -33,7 +33,10 @@ function validateVideoGenerationOptions(input) {
   }
 
   const resolution = String(body.resolution || DEFAULT_RESOLUTION).trim() || DEFAULT_RESOLUTION;
-  if (!model.resolutions.includes(resolution)) {
+  // This admission hint never replaces the ready-asset/admin checks in seedance-start.
+  const dance480 = body.referenceDanceRequested === true && modelId === 'bytedance/seedance-2.5'
+    && mode === 'reference_to_video' && resolution === '480p';
+  if (!model.resolutions.includes(resolution) && !dance480) {
     return invalid('invalid_resolution', 'このモデルでは選択した解像度を利用できません。');
   }
 

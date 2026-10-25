@@ -107,6 +107,8 @@ function readyResponse(row) {
     durationMs: row.duration_ms,
     billableSeconds: row.billable_seconds,
     sampleCredits: referenceDanceCredits(Number(row.billable_seconds)),
+    sampleCreditsResolution: '720p',
+    sampleCreditsByResolution: { '480p': referenceDanceCredits(Number(row.billable_seconds), '480p'), '720p': referenceDanceCredits(Number(row.billable_seconds)) },
     expiresAt: row.expires_at
   };
 }
@@ -287,6 +289,8 @@ module.exports = async function handler(req, res) {
       durationMs: inspected.durationMs,
       billableSeconds: inspected.billableSeconds,
       sampleCredits: referenceDanceCredits(inspected.billableSeconds),
+      sampleCreditsResolution: '720p',
+      sampleCreditsByResolution: { '480p': referenceDanceCredits(inspected.billableSeconds, '480p'), '720p': referenceDanceCredits(inspected.billableSeconds) },
       trimApplied: railwayData.trimApplied === true || railwayData.boundaryTrimmed === true,
       durationDiagnostics: safeDurationDiagnostics(railwayData.durationDiagnostics),
       expiresAt

@@ -61,7 +61,7 @@ test('generation UI exposes standard and Turbo separately without migrating save
   assert.match(source, /const SEEDANCE_25_STANDARD_MODEL='bytedance\/seedance-2\.5-standard'/);
   assert.match(source, /const isTurbo=modelId===SEEDANCE_25_TURBO_MODEL/);
   assert.match(source, /const isStandard=modelId===SEEDANCE_25_STANDARD_MODEL/);
-  assert.match(source, /opt480\.disabled=isTurbo;opt480\.hidden=isTurbo/);
+  assert.match(source, /opt480\.disabled=isTurbo&&!dance480;opt480\.hidden=isTurbo&&!dance480/);
   assert.match(source, /opt1080\.disabled=isStandard;opt1080\.hidden=isStandard/);
   assert.match(source, /\[SEEDANCE_25_STANDARD_MODEL\]:\{maxCredits:990,creditsPerSecond:\{'480p':495\/30,'720p':990\/30\}\}/);
   assert.match(source, /\[SEEDANCE_25_TURBO_MODEL\]:\{maxCredits:600,creditsPerSecond:\{'720p':550\/30,'1080p':20\}\}/);
