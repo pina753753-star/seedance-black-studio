@@ -1,4 +1,4 @@
-# Pina Studio 状態・引き継ぎ（整理日: 2026-10-25）
+# Pina Studio 状態・引き継ぎ（整理日: 2026-10-26）
 
 [資料の入口](CLAUDE.md) / [資料マップ](docs/PROJECT-MAP.md) / [運営ロードマップ](OPERATIONS-ROADMAP.md)
 
@@ -10,21 +10,32 @@
 
 ## 配備・作業状態のスナップショット
 
-2026-10-25 23:56 UTCまでの親作業者の本番確認報告からの引き継ぎと、下記commitのローカル読み取り照合に基づく。動的な環境状態を将来も保証するものではない。再開時は対象環境・commit・SQL適用状態を再確認する。ここにある完了記録は新しい実行許可ではない。
+2026-10-26 00:38 UTCまでの親作業者の本番確認報告からの引き継ぎと、下記commitのローカル読み取り照合に基づく。動的な環境状態を将来も保証するものではない。再開時は対象環境・commit・SQL適用状態を再確認する。ここにある完了記録は新しい実行許可ではない。
 
 | 対象 | 状態 | 識別・根拠 |
 |---|---|---|
-| main / 本番フロント | **本番済み（23:54 UTC promote）** | PR #257 / main `15896a45c59c4e9755c006f8f07dde06cffc1720` / Production `dpl_DZUUvczQGG9mzEbmJNU2TepQetS6`。候補5f804とtree一致をローカル照合 |
+| main / 本番フロント | **本番済み（2026-10-26 00:36 UTC promote、READY）** | PR #259 / main `45a03f899f4cf0a37b082cc6bf55cc7bd853c6c9` / Production `dpl_X683amZWmifJYgpGcmPTDUFLFdGZ`。remote main SHAと価格・モデル差分を読み取り照合 |
 | 本番Railway worker | **本番済み**（親の反映確認） | `1ddb1c9b352d492593e9aef4bba598fea6acbf03`。MOV/明示同意trimのworker2ファイル＋境界テスト。mainと別配備 |
 | ダンス・認証Preview | **固定Preview反映済み、そのコードは新mainにも統合済み**（新本番での実認証・生成は未検証） | `fix/pina-dance-mov-trim-20261024` / `252ebef340ec98732408640502579d1e5ee1c790` |
 | 通常4モデル単体購入 | **コード・SQL・本番promote完了**。実決済E2Eは未実施 | 候補 `preview/basic-credits-20261025` / `5f804d07eb71e5b5cc3447192367c8889570e7ac` をPR #257で統合。SQL migration `20261025234952_basic_credit_access_atomic` 適用を親が確認 |
 | Previewアクセス保護 | **Preview専用Vercel認証を23:31 UTC承認・有効化済み**（親の確認） | 本番はpublic。アプリのSupabase認証とは別。設定値・秘密値は本整理で取得しない |
 | 価格表示の205→185上書き修正 | **ローカルのみ、未commit・未push・未公開** | `fix/pina-dance-credit-display-local-20261025`。基準252ebef、175テスト成功。追加公開しない |
-| この文書整理 | **ローカル文書のみ、未commit・未push・未公開** | `docs/pina-document-map-main-20261025`、基準15896a45。旧ec9190f基準の整理は別worktreeに保持。コード・DB・設定変更なし |
+| この文書整理 | **確認用draft PR #258、main未統合** | `docs/pina-document-map-main-20261025`、分岐基準15896a45。文書だけを更新しコードは取り込まない。旧ec9190f基準の整理は別worktreeに保持。コード・DB・設定変更なし |
 
 23:45 UTCの承認に基づく別タスクの完了報告：SQL migrationを適用し、`check_purchase_credit_access_locked(uuid)` と `deduct_generation_credits_atomic(uuid,uuid,integer)` の定義およびservice_roleのみ実行可能な権限を読み戻し確認。適用・rollback原本は [SQL](docs/sql/basic-credit-access-atomic.sql) / [rollback](docs/sql/basic-credit-access-rollback.sql)。本整理ではDBを照会・変更していない。
 
-親は主要5ドメインの新Production割当と、`www.pinastudio.jp` の新仕様・5パック価格・導線をブラウザ確認。23:56 UTCに一時変更したautoassignをfalseから元のtrueへ復元し、UIのchecked=trueを確認。Preview専用Vercel認証は維持、本番はpublic。既存残高・価格・返金ルール・キー・workerはこのリリースで変更なし。
+2026-10-25のPR #257反映時、親は主要5ドメインの当時のProduction割当と、`www.pinastudio.jp` の新仕様・5パック価格・導線をブラウザ確認。23:56 UTCに一時変更したautoassignをfalseから元のtrueへ復元し、UIのchecked=trueを確認。Preview専用Vercel認証は維持、本番はpublic。既存残高・価格・返金ルール・キー・workerはこのリリースで変更なし。
+
+### 現行料金・モデル制限（2026-10-26 00:38 UTC確認）
+
+- PR #259で1000クレジットパックを4,000円、3000クレジットパックを11,800円へ変更。ほかのパック・サブスク月額・既存残高・返金ルールは変更なし。キャンペーンは保留。
+- Seedance 2.0 Fastは最大720p。未対応1080pは課金前に拒否する。
+- 通常Seedance 2.0の1080pに限り、縦横比・秒数に応じる料金下限を追加。15秒の16:9／9:16は535クレジット。全モデル・全比率共通の料金ではない。
+- 価格設計はFX180円/USD、過去年額10%割引の単価、手数料および明示的な未知費用予算を前提とする。コードの下限計算はOpenRouter 5.5%、API予備費20%＋20円、Stripe 3.6%、税抜手取りを考慮。為替・実請求・追加費用の変動があるため赤字ゼロを保証しない。
+- 親は全5ドメインの割当を読み戻し、本番pricing画面の4,000円／11,800円を確認。00:38 UTCにautoassignを一時falseから元のtrueへ戻し、UIで確認。Preview専用Vercel認証は維持。
+- 今回はSQL・worker・Stripeアカウント設定・キーの追加変更なし。先のSQL migrationとworker配備は上記記録のまま。
+
+**前回本番の履歴**：2026-10-25 23:54 UTC、PR #257 / main `15896a45c59c4e9755c006f8f07dde06cffc1720` / Production `dpl_DZUUvczQGG9mzEbmJNU2TepQetS6`へ反映。候補5f804とtree一致を照合済み。上記PR #259が現在の本番であり、過去の料金記録を現行料金として使用しない。
 
 **未検証**：この新Productionでの実Authログイン後の利用、実決済、有料生成のE2E。下記の先行ダンス実テストは別時点・別フロント環境の結果であり、新Productionの購入経路を検証した証拠ではない。ダンス品質・価格表示ローカル修正・ChatGPT入口／pluginは未完。公開完了と全機能の品質・実取引検証完了を区別する。
 

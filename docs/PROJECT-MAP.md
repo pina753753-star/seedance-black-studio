@@ -1,6 +1,6 @@
 # Pina Studio 資料マップ
 
-入口は [CLAUDE.md](../CLAUDE.md)。本書は所在・責任を整理する目次であり、承認条件やアクセス権限を追加・変更しない。2026-10-25にmain ec9190fを基準として整理し、本番反映後のmain 15896a45へ文書差分のみ載せ直した。
+入口は [CLAUDE.md](../CLAUDE.md)。本書は所在・責任を整理する目次であり、承認条件やアクセス権限を追加・変更しない。2026-10-25にmain ec9190fを基準として整理し、本番反映後のmain 15896a45へ文書差分のみ載せ直した。その後のPR #259 / 本番main 45a03f8の状態を文書だけ更新。draft PR #258はmain未統合で、最新本番コードはこの文書ブランチへ取り込んでいない。
 
 ## 最初に読む順序
 
@@ -39,6 +39,10 @@
 - [本番メタデータ・反映計画](production-metadata-and-release-plan.md)
 - [単体購入のローカル設計・検証](standalone-basic-models-local.md)
 - [SQL原本](sql/basic-credit-access-atomic.sql) / [rollback原本](sql/basic-credit-access-rollback.sql)、[ローカルSQL検証](../tests/postgres/README.md)。読むことと実環境へ適用・rollbackすることは別。新しい実行許可は与えない。
+
+## 現行価格と過去資料の読み分け
+
+2026-10-26 00:36 UTCのPR #259反映が最新。1000パック4,000円／3000パック11,800円、Fast最大720p、通常2.0の1080p料金下限と費用前提は[STATUS](../STATUS.md)を参照する。上記PR #257候補資料の古い料金・未実行記述は当時の履歴であり現行仕様ではない。原本は保持し、適用対象のmain SHAと照合する。
 
 ## 状態ラベルと再開方法
 
