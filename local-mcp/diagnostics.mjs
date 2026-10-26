@@ -5,6 +5,7 @@ const categories=new Set([
  'consent_validation_failed','consent_body_failed','consent_csrf_failed',
  'consent_grant_save_failed','consent_finalize_missing','consent_finalize_failed','consent_response_failed',
  'oauth_store_read_failed','oauth_store_write_failed','oauth_store_rejected',
+ 'consent_finalize_result_missing','consent_finalize_result_failed','consent_finalize_response_failed','oauth_store_decode_failed',
  'release_handler_failed',
 ]);
 export function createDiagnosticReporter(sink=line=>console.error(line)){

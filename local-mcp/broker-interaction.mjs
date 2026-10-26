@@ -34,6 +34,14 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    if(res.headersSent||res.writableEnded){report('consent_response_failed');if(!res.writableEnded){try{res.end();}catch{}}return;}
    res.writeHead(403,{'Cache-Control':'no-store'});res.end('interaction_denied');
   };
+  // Public provider API performs the same save as interactionFinished. Keep
+  // its 303 response sequence unchanged, but distinguish save from response.
+  const finish=async result=>{
+   stage='finalize_result';
+   const returnTo=await provider.interactionResult(req,res,result,{mergeWithLastSubmission:false});
+   stage='finalize_response';
+   res.statusCode=303;res.setHeader('Location',returnTo);res.setHeader('Content-Length','0');res.end();
+  };
   try{
    const user=await verifyPinaBrowserSession(req);
    if(!user?.userId||!user.emailConfirmed||user.accountStatus!=='active')return reject();
@@ -59,7 +67,7 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    const fields=await consentFields(req);
    stage='csrf';
    if(fields.getAll('csrf').length!==1||fields.getAll('decision').length!==1||![...fields.keys()].every(k=>['csrf','decision'].includes(k))||!await verifyCsrf(fields.get('csrf'),binding,user))return reject();
-   if(fields.get('decision')==='deny'){stage='finalize';return await provider.interactionFinished(req,res,{error:'access_denied'},{mergeWithLastSubmission:false});}
+   if(fields.get('decision')==='deny'){return await finish({error:'access_denied'});}
    if(fields.get('decision')!=='allow')return reject();
    const grant=new provider.Grant({accountId:user.userId,clientId});
    const allowed=['credits:read','generation:read','generation:write'];
@@ -69,8 +77,7 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    grant.addOIDCScope(scopes.join(' '));
    stage='grant_save';
    const grantId=await grant.save();
-   stage='finalize';
-   return await provider.interactionFinished(req,res,{login:{accountId:user.userId},consent:{grantId}},{mergeWithLastSubmission:false});
-  }catch(error){report(['ERR_HTTP_HEADERS_SENT','ERR_INVALID_CHAR','ERR_HTTP_INVALID_HEADER_VALUE'].includes(error?.code)?'consent_response_failed':error instanceof errors.SessionNotFound&&['details','finalize'].includes(stage)?'consent_'+stage+'_missing':'consent_'+stage+'_failed');return reject();}
+   return await finish({login:{accountId:user.userId},consent:{grantId}});
+  }catch(error){report(['ERR_HTTP_HEADERS_SENT','ERR_INVALID_CHAR','ERR_HTTP_INVALID_HEADER_VALUE'].includes(error?.code)?'consent_response_failed':error instanceof errors.SessionNotFound&&['details','finalize_result'].includes(stage)?'consent_'+stage+'_missing':'consent_'+stage+'_failed');return reject();}
  };
 }

@@ -18,3 +18,9 @@ test('RPC failure diagnostics contain only read/write/rejected categories, never
   assert.doesNotMatch(lines.join(''),/private|sensitive|payload|token/);
  }
 });
+
+test('successful store lookup with invalid encrypted payload emits only decode classification',async()=>{
+ const lines=[];const Adapter=createPostgresBrokerAdapter({rpc:async()=>({data:{id:'private-id',payload:'invalid-private-payload'}}),key:Buffer.alloc(32,7),diagnostic:createDiagnosticReporter(x=>lines.push(x))});
+ await assert.rejects(new Adapter('Interaction').find('private-id'),{message:'OAuth state unavailable'});
+ assert.deepEqual(lines,['{"event":"pina_mcp_diagnostic","category":"oauth_store_decode_failed"}']);
+});
