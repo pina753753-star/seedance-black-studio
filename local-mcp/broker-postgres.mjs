@@ -13,7 +13,7 @@ export function createPostgresBrokerAdapter({rpc,key,diagnostic=()=>{}}){
  return class Adapter{
   constructor(kind){this.kind=kind;}
   async upsert(id,p,ttl){const i=hash(id);await call('upsert',{kind:this.kind,id:i,payload:seal(p,this.kind+':'+i),expires:Math.floor(Date.now()/1000)+(ttl??3600),grant_id:hash(p.grantId),uid:hash(p.uid),user_code:hash(p.userCode)});}
-  async lookup(op,p){const r=await call(op,{kind:this.kind,...p});return r?{...open(r.payload,this.kind+':'+r.id),...(r.consumed?{consumed:r.consumed}:{})}:undefined;}
+  async lookup(op,p){const r=await call(op,{kind:this.kind,...p});if(!r)return undefined;try{return {...open(r.payload,this.kind+':'+r.id),...(r.consumed?{consumed:r.consumed}:{})};}catch{try{diagnostic('oauth_store_decode_failed');}catch{}throw new Error('OAuth state unavailable');}}
   find(id){return this.lookup('find',{id:hash(id)});}
   findByUid(uid){return this.lookup('uid',{uid:hash(uid)});}
   findByUserCode(code){return this.lookup('user_code',{user_code:hash(code)});}
