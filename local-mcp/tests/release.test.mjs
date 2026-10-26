@@ -1,6 +1,6 @@
 import {test,before,after} from 'node:test';import assert from 'node:assert/strict';import {execFileSync} from 'node:child_process';import {readFileSync,mkdtempSync,rmSync} from 'node:fs';import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';import http from 'node:http';import {generateKeyPairSync,createHash} from 'node:crypto';
 import {createReleaseApp} from '../release-app.mjs';import {createRealDb,literal} from './real-db.mjs';import fixtureModule from './fixture.js';import {Client,StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
-const root=resolve(import.meta.dirname,'../..'),container='pina-mcp-test-release'+process.pid,origin='https://pina.example.invalid',resource=origin+'/api/mcp',clientId='chatgpt-local',redirectUri='https://chatgpt.example.invalid/callback',owner='00000000-0000-4000-8000-000000000001';let running=false,dir,db,api,app,server,socket;const clients=[];
+const root=resolve(import.meta.dirname,'../..'),container='pina-mcp-test-release'+process.pid,origin='https://pina.example.invalid',resource=origin+'/api/mcp',clientId='chatgpt-local',redirectUri='https://chatgpt.example.invalid/callback',owner='00000000-0000-4000-8000-000000000001';let running=false,dir,db,api,app,server,socket;const clients=[];let coldRequests=false,detachSocket=false,interactionRequest;
 const docker=(...a)=>execFileSync('docker',a,{encoding:'utf8',timeout:15000,stdio:['pipe','pipe','pipe']});
 const sql=s=>docker('exec',container,'psql','-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d','pina_mcp_test','-c',s).trim();
 const tokenFor=id=>Buffer.from('{}').toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:id,exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.dummy';
@@ -13,14 +13,14 @@ before(async()=>{
  sql(readFileSync(join(root,'local-mcp/release/migration.sql'),'utf8'));
  sql(`INSERT INTO auth.users(id) VALUES('${owner}');INSERT INTO profiles(id,email,plan) VALUES('${owner}','dummy@example.invalid','free');INSERT INTO credit_balances(user_id,free_credits,purchased_credits,purchased_expires_at) VALUES('${owner}',0,1000,now()+interval '1 year');INSERT INTO stripe_payment_ledger(user_id,purchase_type,grant_status,charge_id,payment_intent_id) VALUES('${owner}','credit_pack','granted','ch_test','pi_test');`);
  sql(`INSERT INTO auth.users(id) VALUES('${other}');INSERT INTO profiles(id,email,plan) VALUES('${other}','other@example.invalid','free');INSERT INTO credit_balances(user_id,free_credits) VALUES('${other}',20);`);
- db=createRealDb(container);
+ db=createRealDb(container);const rpc=db.rpc.bind(db);db.rpc=async(name,args)=>{const r=await rpc(name,args);if(detachSocket&&name==='pina_mcp_oauth_store'&&args.op==='upsert'&&args.p.kind==='Grant'&&interactionRequest){await new Promise(r=>setImmediate(r));interactionRequest.socket=null;}return r;};
  // Only Auth response and external provider/storage/worker are mock. SQL is real.
  db.auth={getUser:async token=>[normalToken,otherToken].includes(token)?{data:{user:{id:token===normalToken?owner:other,email_confirmed_at:'2026-01-01'}}}:{data:{user:null},error:{name:'AuthApiError',code:'bad_jwt'}},admin:{getUserById:async id=>[owner,other].includes(id)?{data:{user:{id,email_confirmed_at:'2026-01-01'}}}:{data:{user:null},error:{code:'user_not_found'}}}};
  api=fixtureModule.apiFixture(db);
  const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});const jwks={keys:[{...privateKey.export({format:'jwk'}),kid:'dummy',alg:'RS256',use:'sig'}]};
  const options={allowGeneration:true,origin,clientId,redirectUri,db,confirmedAuth:api.confirmedAuth,startModule:api.startModule,statusModule:api.statusModule,pricedModule:api.pricedModule,quoteKey:Buffer.alloc(32,1),csrfKey:Buffer.alloc(32,2),browserKey:Buffer.alloc(32,3),storageKey:Buffer.alloc(32,4),cookieKeys:['dummy-only-cookie-key'],jwks,artifactHosts:['storage.example.invalid'],timeoutMs:15000};
  app=createReleaseApp(options);app.restart=(extra={})=>createReleaseApp({...options,...extra});
- dir=mkdtempSync(join(tmpdir(),'pina-release-'));socket=join(dir,'http');server=http.createServer((req,res)=>app.handler(req,res));await new Promise(r=>server.listen(socket,r));
+ dir=mkdtempSync(join(tmpdir(),'pina-release-'));socket=join(dir,'http');server=http.createServer((req,res)=>{if(req.url.startsWith('/interaction/'))interactionRequest=req;if(coldRequests){const restart=app.restart;app=restart();app.restart=restart;}return app.handler(req,res);});await new Promise(r=>server.listen(socket,r));
 });
 after(async()=>{for(const c of clients)await c.close().catch(()=>{});if(server)await new Promise(r=>server.close(r));if(dir)rmSync(dir,{recursive:true,force:true});if(running)docker('rm','-f',container);});
 function request(path,{method='GET',headers={},body}={}){return new Promise((resolve,reject)=>{const req=http.request({socketPath:socket,path,method,headers:{host:new URL(origin).host,'x-forwarded-proto':'https',...headers}},res=>{let data='';res.on('data',c=>data+=c);res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:data}));});req.on('error',reject);req.end(body);});}
@@ -95,4 +95,16 @@ test('real browser session/CSRF/quote binding and other-owner artifact deny',asy
  const newSession=await browser();assert.equal((await newSession('/mcp/approve',form)).status,403);
  sql(`UPDATE pina_mcp.proposals SET quote=jsonb_set(quote,'{expiresAt}','0') WHERE id=${literal(q.proposal_id)}`);assert.equal((await f.b('/mcp/approve',form)).status,403);
  const otherClient=await connect(other);const task=JSON.parse(sql('SELECT to_jsonb(id) FROM generation_tasks LIMIT 1'));assert.equal((await otherClient.client.callTool({name:'pina_get_artifact',arguments:{task_id:task}})).isError,true);
+});
+
+for(const cold of [false,true])test('detached transport across Postgres grant save completes code exchange and balance; cold='+cold,async()=>{
+ const before=api.counters.provider,restart=app.restart;app=restart({allowGeneration:false});app.restart=(extra={})=>restart({allowGeneration:false,...extra});
+ coldRequests=cold;detachSocket=true;try{const f=await connect();const r=await f.client.callTool({name:'pina_get_balance',arguments:{}});assert.ok(Number.isInteger(r.structuredContent.available_credits));assert.equal(api.counters.provider,before);}finally{coldRequests=false;detachSocket=false;interactionRequest=undefined;app=restart();app.restart=restart;}
+});
+test('transport adapter retains host gate and never authenticates forwarded headers',async()=>{
+ for(const path of ['/interaction/dummy','/mcp/oauth/auth','/api/mcp']){
+  const r=await request(path,{headers:{host:'evil.invalid','x-forwarded-host':new URL(origin).host,'x-forwarded-proto':'https'}});assert.equal(r.status,400);assert.equal(r.body,'invalid_host');
+ }
+ const r=await request('/interaction/dummy',{method:'POST',headers:{origin,'content-type':'application/x-www-form-urlencoded','x-forwarded-proto':'https','x-forwarded-host':'evil.invalid'},body:'csrf=dummy&decision=allow'});assert.equal(r.status,403);
+ assert.equal((await request('/api/mcp',{headers:{'x-forwarded-proto':'https'}})).status,401);
 });

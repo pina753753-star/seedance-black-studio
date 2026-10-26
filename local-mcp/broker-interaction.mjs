@@ -26,6 +26,13 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
  if(!provider||new URL(origin).origin!==origin||!clientId||!resource||[verifyPinaBrowserSession,issueCsrf,verifyCsrf].some(f=>typeof f!=='function'))throw new Error('Trusted first-party adapters required');
  const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  return async(req,res)=>{
+  // Koa rebuilds a context for each provider interaction API call. Preserve
+  // this request's actual transport reference across asynchronous persistence;
+  // serverless request cleanup may detach req.socket before the second call.
+  // Only metadata APIs receive this view; never replace the original stream or
+  // infer TLS/proxy facts from headers, another request, or a synthetic socket.
+  const socket=req.socket;
+  const providerRequest=new Proxy(req,{get(target,key){return key==='socket'?socket:Reflect.get(target,key,target);}});
   let stage='session';
   const report=code=>{try{diagnostic(code);}catch{}};
   const reject=()=>{
@@ -38,16 +45,17 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
   // its 303 response sequence unchanged, but distinguish save from response.
   const finish=async result=>{
    stage='finalize_result';
-   const returnTo=await provider.interactionResult(req,res,result,{mergeWithLastSubmission:false});
+   const returnTo=await provider.interactionResult(providerRequest,res,result,{mergeWithLastSubmission:false});
    stage='finalize_response';
    res.statusCode=303;res.setHeader('Location',returnTo);res.setHeader('Content-Length','0');res.end();
   };
   try{
+   if(!socket||typeof socket!=='object')return reject();
    const user=await verifyPinaBrowserSession(req);
    if(!user?.userId||!user.emailConfirmed||user.accountStatus!=='active')return reject();
    stage='details';
    let d;
-   try{d=await provider.interactionDetails(req,res);}catch(error){
+   try{d=await provider.interactionDetails(providerRequest,res);}catch(error){
     if(req.method==='GET'&&error instanceof errors.SessionNotFound){
      report('consent_details_missing');
      res.writeHead(403,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"});
