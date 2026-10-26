@@ -37,7 +37,7 @@ export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,s
    if(url.pathname==='/mcp/approve'){
     const r=await ui({method:req.method,url:url.href,headers:req.headers,body:(await read(req)).toString()});return send(res,r.status,r.body,r.headers);
    }
-   if(['/.well-known/oauth-authorization-server/mcp/oauth','/.well-known/openid-configuration/mcp/oauth'].includes(url.pathname)){req.url='/.well-known/openid-configuration';return await callback(req,res);}
+   if(['/.well-known/oauth-authorization-server/mcp/oauth','/.well-known/openid-configuration/mcp/oauth'].includes(url.pathname)){req.baseUrl='/mcp/oauth';req.originalUrl='/mcp/oauth/.well-known/openid-configuration';req.url='/.well-known/openid-configuration';return await callback(req,res);}
    if(url.pathname.startsWith('/mcp/oauth/')){
     // oidc-provider mounting: preserve originalUrl and expose the mount prefix.
     req.originalUrl=req.url;req.url=req.url.slice('/mcp/oauth'.length);return await callback(req,res);
