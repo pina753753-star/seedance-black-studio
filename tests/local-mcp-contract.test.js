@@ -262,3 +262,15 @@ test('cancelled existing task remains readable without provider URLs or assumed 
  h.state.tasks.get(r.task_id).status='cancelled';
  assert.deepEqual(await h.call('pina_get_generation',{task_id:r.task_id}),{task_id:r.task_id,status:'cancelled',refund_status:'unknown'});
 });
+
+
+test('Fast 1-3s estimates fail before proposal persistence; supported 4s stays55credits', async()=>{
+ const h=fixture();let proposals=0;const original=h.store.createProposal.bind(h.store);h.store.createProposal=async q=>{proposals++;return original(q);};
+ const input={...INPUT,model:'bytedance/seedance-2.0-fast',resolution:'480p',aspect_ratio:'1:1'};
+ for(const duration of [1,2,3])await rejects(()=>h.estimate('alice',{...input,duration}),'invalid_duration');
+ assert.equal(proposals,0);assert.equal(h.state.starts.length,0);assert.equal(h.state.credits,1000);
+ const q=await h.estimate('alice',{...input,duration:4});assert.equal(q.credits,55);assert.equal(q.approval_required,true);assert.equal(proposals,1);
+ const {validateVideoGenerationOptions}=require('../api/_lib/video-model-validation');
+ for(const mode of ['text_to_video','image_to_video','reference_to_video','storyboard'])for(const duration of [1,2,3])assert.equal(validateVideoGenerationOptions({...input,mode,duration}).error,'invalid_duration');
+ for(const resolution of ['480p','720p'])for(const duration of [4,15])assert.equal(validateVideoGenerationOptions({...input,mode:'text_to_video',duration,resolution}).ok,true);
+});

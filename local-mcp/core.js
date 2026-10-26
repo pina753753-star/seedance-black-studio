@@ -35,7 +35,7 @@ function validate(input, spec) {
     if (p.enum && !p.enum.includes(value)) fail('invalid_arguments');
   }
 }
-function createCore({ authenticate, store, backend, integrity, now = Date.now, createId = randomUUID, artifactHosts = [], approvalBaseUrl = null, approvalPath = '/approve', allowStart = true, price = calculateVideoCreditCost }) {
+function createCore({ authenticate, store, backend, integrity, now = Date.now, createId = randomUUID, artifactHosts = [], approvalBaseUrl = null, approvalPath = '/approve', allowStart = true, authorizeStart = () => true, price = calculateVideoCreditCost }) {
   if (typeof authenticate !== 'function' || !store || !backend || typeof integrity?.sign !== 'function' || typeof integrity?.verify !== 'function') throw new Error('Adapters required');
   async function principal(context, scope) {
     // Only the trusted transport may supply context. Never taken from arguments.
@@ -73,7 +73,10 @@ function createCore({ authenticate, store, backend, integrity, now = Date.now, c
     if (!definition) fail('unknown_tool');
     validate(args, definition.inputSchema);
     const p = await principal(context, definition.securitySchemes[0].scopes[0]);
-    if(name==='pina_start_generation'&&!allowStart)fail('generation_not_enabled');
+    if(name==='pina_start_generation'){
+      if(!allowStart)fail('generation_not_enabled');
+      if(typeof authorizeStart!=='function'||authorizeStart(p)!==true)fail('generation_not_allowed');
+    }
     if (name === 'pina_get_balance') {
       const a = await access(p);
       return { available_credits: a.availableCredits, watermark_required: a.watermarkRequired, models: MODELS.filter(model => a.models.includes(model)) };
