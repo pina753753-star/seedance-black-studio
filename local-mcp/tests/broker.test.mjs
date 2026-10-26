@@ -62,6 +62,7 @@ test('library authorization -> first-party consent -> callback code -> token, wi
  const callback=new URL(r.headers.location);assert.equal(callback.origin+callback.pathname,redirectUri);assert.equal(callback.searchParams.get('state'),'dummy-state');assert.ok(callback.searchParams.get('code'),JSON.stringify(r));
  const token=await f.request(f.socket,'/mcp/oauth/token',{grant_type:'authorization_code',client_id:clientId,redirect_uri:redirectUri,code:callback.searchParams.get('code'),code_verifier:verifier,resource});assert.equal(token.status,200,JSON.stringify(token.data));
  const authenticate=createOpaqueAuthenticator({provider:f.provider,resource,clientId,authorize:async({userId})=>({userId,active:true,emailConfirmed:true,accountStatus:'active',capabilities:['credits:read','generation:write']})});
+ const issuedRefresh=await f.provider.RefreshToken.find(token.data.refresh_token);assert.notEqual(issuedRefresh.expiresWithSession,true);
  const context={accessToken:token.data.access_token};let starts=0;
  const core=coreModule.createCore({authenticate,store:storeModule.createMockStore(),integrity:quoteModule.createQuoteIntegrity(Buffer.alloc(32,9)),backend:{readAccess:async userId=>({userId,allowed:true,availableCredits:1000,watermarkRequired:true,models:['bytedance/seedance-2.0']}),start:async()=>{starts++;}},artifactHosts:[]});
  assert.equal((await core.dispatch('pina_get_balance',{},context)).available_credits,1000);
@@ -129,4 +130,37 @@ for(const scenario of ['deny','expired','double-click','parallel-click'])test('e
  const r=await browser(resume);assert.equal(r.status,303);const callback=new URL(r.headers.location);assert.equal(callback.origin+callback.pathname,redirectUri);
  if(scenario==='deny'){assert.equal(callback.searchParams.get('error'),'access_denied');assert.equal(callback.searchParams.has('code'),false);return;}
  assert.ok(callback.searchParams.get('code'));const again=await browser(resume);assert.equal(again.status,400);assert.equal(again.headers.location,undefined);
+});
+
+
+async function persistentConnection(f){
+ const cookies=new Map(),browser=async(path,data)=>{const r=await f.request(f.socket,path,data,{cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),origin:issuer});for(const line of r.headers['set-cookie']||[]){const kv=line.split(';')[0],i=kv.indexOf('=');cookies.set(kv.slice(0,i),kv.slice(i+1));}return r;};
+ const verifier='p'.repeat(64),params={client_id:clientId,response_type:'code',redirect_uri:redirectUri,scope:'credits:read',resource,code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url'),state:'dummy'};
+ let r=await browser('/mcp/oauth/auth?'+new URLSearchParams(params));const path=new URL(r.headers.location,issuer).pathname;assert.equal((await browser(path)).status,200);r=await browser(path,{csrf:'dummy-csrf',decision:'allow'});assert.equal(r.status,200);r=await browser(r.data.match(/href="([^"]+)"/)[1]);
+ const callback=new URL(r.headers.location);const response=await f.request(f.socket,'/mcp/oauth/token',{grant_type:'authorization_code',client_id:clientId,redirect_uri:redirectUri,code:callback.searchParams.get('code'),code_verifier:verifier,resource});assert.equal(response.status,200);return response.data;
+}
+const refreshPersistent=(f,token,extra={})=>f.request(f.socket,'/mcp/oauth/token',{grant_type:'refresh_token',client_id:clientId,refresh_token:token,resource,...extra});
+test('real browser grant survives session removal/restart, refreshes after1h and fails7d idle',async t=>{
+ const f=await fixture(t,{mounted:true}),tokens=await persistentConnection(f),record=await f.provider.RefreshToken.find(tokens.refresh_token);assert.notEqual(record.expiresWithSession,true);
+ const session=record.sessionUid&&await f.provider.Session.findByUid(record.sessionUid);if(session)await session.destroy();
+ const realNow=Date.now,base=realNow();try{Date.now=()=>base+2*3600*1000;const b=await f.instance();let r=await f.request(b.socket,'/mcp/oauth/token',{grant_type:'refresh_token',client_id:clientId,refresh_token:tokens.refresh_token,resource});assert.equal(r.status,200);
+  const last=r.data.refresh_token;Date.now=()=>base+(2*3600+7*86400+1)*1000;r=await refreshPersistent(f,last);assert.equal(r.status,400);assert.equal(r.data.error,'invalid_grant');
+ }finally{Date.now=realNow;}
+});
+test('rotated refresh never extends absolute30d grant; reconnect creates new consent',async t=>{
+ const f=await fixture(t,{mounted:true});let tokens=await persistentConnection(f);const first=await f.provider.RefreshToken.find(tokens.refresh_token),grant=await f.provider.Grant.find(first.grantId),deadline=grant.exp,realNow=Date.now,base=realNow();
+ try{for(const day of [6,12,18,24,29]){Date.now=()=>base+day*86400000;const r=await refreshPersistent(f,tokens.refresh_token);assert.equal(r.status,200);tokens=r.data;const g=await f.provider.Grant.find(first.grantId);await g.save();assert.equal((await f.provider.Grant.find(first.grantId)).exp,deadline);const rt=await f.provider.RefreshToken.find(tokens.refresh_token);assert.ok(rt.exp<=first.iiat+30*86400);}
+  Date.now=()=>base+30*86400000+1000;const denied=await refreshPersistent(f,tokens.refresh_token);assert.equal(denied.status,400);assert.equal(denied.data.error,'invalid_grant');
+  const fresh=await persistentConnection(f),newRecord=await f.provider.RefreshToken.find(fresh.refresh_token);assert.notEqual(newRecord.grantId,first.grantId);
+ }finally{Date.now=realNow;}
+});
+test('existing1h grant keeps its deadline, no automatic extension on save or refresh',async t=>{
+ const f=await fixture(t,{mounted:true}),tokens=await persistentConnection(f),rt=await f.provider.RefreshToken.find(tokens.refresh_token),g=await f.provider.Grant.find(rt.grantId);const realNow=Date.now,base=realNow();g.exp=Math.floor(base/1000)+3600;await g.save();const deadline=g.exp;
+ try{Date.now=()=>base+28*60000;const r=await refreshPersistent(f,tokens.refresh_token);assert.equal(r.status,200);const old=await f.provider.Grant.find(rt.grantId);await old.save();assert.equal(old.exp,deadline);Date.now=()=>base+61*60000;assert.equal((await refreshPersistent(f,r.data.refresh_token)).status,400);}finally{Date.now=realNow;}
+});
+test('persistent refresh retains client binding, rotation replay revocation and explicit revoke',async t=>{
+ const f=await fixture(t,{mounted:true}),tokens=await persistentConnection(f);
+ assert.equal((await refreshPersistent(f,tokens.refresh_token,{client_id:'different-client'})).status,401);
+ const rotated=await refreshPersistent(f,tokens.refresh_token);assert.equal(rotated.status,200);assert.equal((await refreshPersistent(f,tokens.refresh_token)).status,400);assert.equal(await f.provider.AccessToken.find(rotated.data.access_token),undefined);
+ const fresh=await persistentConnection(f);assert.equal((await f.request(f.socket,'/mcp/oauth/token/revocation',{client_id:clientId,token:fresh.refresh_token,token_type_hint:'refresh_token'})).status,200);assert.equal((await refreshPersistent(f,fresh.refresh_token)).status,400);
 });

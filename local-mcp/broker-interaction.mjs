@@ -1,4 +1,5 @@
 import {errors} from 'oidc-provider';
+import {uiPage,uiPolicy} from './ui-page.mjs';
 // Vercel Node helpers may consume the IncomingMessage before invoking us.
 // Match the provider's parsed-body fallback, but reject duplicates/non-scalars
 // rather than flattening them. All normal CSRF and Origin checks still apply.
@@ -50,9 +51,9 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    const resume=new URL(returnTo,origin);
    if(resume.origin!==origin||resume.username||resume.password||resume.search||resume.hash||!/^\/mcp\/oauth\/auth\/[A-Za-z0-9_-]+$/.test(resume.pathname))throw new Error('invalid_resume');
    res.statusCode=200;
-   for(const [key,value] of Object.entries({'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}))res.setHeader(key,value);
+   for(const [key,value] of Object.entries({'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':uiPolicy(origin)}))res.setHeader(key,value);
    const message=result.error?'接続をキャンセルしました。ChatGPTへ戻って手続きを終了してください。':'同意を保存しました。ChatGPTでの接続はまだ完了していません。';
-   res.end('<!doctype html><html lang="ja"><meta charset="utf-8"><title>ChatGPTへ戻る</title><h1>接続手続きを続ける</h1><p>'+message+'</p><p><a href="'+escape(resume.pathname)+'">ChatGPTへ戻る</a></p><p>リンクは一度だけ押してください。期限切れの場合はChatGPTから接続手続きを開き直してください。</p></html>');
+   res.end(uiPage({title:'ChatGPTへ戻る',step:3,body:'<p class="eyebrow">LAST STEP</p><h1>'+(result.error?'接続をキャンセルしました':'ChatGPTで接続を完了')+'</h1><p class="status">'+message+'</p><a class="button primary" href="'+escape(resume.pathname)+'">ChatGPTへ戻る</a><p class="hint">一度だけ押してください。期限切れの場合はChatGPTから接続を開き直してください。</p>'}));
   };
   try{
    if(!socket||typeof socket!=='object')return reject();
@@ -63,17 +64,22 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    try{d=await provider.interactionDetails(providerRequest,res);}catch(error){
     if(req.method==='GET'&&error instanceof errors.SessionNotFound){
      report('consent_details_missing');
-     res.writeHead(403,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"});
-     res.end('<!doctype html><html lang="ja"><meta charset="utf-8"><title>接続手続きを確認してください</title><p>接続手続きの有効期限が切れたか、接続用Cookieを確認できませんでした。</p><p>Pinaに再ログインする必要はありません。ChatGPTに戻り、接続手続きを最初から開き直してください。</p></html>');return;
+     res.writeHead(403,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':uiPolicy(origin)});
+     res.end(uiPage({title:'接続を開き直してください',step:2,body:'<h1>接続を開き直してください</h1><p>接続手続きの有効期限が切れたか、接続用Cookieを確認できませんでした。</p><p class="status">Pinaに再ログインする必要はありません。ChatGPTに戻り、接続手続きを最初から開き直してください。</p>'}));return;
     }
     throw error;
    }
    stage='validation';
    if(d.params.client_id!==clientId||d.params.resource!==resource||d.session?.accountId&&d.session.accountId!==user.userId)return reject();
+   const allowed=['credits:read','generation:read','generation:write'];
+   const scopes=String(d.params.scope||'').split(' ').filter(Boolean);
+   if(scopes.some(x=>!allowed.includes(x)))return reject();
+   const permissionText={'credits:read':'Pinaのクレジット残高を確認','generation:read':'動画の見積・生成状態・成果物を取得','generation:write':'本人が別途承認した動画の生成を開始'};
+   const permissions=[...new Set(scopes)].map(scope=>'<li>'+permissionText[scope]+'</li>').join('');
    const binding={interactionId:d.uid,userId:user.userId};
    if(req.method==='GET'){
-    const csrf=await issueCsrf(binding,user);res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; form-action 'self'; frame-ancestors 'none'"});
-    res.end(`<p>接続するアカウント: ${escape(user.email||user.userId)}</p><p><a href="/mcp-session.html?next=${encodeURIComponent('/interaction/'+d.uid)}">別のアカウントで本人確認し直す</a></p><form method="post"><p>Pinaの残高、見積、本人承認後の生成、状態と成果物への接続を許可します。動画の開始承認は別途必要です。</p><input type="hidden" name="csrf" value="${escape(csrf)}"><button name="decision" value="allow">接続を許可</button><button name="decision" value="deny">キャンセル</button></form>`);return;
+    const csrf=await issueCsrf(binding,user);res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':uiPolicy(origin)});
+    res.end(uiPage({title:'接続内容を確認',step:2,body:`<p class="eyebrow">ACCOUNT &amp; PERMISSIONS</p><h1>ChatGPTと接続しますか？</h1><div class="account"><small>接続するアカウント</small><p>${escape(user.email||user.userId)}</p><a class="button" href="/mcp-session.html?next=${encodeURIComponent('/interaction/'+d.uid)}">別のアカウントで本人確認し直す</a></div><p>接続すると、次の操作を利用できます。</p><ul class="permissions">${permissions}</ul><p class="status">接続を許可するだけでは、動画生成やクレジット消費は行いません。</p><form method="post"><input type="hidden" name="csrf" value="${escape(csrf)}"><button class="primary" name="decision" value="allow">接続を許可</button><button name="decision" value="deny">キャンセル</button></form><p class="hint">接続は最大30日間、更新が7日間なければ期限切れになります。期限内は再ログインせず更新できます。接続を解除するときはChatGPTの設定から切断してください。</p><p class="hint">ログイン情報をChatGPTへ渡すことはありません。次にChatGPTへ戻って接続を完了します。</p>`}));return;
    }
    if(req.method!=='POST'||req.headers.origin!==origin||!String(req.headers['content-type']||'').startsWith('application/x-www-form-urlencoded'))return reject();
    stage='body';
@@ -83,9 +89,6 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    if(fields.get('decision')==='deny'){return await finish({error:'access_denied'});}
    if(fields.get('decision')!=='allow')return reject();
    const grant=new provider.Grant({accountId:user.userId,clientId});
-   const allowed=['credits:read','generation:read','generation:write'];
-   const scopes=String(d.params.scope||'').split(' ').filter(Boolean);
-   if(scopes.some(x=>!allowed.includes(x)))return reject();
    grant.addResourceScope(resource,scopes.filter(x=>allowed.includes(x)).join(' '));
    grant.addOIDCScope(scopes.join(' '));
    stage='grant_save';

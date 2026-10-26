@@ -12,7 +12,7 @@ test('first party consent requires session, CSRF, Origin and correct client/reso
  for(const args of [{origin:'https://evil.invalid'},{body:'csrf=wrong&decision=allow'},{body:'csrf=dummy&decision=allow&userId=bob'},{body:'csrf=dummy&decision=allow&csrf=dummy'}]){const f=fixture();assert.equal((await f.call(args)).status,403);assert.equal(f.state.saved,0);}
 });
 test('safe consent HTML has no purchase links; allow creates grant, deny creates none',async()=>{
- const f=fixture(),page=await f.call({method:'GET'});assert.equal(page.status,200);assert.match(page.body,/&lt;dummy&gt;/);assert.match(page.body,/接続するアカウント: alice/);assert.match(page.body,/mcp-session.html/);assert.doesNotMatch(page.body,/checkout|pricing\.html|アップグレード/);assert.equal(f.state.saved,0);
+ const f=fixture(),page=await f.call({method:'GET'});assert.equal(page.status,200);assert.match(page.body,/&lt;dummy&gt;/);assert.match(page.body,/接続するアカウント<\/small><p>alice/);assert.match(page.body,/mcp-session.html/);assert.doesNotMatch(page.body,/checkout|pricing\.html|アップグレード/);assert.equal(f.state.saved,0);
  await f.call();assert.equal(f.state.saved,1);assert.equal(f.state.finished[0].login.accountId,'alice');
  const denied=fixture();await denied.call({body:'csrf=dummy&decision=deny'});assert.equal(denied.state.saved,0);assert.equal(denied.state.finished[0].error,'access_denied');
 });
@@ -73,3 +73,5 @@ test('continuation rejects external, alternate, encoded and query-bearing resume
   const f=fixture();f.state.returnTo=returnTo;const r=await f.call();assert.equal(r.status,403);assert.equal(r.body,'interaction_denied');assert.equal(r.headers.Location,undefined);
  }
 });
+
+test('consent lists only requested capabilities and keeps user HTML escaped',async()=>{const f=fixture();f.state.details.params.scope='credits:read';f.state.user.email='<img src=x onerror=alert(1)>';const r=await f.call({method:'GET'});assert.match(r.body,/クレジット残高を確認/);assert.doesNotMatch(r.body,/動画の見積|本人が別途承認した動画/);assert.match(r.body,/&lt;img src=x/);assert.doesNotMatch(r.body,/<img src=x/);});

@@ -143,3 +143,17 @@ test('Vercel parsed approval form persists only valid owner approval without sta
   assert.equal(sql(`SELECT purchased_credits FROM credit_balances WHERE user_id='${owner}'`),balance);assert.equal(api.counters.provider,prior);
  }finally{parsedApproval=false;}
 });
+
+test('Postgres persistent consent survives session expiry and restart but enforces idle/absolute limits without generation',async()=>{
+ const f=await connect(),initial=await app.provider.RefreshToken.find(f.tokens.refresh_token),grant=await app.provider.Grant.find(initial.grantId),deadline=grant.exp,prior=api.counters.provider;
+ assert.notEqual(initial.expiresWithSession,true);const realNow=Date.now,base=realNow(),restart=app.restart;
+ const refresh=token=>request('/mcp/oauth/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:clientId,resource,refresh_token:token}).toString()});
+ try{
+  sql("UPDATE pina_mcp.broker_state SET expires=0 WHERE kind='Session'");
+  app=restart();app.restart=restart;let token=f.tokens.refresh_token;
+  for(const days of [1,6,12,18,24,29]){Date.now=()=>base+days*86400000;const r=await refresh(token);assert.equal(r.status,200);token=JSON.parse(r.body).refresh_token;const rt=await app.provider.RefreshToken.find(token);assert.ok(rt.exp<=initial.iiat+30*86400);const g=await app.provider.Grant.find(initial.grantId);await g.save();assert.equal(g.exp,deadline);}
+  Date.now=()=>base+30*86400000+1000;assert.equal((await refresh(token)).status,400);
+ }finally{Date.now=realNow;app=restart();app.restart=restart;}
+ const idle=await connect();try{Date.now=()=>base+8*86400000;assert.equal((await refresh(idle.tokens.refresh_token)).status,400);}finally{Date.now=realNow;}
+ assert.equal(api.counters.provider,prior);
+});
