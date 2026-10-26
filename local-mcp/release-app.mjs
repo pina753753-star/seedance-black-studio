@@ -38,7 +38,7 @@ export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,s
    if(req.method==='GET'&&(url.pathname.startsWith('/interaction/')||url.pathname==='/mcp/approve')){try{await browser.resolve(req);}catch{return send(res,302,'',{'Location':'/mcp-session.html?next='+encodeURIComponent(url.pathname+url.search)});}}
    if(url.pathname.startsWith('/interaction/'))return await interaction(req,res);
    if(url.pathname==='/mcp/approve'){
-    const r=await ui({method:req.method,url:url.href,headers:req.headers,body:(await read(req)).toString()});return send(res,r.status,r.body,r.headers);
+    const r=await ui({method:req.method,url:url.href,headers:req.headers,body:req.method==='POST'?await uiModule.readApprovalBody(req):''});return send(res,r.status,r.body,r.headers);
    }
    if(['/.well-known/oauth-authorization-server/mcp/oauth','/.well-known/openid-configuration/mcp/oauth'].includes(url.pathname)){req.baseUrl='/mcp/oauth';req.originalUrl='/mcp/oauth/.well-known/openid-configuration';req.url='/.well-known/openid-configuration';return await callback(req,res);}
    if(url.pathname.startsWith('/mcp/oauth/')){
