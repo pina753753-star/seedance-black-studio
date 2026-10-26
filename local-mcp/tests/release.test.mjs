@@ -1,6 +1,6 @@
-import {test,before,after} from 'node:test';import assert from 'node:assert/strict';import {execFileSync} from 'node:child_process';import {readFileSync,mkdtempSync,rmSync} from 'node:fs';import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';import http from 'node:http';import {generateKeyPairSync,createHash} from 'node:crypto';
+import {PassThrough} from 'node:stream';import {parse as parseForm} from 'node:querystring';import {test,before,after} from 'node:test';import assert from 'node:assert/strict';import {execFileSync} from 'node:child_process';import {readFileSync,mkdtempSync,rmSync} from 'node:fs';import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';import http from 'node:http';import {generateKeyPairSync,createHash} from 'node:crypto';
 import {createReleaseApp} from '../release-app.mjs';import {createRealDb,literal} from './real-db.mjs';import fixtureModule from './fixture.js';import {Client,StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
-const root=resolve(import.meta.dirname,'../..'),container='pina-mcp-test-release'+process.pid,origin='https://pina.example.invalid',resource=origin+'/api/mcp',clientId='chatgpt-local',redirectUri='https://chatgpt.example.invalid/callback',owner='00000000-0000-4000-8000-000000000001';let running=false,dir,db,api,app,server,socket;const clients=[];let coldRequests=false,detachSocket=false,interactionRequest;
+const root=resolve(import.meta.dirname,'../..'),container='pina-mcp-test-release'+process.pid,origin='https://pina.example.invalid',resource=origin+'/api/mcp',clientId='chatgpt-local',redirectUri='https://chatgpt.example.invalid/callback',owner='00000000-0000-4000-8000-000000000001';let running=false,dir,db,api,app,server,socket;const clients=[];let coldRequests=false,detachSocket=false,interactionRequest,parsedApproval=false;
 const docker=(...a)=>execFileSync('docker',a,{encoding:'utf8',timeout:15000,stdio:['pipe','pipe','pipe']});
 const sql=s=>docker('exec',container,'psql','-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d','pina_mcp_test','-c',s).trim();
 const tokenFor=id=>Buffer.from('{}').toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:id,exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.dummy';
@@ -20,7 +20,7 @@ before(async()=>{
  const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});const jwks={keys:[{...privateKey.export({format:'jwk'}),kid:'dummy',alg:'RS256',use:'sig'}]};
  const options={allowGeneration:true,pilotUserId:owner,origin,clientId,redirectUri,db,confirmedAuth:api.confirmedAuth,startModule:api.startModule,statusModule:api.statusModule,pricedModule:api.pricedModule,quoteKey:Buffer.alloc(32,1),csrfKey:Buffer.alloc(32,2),browserKey:Buffer.alloc(32,3),storageKey:Buffer.alloc(32,4),cookieKeys:['dummy-only-cookie-key'],jwks,artifactHosts:['storage.example.invalid'],timeoutMs:15000};
  app=createReleaseApp(options);app.restart=(extra={})=>createReleaseApp({...options,...extra});
- dir=mkdtempSync(join(tmpdir(),'pina-release-'));socket=join(dir,'http');server=http.createServer((req,res)=>{if(req.url.startsWith('/interaction/'))interactionRequest=req;if(coldRequests){const restart=app.restart;app=restart();app.restart=restart;}return app.handler(req,res);});await new Promise(r=>server.listen(socket,r));
+ dir=mkdtempSync(join(tmpdir(),'pina-release-'));socket=join(dir,'http');server=http.createServer(async(req,res)=>{if(req.url.startsWith('/interaction/'))interactionRequest=req;if(coldRequests){const restart=app.restart;app=restart();app.restart=restart;}if(parsedApproval&&req.method==='POST'&&req.url==='/mcp/approve'){const chunks=[];await new Promise((resolve,reject)=>{req.on('data',c=>chunks.push(c));req.on('end',resolve);req.on('error',reject);});const raw=Buffer.concat(chunks),replay=new PassThrough(),on=replay.on.bind(replay),originalOn=req.on.bind(req);req.read=replay.read.bind(replay);req.on=req.addListener=(name,cb)=>name==='data'||name==='end'?on(name,cb):originalOn(name,cb);replay.end(raw);Object.defineProperty(req,'body',{configurable:true,get:()=>parseForm(raw.toString())});}return app.handler(req,res);});await new Promise(r=>server.listen(socket,r));
 });
 after(async()=>{for(const c of clients)await c.close().catch(()=>{});if(server)await new Promise(r=>server.close(r));if(dir)rmSync(dir,{recursive:true,force:true});if(running)docker('rm','-f',container);});
 function request(path,{method='GET',headers={},body}={}){return new Promise((resolve,reject)=>{const req=http.request({socketPath:socket,path,method,headers:{host:new URL(origin).host,'x-forwarded-proto':'https',...headers}},res=>{let data='';res.on('data',c=>data+=c);res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:data}));});req.on('error',reject);req.end(body);});}
@@ -129,4 +129,17 @@ test('production pilot gate fails closed before claims for missing, invalid or o
   const unauthApproved=await f.client.callTool({name:'pina_start_generation',arguments:{proposal_id:q.proposal_id,request_id:'pilot-unapproved'}});assert.equal(unauthApproved.content[0].text,'approval_required');
   assert.equal(sql('SELECT count(*) FROM pina_mcp.requests'),before);assert.equal(api.counters.provider,prior);
  }finally{app=restart();app.restart=restart;}
+});
+
+
+test('Vercel parsed approval form persists only valid owner approval without start or debit',async()=>{
+ const f=await connect(),prior=api.counters.provider,balance=sql(`SELECT purchased_credits FROM credit_balances WHERE user_id='${owner}'`);
+ parsedApproval=true;try{
+  const q=await approved(f);assert.equal(sql(`SELECT approval IS NOT NULL FROM pina_mcp.proposals WHERE id=${literal(q.proposal_id)}`),'t');
+  const page=await f.b('/mcp/approve?proposal_id='+q.proposal_id);const form={};for(const m of page.body.matchAll(/name="([^"]+)" value="([^"]*)"/g))form[m[1]]=m[2];form.decision='approve';
+  assert.equal((await f.b('/mcp/approve',form,{origin:'null'})).status,403);
+  assert.equal((await f.b('/mcp/approve',{...form,csrf:'0'.repeat(64)})).status,403);
+  const otherBrowser=await browser(other);assert.notEqual((await otherBrowser('/mcp/approve',form)).status,200);
+  assert.equal(sql(`SELECT purchased_credits FROM credit_balances WHERE user_id='${owner}'`),balance);assert.equal(api.counters.provider,prior);
+ }finally{parsedApproval=false;}
 });
