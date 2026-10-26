@@ -41,13 +41,18 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    if(res.headersSent||res.writableEnded){report('consent_response_failed');if(!res.writableEnded){try{res.end();}catch{}}return;}
    res.writeHead(403,{'Cache-Control':'no-store'});res.end('interaction_denied');
   };
-  // Public provider API performs the same save as interactionFinished. Keep
-  // its 303 response sequence unchanged, but distinguish save from response.
+  // Save through the public provider API, then require a same-tab user link.
+  // A normal link starts a fresh navigation; do not broaden form-action CSP.
   const finish=async result=>{
    stage='finalize_result';
    const returnTo=await provider.interactionResult(providerRequest,res,result,{mergeWithLastSubmission:false});
    stage='finalize_response';
-   res.statusCode=303;res.setHeader('Location',returnTo);res.setHeader('Content-Length','0');res.end();
+   const resume=new URL(returnTo,origin);
+   if(resume.origin!==origin||resume.username||resume.password||resume.search||resume.hash||!/^\/mcp\/oauth\/auth\/[A-Za-z0-9_-]+$/.test(resume.pathname))throw new Error('invalid_resume');
+   res.statusCode=200;
+   for(const [key,value] of Object.entries({'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}))res.setHeader(key,value);
+   const message=result.error?'接続をキャンセルしました。ChatGPTへ戻って手続きを終了してください。':'同意を保存しました。ChatGPTでの接続はまだ完了していません。';
+   res.end('<!doctype html><html lang="ja"><meta charset="utf-8"><title>ChatGPTへ戻る</title><h1>接続手続きを続ける</h1><p>'+message+'</p><p><a href="'+escape(resume.pathname)+'">ChatGPTへ戻る</a></p><p>リンクは一度だけ押してください。期限切れの場合はChatGPTから接続手続きを開き直してください。</p></html>');
   };
   try{
    if(!socket||typeof socket!=='object')return reject();
