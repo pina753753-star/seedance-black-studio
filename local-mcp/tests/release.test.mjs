@@ -18,7 +18,7 @@ before(async()=>{
  db.auth={getUser:async token=>[normalToken,otherToken].includes(token)?{data:{user:{id:token===normalToken?owner:other,email_confirmed_at:'2026-01-01'}}}:{data:{user:null},error:{name:'AuthApiError',code:'bad_jwt'}},admin:{getUserById:async id=>[owner,other].includes(id)?{data:{user:{id,email_confirmed_at:'2026-01-01'}}}:{data:{user:null},error:{code:'user_not_found'}}}};
  api=fixtureModule.apiFixture(db);
  const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});const jwks={keys:[{...privateKey.export({format:'jwk'}),kid:'dummy',alg:'RS256',use:'sig'}]};
- const options={allowGeneration:true,origin,clientId,redirectUri,db,confirmedAuth:api.confirmedAuth,startModule:api.startModule,statusModule:api.statusModule,pricedModule:api.pricedModule,quoteKey:Buffer.alloc(32,1),csrfKey:Buffer.alloc(32,2),browserKey:Buffer.alloc(32,3),storageKey:Buffer.alloc(32,4),cookieKeys:['dummy-only-cookie-key'],jwks,artifactHosts:['storage.example.invalid'],timeoutMs:15000};
+ const options={allowGeneration:true,pilotUserId:owner,origin,clientId,redirectUri,db,confirmedAuth:api.confirmedAuth,startModule:api.startModule,statusModule:api.statusModule,pricedModule:api.pricedModule,quoteKey:Buffer.alloc(32,1),csrfKey:Buffer.alloc(32,2),browserKey:Buffer.alloc(32,3),storageKey:Buffer.alloc(32,4),cookieKeys:['dummy-only-cookie-key'],jwks,artifactHosts:['storage.example.invalid'],timeoutMs:15000};
  app=createReleaseApp(options);app.restart=(extra={})=>createReleaseApp({...options,...extra});
  dir=mkdtempSync(join(tmpdir(),'pina-release-'));socket=join(dir,'http');server=http.createServer((req,res)=>{if(req.url.startsWith('/interaction/'))interactionRequest=req;if(coldRequests){const restart=app.restart;app=restart();app.restart=restart;}return app.handler(req,res);});await new Promise(r=>server.listen(socket,r));
 });
@@ -107,4 +107,26 @@ test('transport adapter retains host gate and never authenticates forwarded head
  }
  const r=await request('/interaction/dummy',{method:'POST',headers:{origin,'content-type':'application/x-www-form-urlencoded','x-forwarded-proto':'https','x-forwarded-host':'evil.invalid'},body:'csrf=dummy&decision=allow'});assert.equal(r.status,403);
  assert.equal((await request('/api/mcp',{headers:{'x-forwarded-proto':'https'}})).status,401);
+});
+
+
+test('production pilot gate fails closed before claims for missing, invalid or other account config',async()=>{
+ const f=await connect(),outsider=await connect(other),restart=app.restart,prior=api.counters.provider;
+ const before=sql('SELECT count(*) FROM pina_mcp.requests');
+ try{
+  for(const pilotUserId of [undefined,null,'','alice','*',other]){
+   app=restart({allowGeneration:true,pilotUserId});app.restart=restart;
+   const r=await f.client.callTool({name:'pina_start_generation',arguments:{proposal_id:'dummy',request_id:'pilot-denied'}});
+   assert.equal(r.isError,true);assert.equal(r.content[0].text,'generation_not_allowed');
+   assert.ok(Number.isInteger((await f.client.callTool({name:'pina_get_balance',arguments:{}})).structuredContent.available_credits));
+  }
+  app=restart({allowGeneration:false,pilotUserId:owner});app.restart=restart;
+  const disabled=await f.client.callTool({name:'pina_start_generation',arguments:{proposal_id:'dummy',request_id:'pilot-disabled'}});assert.equal(disabled.content[0].text,'generation_not_enabled');
+  app=restart();app.restart=restart;
+  const denied=await outsider.client.callTool({name:'pina_start_generation',arguments:{proposal_id:'dummy',request_id:'other-account'}});assert.equal(denied.content[0].text,'generation_not_allowed');
+  const spoof=await outsider.client.callTool({name:'pina_start_generation',arguments:{proposal_id:'dummy',request_id:'spoof',user_id:owner}});assert.equal(spoof.isError,true);
+  const q=(await f.client.callTool({name:'pina_estimate_generation',arguments:input})).structuredContent;assert.ok(q);
+  const unauthApproved=await f.client.callTool({name:'pina_start_generation',arguments:{proposal_id:q.proposal_id,request_id:'pilot-unapproved'}});assert.equal(unauthApproved.content[0].text,'approval_required');
+  assert.equal(sql('SELECT count(*) FROM pina_mcp.requests'),before);assert.equal(api.counters.provider,prior);
+ }finally{app=restart();app.restart=restart;}
 });

@@ -5,7 +5,7 @@ import {createPostgresBrokerAdapter} from './broker-postgres.mjs';
 import coreModule from './core.js';import quoteModule from './quote-integrity.js';
 import ledgerModule from './postgres-store.js';import uiModule from './approval-ui.js';
 import browserModule from './browser-session.js';import backendModule from './principal-backend.js';import sdkModule from './sdk-transport.js';
-export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,startModule,statusModule,pricedModule,quoteKey,csrfKey,browserKey,storageKey,cookieKeys,jwks,artifactHosts,allowGeneration=false,timeoutMs=30000,diagnostic=reportDiagnostic}){
+export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,startModule,statusModule,pricedModule,quoteKey,csrfKey,browserKey,storageKey,cookieKeys,jwks,artifactHosts,allowGeneration=false,pilotUserId=null,timeoutMs=30000,diagnostic=reportDiagnostic}){
  if(new URL(origin).origin!==origin||!artifactHosts?.length)throw new Error('Explicit origin and artifact hosts required');
  const issuer=origin+'/mcp/oauth',resource=origin+'/api/mcp';
  const rpc=(name,args)=>db.rpc(name,args);
@@ -18,7 +18,9 @@ export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,s
  const authenticate=context=>browserContexts.has(context)?Promise.resolve(browserContexts.get(context)):opaque(context);
  const query=async(sql,args)=>{if(sql!=='SELECT pina_mcp.dispatch($1::text,$2::jsonb) AS result')throw new Error('Invalid ledger query');const r=await rpc('pina_mcp_dispatch',{op:args[0],p:JSON.parse(args[1])});if(r.error)throw new Error('Ledger unavailable');return {rows:[{result:r.data}]};};
  const backend=backendModule.createPrincipalBackend({db,startModule,statusModule,pricedModule,timeoutMs});
- const core=coreModule.createCore({allowStart:allowGeneration,authenticate,store:ledgerModule.createPostgresStore({query}),integrity:quoteModule.createQuoteIntegrity(quoteKey),backend,artifactHosts,approvalBaseUrl:origin,approvalPath:'/mcp/approve'});
+ // Production starts always require a valid, exact server-owned pilot UUID.
+ const validPilot=typeof pilotUserId==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(pilotUserId);
+ const core=coreModule.createCore({allowStart:allowGeneration,authorizeStart:p=>validPilot&&p.userId===pilotUserId,authenticate,store:ledgerModule.createPostgresStore({query}),integrity:quoteModule.createQuoteIntegrity(quoteKey),backend,artifactHosts,approvalBaseUrl:origin,approvalPath:'/mcp/approve'});
  const resolveBrowserSession=async req=>{const s=await browser.resolve(req),context={};browserContexts.set(context,{...s,scopes:['credits:read','generation:read','generation:write']});return {...s,context};};
  const ui=uiModule.createApprovalUI({core,resolveBrowserSession,csrfKey,origin,path:'/mcp/approve'});
  const interaction=createBrokerInteraction({provider,origin,clientId,resource,verifyPinaBrowserSession:browser.resolve,issueCsrf:browser.issueCsrf,verifyCsrf:browser.verifyCsrf,diagnostic});

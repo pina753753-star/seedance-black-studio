@@ -38,7 +38,7 @@ const VIDEO_MODELS = Object.freeze({
     status: MODEL_STATUS.ACTIVE,
     enabledForGeneration: true,
     metadataConfidence: 'production_verified',
-    durations: Object.freeze({ min: 1, max: 15, integerOnly: true }),
+    durations: Object.freeze({ min: 4, max: 15, integerOnly: true }),
     resolutions: Object.freeze(['480p', '720p']),
     aspectRatios: Object.freeze(['9:16', '16:9', '1:1', '4:3', '3:4']),
     modes: Object.freeze(['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard']),
