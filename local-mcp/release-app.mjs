@@ -1,14 +1,15 @@
+import {reportDiagnostic} from './diagnostics.mjs';
 import {createBroker,createOpaqueAuthenticator} from './broker.mjs';
 import {createBrokerInteraction} from './broker-interaction.mjs';
 import {createPostgresBrokerAdapter} from './broker-postgres.mjs';
 import coreModule from './core.js';import quoteModule from './quote-integrity.js';
 import ledgerModule from './postgres-store.js';import uiModule from './approval-ui.js';
 import browserModule from './browser-session.js';import backendModule from './principal-backend.js';import sdkModule from './sdk-transport.js';
-export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,startModule,statusModule,pricedModule,quoteKey,csrfKey,browserKey,storageKey,cookieKeys,jwks,artifactHosts,allowGeneration=false,timeoutMs=30000}){
+export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,startModule,statusModule,pricedModule,quoteKey,csrfKey,browserKey,storageKey,cookieKeys,jwks,artifactHosts,allowGeneration=false,timeoutMs=30000,diagnostic=reportDiagnostic}){
  if(new URL(origin).origin!==origin||!artifactHosts?.length)throw new Error('Explicit origin and artifact hosts required');
  const issuer=origin+'/mcp/oauth',resource=origin+'/api/mcp';
  const rpc=(name,args)=>db.rpc(name,args);
- const Adapter=createPostgresBrokerAdapter({rpc,key:storageKey});
+ const Adapter=createPostgresBrokerAdapter({rpc,key:storageKey,diagnostic});
  const currentUser=async id=>{const {data,error}=await db.auth.admin.getUserById(id);const u=data?.user;if(error||u?.id!==id||!(u.email_confirmed_at||u.confirmed_at)||u.banned_until&&Date.parse(u.banned_until)>Date.now())return null;const p=await db.from('profiles').select('account_status').eq('id',id).maybeSingle();if(p.error||p.data?.account_status!=='active')return null;return u;};
  const provider=createBroker({issuer,resource,clientId,redirectUri,Adapter,cookieKeys,jwks,findAccount:async(ctx,id)=>await currentUser(id)?{accountId:id,claims:async()=>({sub:id})}:undefined});
  const opaque=createOpaqueAuthenticator({provider,resource,clientId,authorize:async({userId})=>await currentUser(userId)?{userId,active:true,emailConfirmed:true,accountStatus:'active',capabilities:['credits:read','generation:read','generation:write']}:null});
@@ -20,7 +21,7 @@ export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,s
  const core=coreModule.createCore({allowStart:allowGeneration,authenticate,store:ledgerModule.createPostgresStore({query}),integrity:quoteModule.createQuoteIntegrity(quoteKey),backend,artifactHosts,approvalBaseUrl:origin,approvalPath:'/mcp/approve'});
  const resolveBrowserSession=async req=>{const s=await browser.resolve(req),context={};browserContexts.set(context,{...s,scopes:['credits:read','generation:read','generation:write']});return {...s,context};};
  const ui=uiModule.createApprovalUI({core,resolveBrowserSession,csrfKey,origin,path:'/mcp/approve'});
- const interaction=createBrokerInteraction({provider,origin,clientId,resource,verifyPinaBrowserSession:browser.resolve,issueCsrf:browser.issueCsrf,verifyCsrf:browser.verifyCsrf});
+ const interaction=createBrokerInteraction({provider,origin,clientId,resource,verifyPinaBrowserSession:browser.resolve,issueCsrf:browser.issueCsrf,verifyCsrf:browser.verifyCsrf,diagnostic});
  const mcp=sdkModule.createMcpHttpHandler({core,authenticate:opaque,resource,issuer});
  const callback=provider.callback();
  const send=(res,status,body,headers={})=>{res.writeHead(status,{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',...headers});res.end(body);};
@@ -47,7 +48,7 @@ export function createReleaseApp({origin,clientId,redirectUri,db,confirmedAuth,s
     const response=await mcp(new Request(url,{method:req.method,headers:req.headers,body}));return send(res,response.status,Buffer.from(await response.arrayBuffer()),Object.fromEntries(response.headers));
    }
    return send(res,404,'not_found');
-  }catch{return send(res,403,'request_denied');}
+  }catch{try{diagnostic('release_handler_failed');}catch{}return send(res,403,'request_denied');}
  }
  return {handler,provider,core};
 }

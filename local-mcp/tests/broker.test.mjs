@@ -1,14 +1,15 @@
+import {PassThrough} from 'node:stream';import {parse as parseForm} from 'node:querystring';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {generateKeyPairSync,createHash} from 'node:crypto';import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import http from 'node:http';
 import coreModule from '../core.js';import storeModule from '../mock-store.js';import quoteModule from '../quote-integrity.js';
 import {createBrokerInteraction} from '../broker-interaction.mjs';
 import {createBrokerStore} from '../broker-sqlite.mjs';import {createBroker,createOpaqueAuthenticator} from '../broker.mjs';
 const issuer='https://broker.example.invalid',resource='https://pina.example.invalid/api/mcp',clientId='pina-test',redirectUri='https://chatgpt.example.invalid/callback',owner='dummy-user';
-async function fixture(t){
+async function fixture(t,{mounted=false,vercelHelpers=false}={}){
  const dir=mkdtempSync(join(tmpdir(),'pina-broker-')),key=Buffer.alloc(32,3),file=join(dir,'state.sqlite');
  const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});const jwks={keys:[{...privateKey.export({format:'jwk'}),kid:'dummy',alg:'RS256',use:'sig'}]};
  const stores=[],servers=[];
- const instance=async()=>{const store=createBrokerStore(file,key);stores.push(store);const provider=createBroker({issuer,resource,clientId,redirectUri,Adapter:store.Adapter,cookieKeys:['test-only-cookie-material'],jwks,findAccount:async(ctx,id)=>id===owner?{accountId:id,claims:async()=>({sub:id})}:undefined});const interaction=createBrokerInteraction({provider,origin:issuer,clientId,resource,verifyPinaBrowserSession:async()=>({userId:owner,emailConfirmed:true,accountStatus:'active'}),issueCsrf:async()=> 'dummy-csrf',verifyCsrf:async value=>value==='dummy-csrf'});const callback=provider.callback();const server=http.createServer((req,res)=>req.url.startsWith('/interaction/')?interaction(req,res):callback(req,res));servers.push(server);const socket=join(dir,'s'+servers.length);await new Promise(r=>server.listen(socket,r));return {provider,store,socket};};
+ const instance=async()=>{const store=createBrokerStore(file,key);stores.push(store);const provider=createBroker({issuer:mounted?issuer+'/mcp/oauth':issuer,resource,clientId,redirectUri,Adapter:store.Adapter,cookieKeys:['test-only-cookie-material'],jwks,findAccount:async(ctx,id)=>id===owner?{accountId:id,claims:async()=>({sub:id})}:undefined});const interaction=createBrokerInteraction({provider,origin:issuer,clientId,resource,verifyPinaBrowserSession:async()=>({userId:owner,emailConfirmed:true,accountStatus:'active'}),issueCsrf:async()=> 'dummy-csrf',verifyCsrf:async value=>value==='dummy-csrf'});const callback=provider.callback();const server=http.createServer(async(req,res)=>{if(vercelHelpers&&req.headers['content-type']){const chunks=[];await new Promise((resolve,reject)=>{req.on('data',c=>chunks.push(c));req.on('end',resolve);req.on('error',reject);});const raw=Buffer.concat(chunks);const replay=new PassThrough(),on=replay.on.bind(replay),originalOn=req.on.bind(req);req.read=replay.read.bind(replay);req.on=req.addListener=(name,cb)=>name==='data'||name==='end'?on(name,cb):originalOn(name,cb);replay.end(raw);Object.defineProperty(req,'body',{configurable:true,get:()=>parseForm(raw.toString())});}if(req.url.startsWith('/interaction/'))return interaction(req,res);if(mounted){req.originalUrl=req.url;req.url=req.url.slice('/mcp/oauth'.length);}return callback(req,res);});servers.push(server);const socket=join(dir,'s'+servers.length);await new Promise(r=>server.listen(socket,r));return {provider,store,socket};};
  const a=await instance();
  t.after(async()=>{await Promise.all(servers.map(s=>new Promise(r=>s.close(r))));stores.forEach(s=>s.close());rmSync(dir,{recursive:true,force:true});});
  const request=(socket,path,data,headers={})=>new Promise((resolve,reject)=>{const body=data?new URLSearchParams(data).toString():null;const req=http.request({socketPath:socket,path,method:body?'POST':'GET',headers:{host:'broker.example.invalid','x-forwarded-proto':'https',...headers,...(body?{'content-type':'application/x-www-form-urlencoded','content-length':Buffer.byteLength(body)}:{})}},res=>{let s='';res.on('data',c=>s+=c);res.on('end',()=>{let data;try{data=JSON.parse(s);}catch{data=s;}resolve({status:res.statusCode,data,headers:res.headers});});});req.on('error',reject);req.end(body);});
@@ -80,4 +81,38 @@ test('OAuth-only client rejects OpenID GET/POST and refresh scope escalation',as
  for(const scope of ['credits:read openid','credits:read offline_access','credits:read admin']){
   const r=await f.request(f.socket,'/token',{grant_type:'refresh_token',client_id:clientId,refresh_token:tokens.data.refresh_token,resource,scope});assert.equal(r.status,400,JSON.stringify(r));assert.equal(r.data.error,'invalid_scope');
  }
+});
+
+// Browser-like path selection: previous harness sent every cookie on every path.
+test('mounted auth uses root interaction cookie; nine minute delay expires without grants',async t=>{
+ const f=await fixture(t,{mounted:true}),cookies=[];
+ const params={client_id:clientId,response_type:'code',redirect_uri:redirectUri,scope:'credits:read',resource,code_challenge_method:'S256',code_challenge:createHash('sha256').update('x'.repeat(64)).digest('base64url'),state:'dummy'};
+ const start=await f.request(f.socket,'/mcp/oauth/auth?'+new URLSearchParams(params));
+ const path=new URL(start.headers.location,issuer).pathname;
+ assert.match(path,/^\/interaction\/[A-Za-z0-9_-]+$/);
+ for(const line of start.headers['set-cookie']||[]){const parts=line.split(';').map(x=>x.trim());cookies.push({pair:parts[0],path:parts.find(x=>/^path=/i.test(x))?.slice(5)||'/',expires:parts.find(x=>/^expires=/i.test(x))?.slice(8)});}
+ const interactionCookies=cookies.filter(c=>c.path===path);assert.ok(interactionCookies.length);assert.ok(interactionCookies.some(c=>Math.abs(Date.parse(c.expires)-Date.now()-300000)<2000));
+ assert.ok(cookies.some(c=>c.path.startsWith('/mcp/oauth/auth/')));
+ const cookie=interactionCookies.map(c=>c.pair).join('; ');
+ const fresh=await f.request(f.socket,path,null,{cookie});assert.equal(fresh.status,200);
+ // Cookie absent (browser expiry / cleared cookie) and expired persisted state.
+ const missing=await f.request(f.socket,path);assert.equal(missing.status,403);assert.match(missing.data,/有効期限/);
+ const realNow=Date.now;try{const later=realNow()+9*60*1000;Date.now=()=>later;
+  const expired=await f.request(f.socket,path,null,{cookie});assert.equal(expired.status,403);assert.match(expired.data,/ChatGPTに戻り/);
+  assert.doesNotMatch(expired.data,/<form|csrf|decision/);
+  const denied=await f.request(f.socket,path,{csrf:'dummy-csrf',decision:'allow'},{cookie,origin:issuer});assert.equal(denied.status,403);assert.equal(denied.data,'interaction_denied');
+ }finally{Date.now=realNow;}
+});
+
+test('mounted Vercel helper semantics: consent POST responds once and resumes OAuth successfully',async t=>{
+ const f=await fixture(t,{mounted:true,vercelHelpers:true}),cookies=new Map();
+ const browser=async(path,data)=>{const cookie=[...cookies.values()].filter(c=>path.split('?')[0]===c.path||path.startsWith(c.path.endsWith('/')?c.path:c.path+'/')).map(c=>c.pair).join('; ');const r=await f.request(f.socket,path,data,{cookie,origin:issuer});
+  for(const line of r.headers['set-cookie']||[]){const parts=line.split(';').map(s=>s.trim()),pair=parts[0],name=pair.slice(0,pair.indexOf('=')),path=parts.find(x=>/^path=/i.test(x))?.slice(5)||'/';cookies.set(name+path,{pair,path});}return r;};
+ const verifier='x'.repeat(64),params={client_id:clientId,response_type:'code',redirect_uri:redirectUri,scope:'credits:read',resource,code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url'),state:'dummy-state'};
+ let r=await browser('/mcp/oauth/auth?'+new URLSearchParams(params));const path=new URL(r.headers.location,issuer).pathname;
+ assert.match(path,/^\/interaction\//);assert.equal((await browser(path)).status,200);
+ r=await browser(path,{csrf:'dummy-csrf',decision:'allow'});assert.equal(r.status,303);assert.equal(r.headers['content-length'],'0');assert.equal(r.data,'');
+ const resume=new URL(r.headers.location,issuer);assert.match(resume.pathname,/^\/mcp\/oauth\/auth\//);
+ r=await browser(resume.pathname+resume.search);assert.equal(r.status,303);const callback=new URL(r.headers.location);assert.equal(callback.origin+callback.pathname,redirectUri);assert.equal(callback.searchParams.get('state'),'dummy-state');assert.ok(callback.searchParams.get('code'));
+ r=await f.request(f.socket,'/mcp/oauth/token',{grant_type:'authorization_code',client_id:clientId,redirect_uri:redirectUri,code:callback.searchParams.get('code'),code_verifier:verifier,resource});assert.equal(r.status,200);assert.ok(r.data.access_token);assert.equal(r.data.id_token,undefined);
 });
