@@ -52,15 +52,15 @@ test('revocation endpoint invalidates opaque access; authorization rejects bad c
 });
 
 test('library authorization -> first-party consent -> callback code -> token, without seeded code',async t=>{
- const f=await fixture(t),cookies=new Map();
+ const f=await fixture(t,{mounted:true}),cookies=new Map();
  const browser=async(path,data)=>{const r=await f.request(f.socket,path,data,{cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),origin:issuer});for(const line of r.headers['set-cookie']||[]){const kv=line.split(';')[0],i=kv.indexOf('=');cookies.set(kv.slice(0,i),kv.slice(i+1));}return r;};
  const verifier='x'.repeat(64),params={client_id:clientId,response_type:'code',redirect_uri:redirectUri,scope:'credits:read generation:write',resource,code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url'),state:'dummy-state'};
- let r=await browser('/auth?'+new URLSearchParams(params));assert.ok(r.headers.location?.includes('/interaction/'),JSON.stringify(r));
+ let r=await browser('/mcp/oauth/auth?'+new URLSearchParams(params));assert.ok(r.headers.location?.includes('/interaction/'),JSON.stringify(r));
  const path=new URL(r.headers.location,issuer).pathname;assert.equal((await browser(path)).status,200);
- r=await browser(path,{csrf:'dummy-csrf',decision:'allow'});assert.ok(r.headers.location);
- r=await browser(new URL(r.headers.location,issuer).pathname+new URL(r.headers.location,issuer).search);
+ r=await browser(path,{csrf:'dummy-csrf',decision:'allow'});assert.equal(r.status,200);
+ r=await browser(r.data.match(/href="([^"]+)"/)[1]);
  const callback=new URL(r.headers.location);assert.equal(callback.origin+callback.pathname,redirectUri);assert.equal(callback.searchParams.get('state'),'dummy-state');assert.ok(callback.searchParams.get('code'),JSON.stringify(r));
- const token=await f.exchange({code:callback.searchParams.get('code'),verifier});assert.equal(token.status,200,JSON.stringify(token.data));
+ const token=await f.request(f.socket,'/mcp/oauth/token',{grant_type:'authorization_code',client_id:clientId,redirect_uri:redirectUri,code:callback.searchParams.get('code'),code_verifier:verifier,resource});assert.equal(token.status,200,JSON.stringify(token.data));
  const authenticate=createOpaqueAuthenticator({provider:f.provider,resource,clientId,authorize:async({userId})=>({userId,active:true,emailConfirmed:true,accountStatus:'active',capabilities:['credits:read','generation:write']})});
  const context={accessToken:token.data.access_token};let starts=0;
  const core=coreModule.createCore({authenticate,store:storeModule.createMockStore(),integrity:quoteModule.createQuoteIntegrity(Buffer.alloc(32,9)),backend:{readAccess:async userId=>({userId,allowed:true,availableCredits:1000,watermarkRequired:true,models:['bytedance/seedance-2.0']}),start:async()=>{starts++;}},artifactHosts:[]});
@@ -111,8 +111,22 @@ for(const cold of [false,true])for(const [detachSocket,invalidateInteraction] of
  const verifier='x'.repeat(64),params={client_id:clientId,response_type:'code',redirect_uri:redirectUri,scope:'credits:read',resource,code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url'),state:'dummy-state'};
  let r=await browser('/mcp/oauth/auth?'+new URLSearchParams(params));const path=new URL(r.headers.location,issuer).pathname;
  assert.match(path,/^\/interaction\//);assert.equal((await browser(path)).status,200);
- r=await browser(path,{csrf:'dummy-csrf',decision:'allow'});if(invalidateInteraction){assert.equal(r.status,403);assert.equal(r.data,'interaction_denied');assert.equal(r.headers.location,undefined);return;}assert.equal(r.status,303);assert.equal(r.headers['content-length'],'0');assert.equal(r.data,'');
- const resume=new URL(r.headers.location,issuer);assert.match(resume.pathname,/^\/mcp\/oauth\/auth\//);
+ r=await browser(path,{csrf:'dummy-csrf',decision:'allow'});if(invalidateInteraction){assert.equal(r.status,403);assert.equal(r.data,'interaction_denied');assert.equal(r.headers.location,undefined);return;}assert.equal(r.status,200);assert.equal(r.headers.location,undefined);assert.equal(r.headers['referrer-policy'],'no-referrer');
+ const resume=new URL(r.data.match(/href="([^"]+)"/)[1],issuer);assert.match(resume.pathname,/^\/mcp\/oauth\/auth\//);
  r=await browser(resume.pathname+resume.search);assert.equal(r.status,303);const callback=new URL(r.headers.location);assert.equal(callback.origin+callback.pathname,redirectUri);assert.equal(callback.searchParams.get('state'),'dummy-state');assert.ok(callback.searchParams.get('code'));
  r=await f.request(f.socket,'/mcp/oauth/token',{grant_type:'authorization_code',client_id:clientId,redirect_uri:redirectUri,code:callback.searchParams.get('code'),code_verifier:verifier,resource});assert.equal(r.status,200);assert.ok(r.data.access_token);assert.equal(r.data.id_token,undefined);
+});
+
+for(const scenario of ['deny','expired','double-click','parallel-click'])test('explicit continuation preserves provider '+scenario+' behavior',async t=>{
+ const f=await fixture(t,{mounted:true}),cookies=new Map();
+ const browser=async(path,data)=>{const r=await f.request(f.socket,path,data,{cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),origin:issuer});for(const line of r.headers['set-cookie']||[]){const kv=line.split(';')[0],i=kv.indexOf('=');cookies.set(kv.slice(0,i),kv.slice(i+1));}return r;};
+ const params={client_id:clientId,response_type:'code',redirect_uri:redirectUri,scope:'credits:read',resource,code_challenge_method:'S256',code_challenge:createHash('sha256').update('x'.repeat(64)).digest('base64url'),state:'dummy-state'};
+ const start=await browser('/mcp/oauth/auth?'+new URLSearchParams(params)),path=new URL(start.headers.location,issuer).pathname;
+ const saved=await browser(path,{csrf:'dummy-csrf',decision:scenario==='deny'?'deny':'allow'});assert.equal(saved.status,200);assert.equal(saved.headers.location,undefined);
+ const resume=saved.data.match(/href="([^"]+)"/)[1];
+ if(scenario==='expired'){const adapter=new f.store.Adapter('Interaction'),uid=path.split('/').pop(),row=await adapter.find(uid);await adapter.upsert(uid,row,-1);const r=await browser(resume);assert.equal(r.status,400);assert.equal(r.headers.location,undefined);return;}
+ if(scenario==='parallel-click'){const results=await Promise.all([browser(resume),browser(resume)]);assert.deepEqual(results.map(x=>x.status).sort(),[303,400]);assert.equal(results.filter(x=>x.headers.location&&new URL(x.headers.location).searchParams.has('code')).length,1);return;}
+ const r=await browser(resume);assert.equal(r.status,303);const callback=new URL(r.headers.location);assert.equal(callback.origin+callback.pathname,redirectUri);
+ if(scenario==='deny'){assert.equal(callback.searchParams.get('error'),'access_denied');assert.equal(callback.searchParams.has('code'),false);return;}
+ assert.ok(callback.searchParams.get('code'));const again=await browser(resume);assert.equal(again.status,400);assert.equal(again.headers.location,undefined);
 });
