@@ -4,9 +4,29 @@
   "functions": {
     "api/reference-dance-confirm-upload.js": {
       "maxDuration": 300
+    },
+    "api/mcp.js": {
+      "maxDuration": 300,
+      "includeFiles": "local-mcp/**"
     }
   },
   "routes": [
+    {
+      "src": "/.well-known/(oauth-authorization-server|openid-configuration)/mcp/oauth",
+      "dest": "/api/mcp"
+    },
+    {
+      "src": "/mcp/(.*)",
+      "dest": "/api/mcp"
+    },
+    {
+      "src": "/interaction/(.*)",
+      "dest": "/api/mcp"
+    },
+    {
+      "src": "/.well-known/oauth-protected-resource(?:/api/mcp)?",
+      "dest": "/api/mcp"
+    },
     {
       "src": "/api/seedance-start",
       "dest": "/api/seedance-start-priced"

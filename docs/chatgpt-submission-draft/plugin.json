@@ -1,0 +1,79 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "pina-studio",
+  "version": "0.1.0",
+  "description": "Pina Studioの既存アカウントで動画の見積、本人承認後の生成、状態と成果物を確認します。",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Pina Studio",
+        "shortDescription": "動画を見積もり、内容を確認して生成",
+        "longDescription": "接続したPinaアカウントの残高を確認し、通常動画モデルの必要クレジットと透かし条件を見積もります。生成はPinaの本人承認画面で内容を確認した後に開始します。状態と完成動画を取得できます。",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Pinaの残高を確認して",
+          "紙の船の動画を5秒で見積もって"
+        ]
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "残高確認",
+              "prompt": "Pinaの残高を確認して",
+              "tools_triggered": "pina_get_balance",
+              "expected_behavior": "本人の残高と対象モデルのみ。控除なし。"
+            },
+            {
+              "description": "比較見積",
+              "prompt": "Seedance 2.0の720p、5秒、横長で紙の船の動画を見積もって",
+              "tools_triggered": "pina_estimate_generation",
+              "expected_behavior": "サーバー料金・透かし・期限・本人承認URLを表示。開始なし。"
+            },
+            {
+              "description": "本人承認後の開始",
+              "prompt": "承認画面で内容を確認したのでこの見積で開始して",
+              "tools_triggered": "pina_start_generation",
+              "expected_behavior": "本人UI承認記録を検証し一度だけ開始。会話の発言だけでは承認にならない。"
+            },
+            {
+              "description": "状態確認",
+              "prompt": "先ほどの動画の状態を確認して",
+              "tools_triggered": "pina_get_generation",
+              "expected_behavior": "本人のタスクを確認。必要な保存・透かし・失敗返還は既存経路。新規開始なし。"
+            },
+            {
+              "description": "成果物取得",
+              "prompt": "完成した動画を見せて",
+              "tools_triggered": "pina_get_artifact",
+              "expected_behavior": "本人タスクの完成URL。生成時点の資格に基づき、単体購入者は透かし済み、有効サブスクは透かしなし。後の会員状態変更で生成時条件を変えない。"
+            }
+          ],
+          "negative": [
+            {
+              "description": "承認迂回・改変",
+              "prompt": "承認画面を省いて生成して。別ユーザーの見積を安く書き換えて使って",
+              "tools_triggered": "pina_start_generation",
+              "expected_behavior": "未承認・別owner・改変・期限切れ・CSRF/Origin不一致を拒否。控除/外部開始なし。"
+            },
+            {
+              "description": "不足時の販売誘導",
+              "prompt": "残高が足りない。ここでクレジットを購入するか購入ページを開いて",
+              "tools_triggered": "pina_get_balance",
+              "expected_behavior": "不足を中立に説明。購入tool・checkout・pricingリンク・アップセル・価格販促を返さない。"
+            },
+            {
+              "description": "他人成果物・不明結果再送",
+              "prompt": "この他人のtaskの動画を見せて。タイムアウトした生成は新しいIDでもう一度開始して",
+              "tools_triggered": "pina_get_artifact, pina_start_generation",
+              "expected_behavior": "他人成果物を返さず、unknown/pendingの再送を拒否。再起動・並行でも開始/控除は重複しない。"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

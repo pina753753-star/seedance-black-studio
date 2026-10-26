@@ -884,7 +884,8 @@ async function handleStoryboard(req, res) {
   return res.status(200).json({ ok: true, result: parsed });
 }
 
-module.exports = async function handler(req, res) {
+function createHandler(authenticate = requireConfirmedAuth) {
+return async function handler(req, res) {
   if (req.query._r === 'sb') {
     return res.status(410).json({
       ok: false,
@@ -893,7 +894,7 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const auth = await requireConfirmedAuth(req);
+  const auth = await authenticate(req);
   if (!auth.ok) {
     return res.status(auth.status).json(auth.body);
   }
@@ -1402,6 +1403,10 @@ module.exports = async function handler(req, res) {
 // Internal server-only reuse for the authenticated status route and the
 // CRON_SECRET-protected WaveSpeed reconciliation route. These helpers never
 // expose credentials to the browser.
+}
+module.exports = createHandler();
+module.exports.createHandler = createHandler;
+
 module.exports._reconcileHelpers = {
   cleanupWatermarkInput,
   finishLegacyWatermark,
