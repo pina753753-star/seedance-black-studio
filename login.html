@@ -68,6 +68,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-config.js?v=4a1f0c1"></script>
   <script src="./auth-guard.js?v=2"></script>
+  <script src="./mcp-return.js"></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=flowvidTurnstileReady&amp;render=explicit" defer></script>
   <script>
     let mode='login';
@@ -233,6 +234,7 @@
       }
       clearMessage();
     }
+    const loginDestination=window.PinaMcpReturn?.loginTarget(location.search)||'./profile.html';
     function showRedirectMessage(){
       const text=new URLSearchParams(location.search).get('authMessage');
       if(!text)return;
@@ -255,7 +257,7 @@
         const user=guard
           ? await guard.requireConfirmedUser(client,{redirect:false})
           : null;
-        if(user)location.replace('./profile.html');
+        if(user)location.replace(loginDestination);
       }).catch(()=>{});
     }
 
@@ -344,7 +346,7 @@
         const confirmedUser=await guard.requireConfirmedUser(client);
         if(!confirmedUser)return;
       }
-      location.href='./profile.html';
+      location.href=loginDestination;
     };
   </script>
 </body>
