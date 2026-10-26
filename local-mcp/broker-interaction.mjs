@@ -23,9 +23,9 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    const grant=new provider.Grant({accountId:user.userId,clientId});
    const allowed=['credits:read','generation:read','generation:write'];
    const scopes=String(d.params.scope||'').split(' ').filter(Boolean);
-   if(scopes.some(x=>!allowed.includes(x)&&!['openid','offline_access'].includes(x)))return reject();
+   if(scopes.some(x=>!allowed.includes(x)))return reject();
    grant.addResourceScope(resource,scopes.filter(x=>allowed.includes(x)).join(' '));
-   grant.addOIDCScope(scopes.filter(x=>['openid','offline_access'].includes(x)).join(' '));
+   grant.addOIDCScope(scopes.join(' '));
    const grantId=await grant.save();
    return provider.interactionFinished(req,res,{login:{accountId:user.userId},consent:{grantId}},{mergeWithLastSubmission:false});
   }catch{return reject();}

@@ -68,3 +68,16 @@ test('library authorization -> first-party consent -> callback code -> token, wi
  await assert.rejects(core.dispatch('pina_get_balance',{}, {accessToken:'normal.supabase.jwt'}));
 
 });
+
+test('OAuth-only client rejects OpenID GET/POST and refresh scope escalation',async t=>{
+ const f=await fixture(t),verifier='q'.repeat(64);
+ const params={client_id:clientId,response_type:'code',redirect_uri:redirectUri,scope:'credits:read openid',resource,prompt:'consent',code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url'),state:'test'};
+ for(const method of ['GET','POST']){
+  const r=method==='GET'?await f.request(f.socket,'/auth?'+new URLSearchParams(params)):await f.request(f.socket,'/auth',params);
+  if(method==='POST'){assert.equal(r.status,404);continue;}assert.ok(r.headers.location?.startsWith(redirectUri),JSON.stringify(r));assert.equal(new URL(r.headers.location).searchParams.get('error'),'invalid_scope');
+ }
+ const tokens=await f.exchange(await f.code());assert.equal(tokens.status,200);assert.equal(tokens.data.id_token,undefined);
+ for(const scope of ['credits:read openid','credits:read offline_access','credits:read admin']){
+  const r=await f.request(f.socket,'/token',{grant_type:'refresh_token',client_id:clientId,refresh_token:tokens.data.refresh_token,resource,scope});assert.equal(r.status,400,JSON.stringify(r));assert.equal(r.data.error,'invalid_scope');
+ }
+});

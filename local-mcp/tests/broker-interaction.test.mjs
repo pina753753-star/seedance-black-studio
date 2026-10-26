@@ -16,3 +16,8 @@ test('safe consent HTML has no purchase links; allow creates grant, deny creates
  await f.call();assert.equal(f.state.saved,1);assert.equal(f.state.finished[0].login.accountId,'alice');
  const denied=fixture();await denied.call({body:'csrf=dummy&decision=deny'});assert.equal(denied.state.saved,0);assert.equal(denied.state.finished[0].error,'access_denied');
 });
+test('first-party consent never grants unsupported OpenID or offline scopes',async()=>{
+ for(const scope of ['credits:read openid','credits:read offline_access','credits:read admin']){
+  const f=fixture();f.state.details.params.scope=scope;assert.equal((await f.call()).status,403);assert.equal(f.state.saved,0);assert.equal(f.state.finished.length,0);
+ }
+});
