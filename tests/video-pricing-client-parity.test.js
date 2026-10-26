@@ -31,15 +31,17 @@ test('browser and server credit estimates stay identical for all enabled models'
   ];
   const modes = ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard'];
   const resolutions = ['480p', '720p', '1080p'];
-  const durations = [4, 5, 15, 30];
+  const durations = Array.from({length:30},(_,i)=>i+1);
 
   for (const model of models) {
     for (const mode of modes) {
       for (const resolution of resolutions) {
         for (const duration of durations) {
           for (const plan of ['free', 'team']) {
-            const input = { model, mode, resolution, duration, plan };
-            assert.equal(clientCalculate(input), calculateVideoCreditCost(input), JSON.stringify(input));
+            for(const aspectRatio of ['1:1','4:3','3:4','16:9','9:16','21:9']) {
+              const input = { model, mode, resolution, duration, plan, aspectRatio };
+              assert.equal(clientCalculate(input), calculateVideoCreditCost(input), JSON.stringify(input));
+            }
           }
         }
       }

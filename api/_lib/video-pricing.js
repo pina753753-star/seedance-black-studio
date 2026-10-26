@@ -29,6 +29,18 @@ function roundUpToFive(value, maxCredits = MAX_CREDITS) {
   return Math.ceil(Math.max(MIN_CREDITS, Math.min(maxCredits, value)) / 5) * 5;
 }
 
+// Approved 2.0 1080p floor: 24fps / 1024 tokens, $7.7/M tokens,
+// FX180 + OpenRouter5.5%, API reserve20% + JPY20, Stripe3.6%,
+// tax-exclusive proceeds and legacy annual10%-off Ultimate unit value.
+// Budget assumptions, not a guarantee of actual profit. Other models unchanged.
+function seedance20Minimum(model,resolution,duration,aspectRatio='9:16'){
+  if(model!=='bytedance/seedance-2.0'||resolution!=='1080p')return 0;
+  const pixels={'1:1':1080*1080,'4:3':1440*1080,'3:4':1080*1440,'16:9':1920*1080,'9:16':1080*1920}[aspectRatio]||1080*1920;
+  const providerUsd=pixels*24*duration/1024*0.0000077;
+  const netYenPerCredit=(15800/5100)*0.9*(1/1.1-0.036);
+  return Math.ceil((providerUsd*180*1.055*1.2+20)/netYenPerCredit/5)*5;
+}
+
 function calculateVideoCreditCost(input) {
   const body = input || {};
   const mode = String(body.mode || 'reference_to_video').trim();
@@ -68,11 +80,12 @@ function calculateVideoCreditCost(input) {
     return roundUpToFive(duration * creditsPerSecond, seedance25Pricing.maxCredits);
   }
 
+  const minimum = seedance20Minimum(modelId, resolution, duration, body.aspectRatio || body.aspect_ratio || '9:16');
   if (mode === 'storyboard') {
-    return roundUpToFive(
+    return Math.max(minimum, roundUpToFive(
       Math.max(MIN_CREDITS, duration * 12) * profile.storyboardMultiplier,
       profile.maxCredits
-    );
+    ));
   }
 
   let credits = 80;
@@ -86,10 +99,10 @@ function calculateVideoCreditCost(input) {
     ? PRICING_SAFETY_MULTIPLIER
     : 1;
 
-  return roundUpToFive(
+  return Math.max(minimum, roundUpToFive(
     credits * profile.modelMultiplier * modeMultiplier,
     profile.maxCredits
-  );
+  ));
 }
 
 module.exports = {

@@ -130,3 +130,15 @@ test('purchase-only admin dance stays subscription-only before asset access and 
   assert.equal(h.calls.moderation, 0);
   noSpendOrProvider(h.calls);
 });
+
+for (const mode of ['text_to_video','image_to_video','reference_to_video','storyboard']) {
+  test(`Fast 1080p ${mode} rejects before moderation, writes, debit and provider`, async () => {
+    const h=harness(); const res=await h.request({model:'bytedance/seedance-2.0-fast',resolution:'1080p',mode});
+    assert.equal(res.statusCode,400);assert.equal(res.body.error,'invalid_resolution');
+    assert.equal(h.calls.moderation,0);assert.equal(h.calls.dbWrites,0);noSpendOrProvider(h.calls);
+  });
+  for(const resolution of ['480p','720p'])test(`Fast ${resolution} ${mode} still reaches moderation`,async()=>{
+    const h=harness();const res=await h.request({model:'bytedance/seedance-2.0-fast',resolution,mode});
+    assert.equal(res.statusCode,503);assert.equal(res.body.error,'content_safety_check_unavailable');assert.equal(h.calls.moderation,1);noSpendOrProvider(h.calls);
+  });
+}

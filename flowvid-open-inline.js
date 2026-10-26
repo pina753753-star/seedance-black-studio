@@ -15,7 +15,20 @@
     return Math.ceil(Math.max(50,Math.min(maxCredits,value))/5)*5;
   }
 
-  function computeCredits({duration,resolution,model,mode,plan}){
+// Approved 2.0 1080p floor: 24fps / 1024 tokens, $7.7/M tokens,
+// FX180 + OpenRouter5.5%, API reserve20% + JPY20, Stripe3.6%,
+// tax-exclusive proceeds and legacy annual10%-off Ultimate unit value.
+// Budget assumptions, not a guarantee of actual profit. Other models unchanged.
+function seedance20Minimum(model,resolution,duration,aspectRatio='9:16'){
+  if(model!=='bytedance/seedance-2.0'||resolution!=='1080p')return 0;
+  const pixels={'1:1':1080*1080,'4:3':1440*1080,'3:4':1080*1440,'16:9':1920*1080,'9:16':1080*1920}[aspectRatio]||1080*1920;
+  const providerUsd=pixels*24*duration/1024*0.0000077;
+  const netYenPerCredit=(15800/5100)*0.9*(1/1.1-0.036);
+  return Math.ceil((providerUsd*180*1.055*1.2+20)/netYenPerCredit/5)*5;
+}
+
+  function computeCredits({duration,resolution,model,mode,plan,aspectRatio,aspect_ratio}){
+    const minimum=seedance20Minimum(model,resolution,duration,aspectRatio||aspect_ratio||'9:16');
     const seedance25Pricing=SEEDANCE_25_PRICING[model];
     if(seedance25Pricing){
       const creditsPerSecond=seedance25Pricing.creditsPerSecond[resolution]||seedance25Pricing.creditsPerSecond['720p'];
@@ -23,7 +36,7 @@
     }
     const multiplier=(model===FAST_MODEL||model==='bytedance/seedance-2.0-lite')?0.8:1;
     const maxCredits=400;
-    if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12),maxCredits);
+    if(mode==='storyboard')return Math.max(minimum,roundUpToFive(Math.max(50,duration*12),maxCredits));
     let credits=80;
     credits+=Math.max(0,duration-5)*15;
     if(resolution==='1080p')credits+=100;
@@ -31,7 +44,7 @@
     if(mode==='text_to_video')credits-=10;
     credits+=15;
     const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;
-    return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);
+    return Math.max(minimum,roundUpToFive(credits*multiplier*modeMultiplier,maxCredits));
   }
   window.flowvidComputeCredits=computeCredits;
 
@@ -41,7 +54,7 @@
     const model=document.getElementById('model')?.value||FAST_MODEL;
     const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
     const plan=localStorage.getItem('flowvidPlan')||localStorage.getItem('plan')||'free';
-    return computeCredits({duration,resolution,model,mode,plan});
+    return computeCredits({duration,resolution,model,mode,plan,aspectRatio:document.getElementById('aspect')?.value||'9:16'});
   }
 
   function syncCreditButton(){
@@ -187,7 +200,7 @@
   function installCreditSync(){
     if(window.__flowvidCreditSyncInstalled)return;
     window.__flowvidCreditSyncInstalled=true;
-    ['model','duration','resolution'].forEach(id=>{
+    ['model','duration','resolution','aspect'].forEach(id=>{
       document.getElementById(id)?.addEventListener('change',()=>setTimeout(syncCreditButton,0));
     });
     document.querySelectorAll('[data-mode]').forEach(button=>{

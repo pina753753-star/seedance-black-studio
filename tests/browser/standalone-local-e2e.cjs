@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
-const reportPath = '/workspace/pina-deliverables/integration-browser-report.json';
+const reportPath = process.env.PINA_BROWSER_REPORT || '/workspace/pina-deliverables/integration-browser-report.json';
 const origin = 'http://pina.local';
 const passed = [], failures = [];
 let blockedExternal = 0, unexpectedApi = [];
@@ -71,6 +71,46 @@ async function model(page,value,resolution) {
  let browser;
  try{
  browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-background-networking','--disable-component-update','--disable-sync','--host-resolver-rules=MAP * ~NOTFOUND']});
+ await run('2.0 1080 aspect prices persist through history refresh and storyboard estimates',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:false,storyboard25:false,watermarkRequired:true});
+  try{
+   await model(f.page,'bytedance/seedance-2.0','1080p');
+   await f.page.locator('#duration').selectOption('15');
+   for(const [aspect,credits] of [['16:9',535],['1:1',335],['4:3',405],['9:16',535]]){
+    await f.page.locator('#aspect').selectOption(aspect);await f.page.waitForTimeout(850);
+    assert.match(await f.page.locator('#create').textContent(),new RegExp(credits+'$'));
+    assert.equal(await f.page.evaluate(()=>creditEstimate()),credits);
+   }
+   await f.page.locator('#create').click();await f.page.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
+   assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.estimated_credits,535);assert.equal(f.starts[0].body.aspect_ratio,'9:16');
+   await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');await f.page.locator('#sbResolution').selectOption('1080p');await f.page.locator('#sbDuration').selectOption('15');
+   for(const [aspect,credits] of [['16:9',535],['1:1',400],['4:3',405]]){await f.page.locator('#sbAspect').selectOption(aspect);assert.equal(await f.page.locator('#sbCreditEstimateValue').textContent(),String(credits));}
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
+ for(const prepared of [false,true])await run('Fast saved 1080p restores visibly to 720p, prepared='+prepared,async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:false,storyboard25:false,watermarkRequired:true});
+  try{
+   await f.page.evaluate(prepared=>{localStorage.setItem(prepared?'flowvidStoryboardDraft':'flowvidGenerateDraft',JSON.stringify({model:'bytedance/seedance-2.0-fast',resolution:'1080p',duration:5,aspect:'16:9',mode:'text_to_video',prompt_text_to_video:'A paper boat',prompt:'A paper boat',prepared,imageUrl:prepared?'https://synthetic.invalid/image.png':undefined}));},prepared);
+   await f.page.reload({waitUntil:'networkidle'});
+   assert.equal(await f.page.locator('#resolution').inputValue(),'720p');
+   assert.equal(await f.page.locator('#resolution option[value="1080p"]').evaluate(el=>el.disabled&&el.hidden),true);
+   assert.equal(await f.page.locator('#fastResolutionNotice').evaluate(el=>!el.hidden),true);
+   assert.match(await f.page.locator('#fastResolutionNotice').textContent(),/720pに変更/);
+   assert.equal(f.starts.length,0);
+   await f.page.locator('#mainCard details.settings').evaluate(el=>{el.open=true});
+   await f.page.locator('#model').selectOption('bytedance/seedance-2.0');
+   assert.equal(await f.page.locator('#resolution option[value="1080p"]').evaluate(el=>el.disabled||el.hidden),false);
+   await f.page.locator('[data-mode="storyboard"]').click();
+   await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');
+   await f.page.locator('#sbResolution').selectOption('1080p');
+   await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0-fast');
+   assert.equal(await f.page.locator('#sbResolution').inputValue(),'720p');
+   assert.equal(await f.page.locator('#sbResolution option[value="1080p"]').evaluate(el=>el.disabled&&el.hidden),true);
+   assert.equal(await f.page.locator('#sbFastResolutionNotice').evaluate(el=>!el.hidden),true);
+   assert.equal(f.starts.length,0);assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
  await run('purchase: 2.5 Turbo enabled, audio/storyboard restricted, ordinary start sends one authenticated mock request',async()=>{
   const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:false,storyboard25:false,watermarkRequired:true});
   try{

@@ -146,8 +146,8 @@
   }
 
   function selectedModel(){const model=$('model')?.value||STANDARD_MODEL;return model===LEGACY_LITE_MODEL?FAST_MODEL:model}
-  function credits(){const args={mode:currentMode(),duration:Number($('duration')?.value||5),resolution:$('resolution')?.value||'720p',model:selectedModel()};if(typeof window.flowvidComputeCredits==='function')return window.flowvidComputeCredits(args);let c=80;c+=Math.max(0,args.duration-5)*15;if(args.resolution==='1080p')c+=100;if(args.resolution==='480p')c-=20;if(args.mode==='text_to_video')c-=10;c+=15;const multiplier=args.model===FAST_MODEL?.8:1;return Math.max(50,Math.round(c*multiplier))}
-  function updateCreate(){const b=$('create');if(b)b.textContent='作成する ✦ '+credits()}
+  function credits(){const args={mode:currentMode(),duration:Number($('duration')?.value||5),resolution:$('resolution')?.value||'720p',model:selectedModel(),aspectRatio:$('aspect')?.value||'9:16'};if(typeof window.flowvidComputeCredits==='function')return window.flowvidComputeCredits(args);return null}
+  function updateCreate(){const b=$('create'),c=credits();if(b)b.textContent=c===null?'料金を確認できません。再読み込みしてください':'作成する ✦ '+c}
   function startTimeout(ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);return {signal:c.signal,clear:()=>clearTimeout(t)}}
   async function parseJsonResponse(res){const text=await res.text();try{return text?JSON.parse(text):{}}catch(_){return{ok:false,error:text.slice(0,200)||'Invalid response'}}}
   function showError(msg){const now=$('now'),job=$('job'),create=$('create');if(job)job.textContent='送信失敗: '+String(msg||'unknown').slice(0,90);if(create)create.disabled=false;if(now)now.classList.add('show')}
@@ -156,6 +156,7 @@
     const mode=currentMode();
     const refs=getRefs();
     updateCreate();
+    if(credits()===null){alert('料金を確認できません。再読み込みしてください');return}
     if(!prompt){alert('プロンプトを入力してください');return}
     if(mode!=='text_to_video'&&!refs.length){alert('画像をアップロードしてください');return}
     const create=$('create'),now=$('now'),done=$('done'),job=$('job');
