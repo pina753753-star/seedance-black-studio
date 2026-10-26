@@ -385,7 +385,8 @@ async function releaseTask(db, userId, taskId, status, errorMessage) {
   }
 }
 
-module.exports = async function handler(req, res) {
+function createHandler(authenticate = requireConfirmedAuth) {
+return async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(200).json({
       ok: true,
@@ -400,7 +401,7 @@ module.exports = async function handler(req, res) {
 
   // Authenticate against Supabase Auth and reject unconfirmed addresses before
   // moderation, balance reads, task creation, credit use, or OpenRouter calls.
-  const auth = await requireConfirmedAuth(req);
+  const auth = await authenticate(req);
   if (!auth.ok) {
     return res.status(auth.status).json(auth.body);
   }
@@ -1199,5 +1200,9 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     return res.status(500).json({ ok: false, error: error?.message || 'Unknown error', refunded, checkedAt: new Date().toISOString() });
   }
 };
+
+}
+module.exports = createHandler();
+module.exports.createHandler = createHandler;
 
 module.exports._test = { buildWaveSpeedPayload, buildWaveSpeedMotionControlPayload, resolveWaveSpeedModel };

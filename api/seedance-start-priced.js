@@ -24,7 +24,8 @@ function normalizeModel(value) {
 // 限定のベータ提供ゲートを解除した(api/upload-reference-image.js参照)。
 // 参照画像に対するモデレーション(sexual/minors等)は、この後coreHandler
 // (api/_lib/seedance-start.js)側の既存チェックがそのまま引き続き行う。
-module.exports = async function handler(req, res) {
+function createHandler(coreHandler) {
+return async function handler(req, res) {
   if (req.method !== 'POST') return coreHandler(req, res);
 
   const body = jsonBody(req);
@@ -45,3 +46,7 @@ module.exports = async function handler(req, res) {
 
   return coreHandler(req, res);
 };
+
+}
+module.exports = createHandler(coreHandler);
+module.exports.createHandler = createHandler;
