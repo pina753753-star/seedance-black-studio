@@ -78,6 +78,12 @@ export function createBrokerInteraction({provider,origin,clientId,resource,verif
    stage='grant_save';
    const grantId=await grant.save();
    return await finish({login:{accountId:user.userId},consent:{grantId}});
-  }catch(error){report(['ERR_HTTP_HEADERS_SENT','ERR_INVALID_CHAR','ERR_HTTP_INVALID_HEADER_VALUE'].includes(error?.code)?'consent_response_failed':error instanceof errors.SessionNotFound&&['details','finalize_result'].includes(stage)?'consent_'+stage+'_missing':'consent_'+stage+'_failed');return reject();}
+  }catch(error){
+   if(stage==='finalize_result'){
+    const socket=req.socket==null?'missing':'present';
+    const type=error instanceof TypeError?'type_error':error instanceof RangeError?'range_error':'other';
+    report('consent_result_socket_'+socket+'_'+type);
+   }
+   report(['ERR_HTTP_HEADERS_SENT','ERR_INVALID_CHAR','ERR_HTTP_INVALID_HEADER_VALUE'].includes(error?.code)?'consent_response_failed':error instanceof errors.SessionNotFound&&['details','finalize_result'].includes(stage)?'consent_'+stage+'_missing':'consent_'+stage+'_failed');return reject();}
  };
 }
