@@ -2,9 +2,9 @@ import test from 'node:test';import assert from 'node:assert/strict';import {Rea
 import {createBrokerInteraction} from '../broker-interaction.mjs';
 function fixture(){
  const state={finished:[],saved:0,user:{userId:'alice',emailConfirmed:true,accountStatus:'active'},diagnostics:[],details:{uid:'interaction',params:{client_id:'pina',resource:'https://pina.invalid/mcp',scope:'credits:read generation:write'}}};
- const provider={interactionDetails:async()=>state.details,interactionResult:async(req,res,result)=>{if(state.finishHeadersSent){res.headersSent=true;res.writableEnded=state.finishEnded;throw Object.assign(new Error('private header details'),{code:'ERR_HTTP_HEADERS_SENT'});}if(state.finishError)throw (state.finishError instanceof Error?state.finishError:new Error('dummy persistence failure'));state.finished.push(result);return 'https://pina.invalid/mcp/oauth/auth/dummy';},Grant:class{constructor(p){this.params=p;}addResourceScope(){}addOIDCScope(){}async save(){state.saved++;return 'grant';}}};
+ const provider={interactionDetails:async()=>state.details,interactionResult:async(req,res,result)=>{if(state.onFinish)state.onFinish(req);if(state.finishHeadersSent){res.headersSent=true;res.writableEnded=state.finishEnded;throw Object.assign(new Error('private header details'),{code:'ERR_HTTP_HEADERS_SENT'});}if(state.finishError)throw (state.finishError instanceof Error?state.finishError:new Error('dummy persistence failure'));state.finished.push(result);return 'https://pina.invalid/mcp/oauth/auth/dummy';},Grant:class{constructor(p){this.params=p;}addResourceScope(){}addOIDCScope(){}async save(){state.saved++;return 'grant';}}};
  const handler=createBrokerInteraction({provider,origin:'https://pina.invalid',clientId:'pina',resource:'https://pina.invalid/mcp',verifyPinaBrowserSession:async()=>state.user,issueCsrf:async()=>'<dummy>',verifyCsrf:async(v,b)=>v==='dummy'&&b.userId==='alice'&&b.interactionId==='interaction',diagnostic:code=>state.diagnostics.push(code)});
- async function call({method='POST',origin='https://pina.invalid',body='csrf=dummy&decision=allow',parsedBody,parsed=false,socket={}}={}){const req=Readable.from([body]);req.socket=socket;if(parsed){for await(const c of req){}req.body=parsedBody;}req.method=method;req.headers={origin,'content-type':'application/x-www-form-urlencoded'};const res={status:200,writes:0,ends:0,setHeader(k,v){if(state.responseError)throw Error('private response detail');this.headers??={};this.headers[k]=v;},writeHead(s,h){if(this.headersSent)throw Error('second write');this.writes++;this.status=s;this.headers=h;},end(body){this.ends++;this.writableEnded=true;this.body=body;}};await handler(req,res);return res;}
+ async function call({method='POST',origin='https://pina.invalid',body='csrf=dummy&decision=allow',parsedBody,parsed=false,socket={}}={}){const req=Readable.from([body]);state.request=req;req.socket=socket;if(parsed){for await(const c of req){}req.body=parsedBody;}req.method=method;req.headers={origin,'content-type':'application/x-www-form-urlencoded'};const res={status:200,writes:0,ends:0,setHeader(k,v){if(state.responseError)throw Error('private response detail');this.headers??={};this.headers[k]=v;},writeHead(s,h){if(this.headersSent)throw Error('second write');this.writes++;this.status=s;this.headers=h;},end(body){this.ends++;this.writableEnded=true;this.body=body;}};await handler(req,res);return res;}
  return {state,call};
 }
 test('first party consent requires session, CSRF, Origin and correct client/resource/account',async()=>{
@@ -47,8 +47,17 @@ test('diagnostics distinguish saved interaction result from response failure',as
 test('finalization emits only fixed socket and allowlisted exception categories',async()=>{
  for(const socket of [undefined,null,{}])for(const [ErrorType,type] of [[TypeError,'type_error'],[RangeError,'range_error'],[Error,'other']]){
   const f=fixture();f.state.finishError=new ErrorType('private token URL and stack must not be logged');
-  const r=await f.call({socket:socket===undefined?null:socket});assert.equal(r.status,403);assert.equal(f.state.saved,1);assert.equal(f.state.finished.length,0);
+  f.state.onFinish=()=>{f.state.request.socket=socket;};const r=await f.call();assert.equal(r.status,403);assert.equal(f.state.saved,1);assert.equal(f.state.finished.length,0);
   assert.deepEqual(f.state.diagnostics,['consent_result_socket_'+(socket==null?'missing':'present')+'_'+type,'consent_finalize_result_failed']);
  }
  const f=fixture();const forged=new Error('private');forged.name='TypeError';f.state.finishError=forged;await f.call();assert.equal(f.state.diagnostics[0],'consent_result_socket_present_other');
 });
+
+ test('provider metadata retains only the original transport and leaves the real request detached',async()=>{
+  const f=fixture(),socket={encrypted:false,remoteAddress:'127.0.0.1'};
+  f.state.onFinish=req=>{f.state.request.socket=null;assert.equal(req.socket,socket);assert.equal(req.headers,f.state.request.headers);assert.equal(req.socket.encrypted,false);};
+  const r=await f.call({socket});assert.equal(r.statusCode,303);assert.equal(f.state.request.socket,null);assert.equal(f.state.saved,1);
+ });
+ test('missing original transport fails closed before grant or finalization',async()=>{
+  const f=fixture();const r=await f.call({socket:null});assert.equal(r.status,403);assert.equal(f.state.saved,0);assert.equal(f.state.finished.length,0);
+ });
