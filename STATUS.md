@@ -1,4 +1,61 @@
-# FlowVid Studio 完成までの全体像(最終更新: 2026-09-14)
+# Pina Studio 状態・引き継ぎ（整理日: 2026-10-25）
+
+[資料の入口](CLAUDE.md) / [資料マップ](docs/PROJECT-MAP.md) / [運営ロードマップ](OPERATIONS-ROADMAP.md)
+
+## 現在の仕様・優先順位
+
+- **確定仕様**：単体購入で通常Seedance 2.0 / Fast / 2.5 / Turboを利用可能にする。単体購入のみは透かしあり、有効サブスクは透かしなし。LIVE / Director / H3 / edit等の追加機能は既存tierを維持する。
+- **主目的**：クレジット単体購入、その後ChatGPT入口。全機能解放案は基本4モデルへ縮小され、保留。ChatGPT入口の具体的な実装・公開形態は本記録では未確定。
+- **ダンスの品質目標（確定仕様）**：参考動画から動きだけを取り、顔・体型・服・背景はキャラ画像を維持する。現出力は体型が痩せ、背景が参考動画へ寄るため品質未完。対応方針の検討と実装・検証完了を混同しない。
+
+## 配備・作業状態のスナップショット
+
+2026-10-25 23:56 UTCまでの親作業者の本番確認報告からの引き継ぎと、下記commitのローカル読み取り照合に基づく。動的な環境状態を将来も保証するものではない。再開時は対象環境・commit・SQL適用状態を再確認する。ここにある完了記録は新しい実行許可ではない。
+
+| 対象 | 状態 | 識別・根拠 |
+|---|---|---|
+| main / 本番フロント | **本番済み（23:54 UTC promote）** | PR #257 / main `15896a45c59c4e9755c006f8f07dde06cffc1720` / Production `dpl_DZUUvczQGG9mzEbmJNU2TepQetS6`。候補5f804とtree一致をローカル照合 |
+| 本番Railway worker | **本番済み**（親の反映確認） | `1ddb1c9b352d492593e9aef4bba598fea6acbf03`。MOV/明示同意trimのworker2ファイル＋境界テスト。mainと別配備 |
+| ダンス・認証Preview | **固定Preview反映済み、そのコードは新mainにも統合済み**（新本番での実認証・生成は未検証） | `fix/pina-dance-mov-trim-20261024` / `252ebef340ec98732408640502579d1e5ee1c790` |
+| 通常4モデル単体購入 | **コード・SQL・本番promote完了**。実決済E2Eは未実施 | 候補 `preview/basic-credits-20261025` / `5f804d07eb71e5b5cc3447192367c8889570e7ac` をPR #257で統合。SQL migration `20261025234952_basic_credit_access_atomic` 適用を親が確認 |
+| Previewアクセス保護 | **Preview専用Vercel認証を23:31 UTC承認・有効化済み**（親の確認） | 本番はpublic。アプリのSupabase認証とは別。設定値・秘密値は本整理で取得しない |
+| 価格表示の205→185上書き修正 | **ローカルのみ、未commit・未push・未公開** | `fix/pina-dance-credit-display-local-20261025`。基準252ebef、175テスト成功。追加公開しない |
+| この文書整理 | **ローカル文書のみ、未commit・未push・未公開** | `docs/pina-document-map-main-20261025`、基準15896a45。旧ec9190f基準の整理は別worktreeに保持。コード・DB・設定変更なし |
+
+23:45 UTCの承認に基づく別タスクの完了報告：SQL migrationを適用し、`check_purchase_credit_access_locked(uuid)` と `deduct_generation_credits_atomic(uuid,uuid,integer)` の定義およびservice_roleのみ実行可能な権限を読み戻し確認。適用・rollback原本は [SQL](docs/sql/basic-credit-access-atomic.sql) / [rollback](docs/sql/basic-credit-access-rollback.sql)。本整理ではDBを照会・変更していない。
+
+親は主要5ドメインの新Production割当と、`www.pinastudio.jp` の新仕様・5パック価格・導線をブラウザ確認。23:56 UTCに一時変更したautoassignをfalseから元のtrueへ復元し、UIのchecked=trueを確認。Preview専用Vercel認証は維持、本番はpublic。既存残高・価格・返金ルール・キー・workerはこのリリースで変更なし。
+
+**未検証**：この新Productionでの実Authログイン後の利用、実決済、有料生成のE2E。下記の先行ダンス実テストは別時点・別フロント環境の結果であり、新Productionの購入経路を検証した証拠ではない。ダンス品質・価格表示ローカル修正・ChatGPT入口／pluginは未完。公開完了と全機能の品質・実取引検証完了を区別する。
+
+## ダンス実テストの結果と限界
+
+親の実ブラウザ・台帳確認からの引き継ぎ（本整理で再生成・台帳再照会はしていない）：
+
+- task `6cc4c15b-1797-4ee1-bd26-fa8f16a1ce98` は completed。480p・10秒指定、`credit_cost=205`、台帳 `-205` を確認。
+- 出力実測9.708333秒、434×942。元動画の5〜15秒の振付をキャラが再現することをフレーム確認し、ユーザーへ納品済み。
+- **成功範囲**：アップロード→検査ready→Motion Control送信→生成完了→205控除→出力取得。
+- **未完範囲**：顔・体型・服・背景をキャラ画像のまま維持する品質。生成完了や振付再現だけでダンス機能を完成扱いにしない。
+- 10.000秒指定と出力実測は一致していない。料金は検査済み参考動画の秒数で計算される。追加生成は行わない。
+
+## 再発防止・引き継ぎ時の確認
+
+1. **複数の料金表示更新**：生成画面の計算が正しくても、`flowvid-open-inline.js` の監視処理と `flowvid-history.js` の後続更新で通常料金へ上書きされた。関数単体の一致だけでなく、実際の読込順・MutationObserver・履歴更新後の表示まで検証する。修正は上記ローカル175テスト版で保持。
+2. **正規ログインの誤停止**：SDKは既存セッションの復元でもSIGNED_INを通知する。イベント発生だけで本人確認成功を無効化しない。同一トークン・ユーザーの一致を確認し、別アカウント・ログアウト・失効時の拒否を維持する。252ebefの修正後、親が実画面の誤停止解消を確認。
+3. **配備先の混同**：main、Vercel Preview、Railway worker、共有DBは別状態。READYや認証診断だけで全経路の反映完了とはしない。provider処理を行わない診断と有料生成を区別する。
+4. **資料の時間差**：READMEの「全モードOpenRouter」は現mainコードと不一致だった。プロバイダ・公開状況はcommit付きで確認する。候補資料の「未commit」「すべて未実行」はその作成時点の記録として読み、本節の最新確認状態と区別する。
+5. **安全な記録**：秘密値・トークン・署名URLを引き継ぎ資料へ保存しない。以前のキー交換作業は撤回済み。変更済み・安全化済みと記録せず、新たなキー操作をこの文書から開始しない。
+
+## 証拠・候補資料の所在
+
+- リポジトリ内の永続資料と本番統合済みのリリース資料への参照は [資料マップ](docs/PROJECT-MAP.md)。候補ブランチをmainへ取り込む指示ではない。
+- executor内の `/workspace/pina-handoff/` には差分・試験ログ・手順書があるが、GitHubへ保存された資料ではなく、別環境に存在するとは限らない。
+- ローカル表示修正の差分 `dance-credit-display-local.diff`、試験ログ `dance-credit-display-regression.log`、過去のダンス手順 `dance-final-verification-runbook.md`。過去手順の残作業は、この実施結果・最新指示と照合して読む。
+- 本節以前の作業ログは下に保存する。古い「現在」「未実施」「完了」は各記録日・対象範囲に限る。本節と矛盾する場合は新しい確認事実を優先し、安全制約・承認ルールは別途維持する。
+
+---
+
+## 過去の全体像・作業履歴（従来表題の最終更新: 2026-09-14）
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
 
