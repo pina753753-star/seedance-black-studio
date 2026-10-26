@@ -36,7 +36,7 @@ function harness({ authenticated = true, stripeFails = false } = {}) {
   } };
 }
 
-for (const [id, amount, credits] of [['credits_100',500,100],['credits_300',1300,300],['credits_500',2000,500],['credits_1000',3600,1000],['credits_3000',9800,3000]]) {
+for (const [id, amount, credits] of [['credits_100',500,100],['credits_300',1300,300],['credits_500',2000,500],['credits_1000',4000,1000],['credits_3000',11800,3000]]) {
   for (const ui of ['embedded', 'hosted']) test(`${id} ${ui}: authenticated user needs no subscription; prices/metadata unchanged`, async () => {
     const h = harness();
     const res = await h.request({ kind: 'credits', id, ui, user_id: 'attacker', credits: 999999, plan: 'team' });

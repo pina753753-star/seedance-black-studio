@@ -41,7 +41,9 @@ for (const model of MODELS) {
         const input = { model, mode, resolution, duration };
         assert.equal(
           calculateVideoCreditCost(input),
-          legacySeedanceCreditCost(input),
+          model === 'bytedance/seedance-2.0' && resolution === '1080p'
+            ? Math.max(legacySeedanceCreditCost(input), Math.ceil(((1080*1920*24*duration/1024*0.0000077)*180*1.055*1.2+20)/((15800/5100)*0.9*(1/1.1-0.036))/5)*5)
+            : legacySeedanceCreditCost(input),
           JSON.stringify(input)
         );
         cases += 1;

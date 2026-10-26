@@ -96,7 +96,7 @@ test('existing Seedance 2.0 constraints and Fast 1080p reference block remain un
   }).error, 'invalid_duration');
   assert.equal(validateVideoGenerationOptions({
     model: 'bytedance/seedance-2.0-fast', mode: 'reference_to_video', resolution: '1080p', duration: 5
-  }).error, 'unsupported_combination');
+  }).error, 'invalid_resolution');
 });
 
 test('the public generation entry point forwards both Seedance 2.5 variants to the core handler', async () => {

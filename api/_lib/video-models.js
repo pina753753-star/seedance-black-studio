@@ -39,7 +39,7 @@ const VIDEO_MODELS = Object.freeze({
     enabledForGeneration: true,
     metadataConfidence: 'production_verified',
     durations: Object.freeze({ min: 1, max: 15, integerOnly: true }),
-    resolutions: Object.freeze(['480p', '720p', '1080p']),
+    resolutions: Object.freeze(['480p', '720p']),
     aspectRatios: Object.freeze(['9:16', '16:9', '1:1', '4:3', '3:4']),
     modes: Object.freeze(['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard']),
     generateAudio: Object.freeze({ supported: true, currentDefault: true }),
@@ -47,7 +47,7 @@ const VIDEO_MODELS = Object.freeze({
     unsupportedCombinations: Object.freeze([
       Object.freeze({ mode: 'reference_to_video', resolution: '1080p' })
     ]),
-    notes: Object.freeze(['Reference-to-video at 1080p is blocked by the existing production flow.'])
+    notes: Object.freeze(['OpenRouter supports Fast at 480p/720p only; 1080p is rejected before charging.'])
   }),
 
   'bytedance/seedance-2.0-lite': Object.freeze({

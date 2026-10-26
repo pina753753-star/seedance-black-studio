@@ -640,6 +640,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       resolution,
       model,
       plan: generationPlan,
+      aspectRatio,
       referenceDanceBillableSeconds: referenceDance?.billableSeconds
     });
 

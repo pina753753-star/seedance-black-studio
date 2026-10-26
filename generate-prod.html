@@ -72,7 +72,7 @@
 <div class="prompt"><textarea id="prompt" placeholder="キャラクター、商品、シーン、動きを入力してください。"></textarea></div>
 <details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5-standard">Seedance 2.5</option><option value="bytedance/seedance-2.5">Seedance 2.5 Turbo</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
 <button class="create" id="create">作成する ✦ 80</button>
-<div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="planWarning" style="display:none;margin-top:10px;background:rgba(232,203,116,.07);border:1px solid rgba(232,203,116,.28);border-radius:14px;padding:12px 16px;color:#f4d98d;font-size:13px;font-weight:700;line-height:1.6">通常のSeedance 2.5生成は購入クレジットまたは対象の有効なサブスクで利用できます。単体購入はウォーターマーク付きです。曲アップロード・Seedance 2.5の絵コンテは有効なPremium以上のサブスクが必要です。<br><a href="./pricing.html#monthly" style="color:#fff;text-decoration:underline">プランを見る →</a></div><div id="seedance25Promo" style="display:none;margin-top:10px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.24);border-radius:14px;padding:12px 16px;color:#cceeff;font-size:12px;font-weight:700;line-height:1.7">公開記念価格（期間限定）<br>Seedance 2.5 Turbo・1080p：15秒 300クレジット／30秒 600クレジット<br><span style="color:#9ca3af;font-weight:500">終了前にサイト内でお知らせします。</span></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
+<p id="fastResolutionNotice" role="status" hidden></p><div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="planWarning" style="display:none;margin-top:10px;background:rgba(232,203,116,.07);border:1px solid rgba(232,203,116,.28);border-radius:14px;padding:12px 16px;color:#f4d98d;font-size:13px;font-weight:700;line-height:1.6">通常のSeedance 2.5生成は購入クレジットまたは対象の有効なサブスクで利用できます。単体購入はウォーターマーク付きです。曲アップロード・Seedance 2.5の絵コンテは有効なPremium以上のサブスクが必要です。<br><a href="./pricing.html#monthly" style="color:#fff;text-decoration:underline">プランを見る →</a></div><div id="seedance25Promo" style="display:none;margin-top:10px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.24);border-radius:14px;padding:12px 16px;color:#cceeff;font-size:12px;font-weight:700;line-height:1.7">公開記念価格（期間限定）<br>Seedance 2.5 Turbo・1080p：15秒 300クレジット／30秒 600クレジット<br><span style="color:#9ca3af;font-weight:500">終了前にサイト内でお知らせします。</span></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
 <div class="mini"></div>
 <pre class="log" id="log"></pre>
 </section>
@@ -113,7 +113,7 @@
     <div class="field"><label>モデル</label><select id="sbModel"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5-standard">Seedance 2.5（Premium以上）</option><option value="bytedance/seedance-2.5">Seedance 2.5 Turbo（Premium以上）</option></select></div>
     <div class="field"><label>アスペクト比</label><select id="sbAspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div>
     <div class="field"><label>長さ</label><select id="sbDuration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div>
-    <div class="field"><label>解像度</label><select id="sbResolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div>
+    <div class="field"><label>解像度</label><p id="sbFastResolutionNotice" role="status" hidden></p><select id="sbResolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div>
   </div></details>
 
   <div id="sbCreditEstimate" style="margin-top:12px;font-size:13px;color:#aaa">動画生成予定: <span id="sbCreditEstimateValue">-</span> credits<br><span style="font-size:11px;color:#666">※プロンプト作成時はクレジットを消費しません</span></div>
@@ -323,13 +323,26 @@ function pricingMultiplier(model){return model==='bytedance/seedance-2.0-fast'||
 function pricingMaxCredits(model){return SEEDANCE_25_PRICING[model]?.maxCredits||400}
 function roundUpToFive(v,maxCredits=400){return Math.ceil(Math.max(50,Math.min(maxCredits,v))/5)*5;}
 const PRICING_SAFETY_MULTIPLIER=1.15;
+// Approved 2.0 1080p floor: 24fps / 1024 tokens, $7.7/M tokens,
+// FX180 + OpenRouter5.5%, API reserve20% + JPY20, Stripe3.6%,
+// tax-exclusive proceeds and legacy annual10%-off Ultimate unit value.
+// Budget assumptions, not a guarantee of actual profit. Other models unchanged.
+function seedance20Minimum(model,resolution,duration,aspectRatio='9:16'){
+  if(model!=='bytedance/seedance-2.0'||resolution!=='1080p')return 0;
+  const pixels={'1:1':1080*1080,'4:3':1440*1080,'3:4':1080*1440,'16:9':1920*1080,'9:16':1080*1920}[aspectRatio]||1080*1920;
+  const providerUsd=pixels*24*duration/1024*0.0000077;
+  const netYenPerCredit=(15800/5100)*0.9*(1/1.1-0.036);
+  return Math.ceil((providerUsd*180*1.055*1.2+20)/netYenPerCredit/5)*5;
+}
+
 function creditEstimate(){const duration=Number($('duration')?.value||5);const resolution=$('resolution')?.value||'720p';const model=$('model')?.value||'bytedance/seedance-2.0-fast';
+  const minimum=seedance20Minimum(model,resolution,duration,$('aspect')?.value||'9:16');
   // refs: 参照画像の枚数目安。絵コンテタブの確定フロー(sbLocked)は専用画像1枚として扱い、
   // 通常のリファレンスタブは画像の内容にかかわらず実際のアップロード完了枚数(urls.length)、
   // image_to_videoは1枚、text_to_videoは0枚とする。
   const refs=mode==='text_to_video'?0:(sbLocked?1:(mode==='image_to_video'?1:urls.length));
   if(referenceDanceAsset?.status==='ready'&&canUseReferenceDance()){const billableReferenceSeconds=Number(referenceDanceAsset.billableSeconds||0);return Math.ceil((((($('resolution').value==='480p'?22:44)*billableReferenceSeconds)*11/12))/5)*5}
-  const seedance25Pricing=SEEDANCE_25_PRICING[model];if(seedance25Pricing){const creditsPerSecond=seedance25Pricing.creditsPerSecond[resolution]||seedance25Pricing.creditsPerSecond['720p'];return roundUpToFive(duration*creditsPerSecond,seedance25Pricing.maxCredits);}const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return roundUpToFive(Math.max(50,duration*12),maxCredits);let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return roundUpToFive(credits*multiplier*modeMultiplier,maxCredits);}
+  const seedance25Pricing=SEEDANCE_25_PRICING[model];if(seedance25Pricing){const creditsPerSecond=seedance25Pricing.creditsPerSecond[resolution]||seedance25Pricing.creditsPerSecond['720p'];return roundUpToFive(duration*creditsPerSecond,seedance25Pricing.maxCredits);}const multiplier=pricingMultiplier(model);const maxCredits=pricingMaxCredits(model);if(mode==='storyboard')return Math.max(minimum,roundUpToFive(Math.max(50,duration*12),maxCredits));let credits=80;credits+=Math.max(0,duration-5)*15;if(resolution==='1080p')credits+=100;if(resolution==='480p')credits-=20;if(mode==='text_to_video')credits-=10;credits+=15;const modeMultiplier=mode==='reference_to_video'?PRICING_SAFETY_MULTIPLIER:1;return Math.max(minimum,roundUpToFive(credits*multiplier*modeMultiplier,maxCredits));}
 function updateCreditUi(){
   const c=creditEstimate();
   const btn=$('create');
@@ -368,12 +381,16 @@ function syncSelectModelCapabilities(modelId,durationId,resolutionId,aspectId){
   const dance480=danceForm&&referenceDanceAccess;
   const preservePending480=danceForm&&referenceDanceAccessPending;
   const isStandard=modelId===SEEDANCE_25_STANDARD_MODEL;
+  const isFast=modelId==='bytedance/seedance-2.0-fast';
+  const no1080=isStandard||isFast;
+  const notice=$(resolutionId==='sbResolution'?'sbFastResolutionNotice':'fastResolutionNotice');
+  if(notice){if(isFast&&$(resolutionId)?.value==='1080p'){notice.textContent='Fastは480p・720pに対応しています。解像度を720pに変更しました。設定をご確認のうえ生成してください。';notice.hidden=false}else if(!isFast){notice.hidden=true}}
   const durationEl=$(durationId);if(durationEl){const current=Number(durationEl.value);const allowed=is25?Array.from({length:27},(_,i)=>i+4):[5,8,10,15];durationEl.replaceChildren(...allowed.map(sec=>{const option=document.createElement('option');option.value=String(sec);option.textContent=sec+'秒';return option}));durationEl.value=String(allowed.includes(current)?current:5)}
-  const resolutionEl=$(resolutionId);if(resolutionEl){const opt1080=Array.from(resolutionEl.options).find(o=>o.value==='1080p');if(opt1080){opt1080.disabled=isStandard;opt1080.hidden=isStandard}const opt480=Array.from(resolutionEl.options).find(o=>o.value==='480p');if(opt480){opt480.disabled=isTurbo&&!dance480;opt480.hidden=isTurbo&&!dance480}if((isTurbo&&!dance480&&!preservePending480&&resolutionEl.value==='480p')||(isStandard&&resolutionEl.value==='1080p'))resolutionEl.value='720p'}
+  const resolutionEl=$(resolutionId);if(resolutionEl){const opt1080=Array.from(resolutionEl.options).find(o=>o.value==='1080p');if(opt1080){opt1080.disabled=no1080;opt1080.hidden=no1080}const opt480=Array.from(resolutionEl.options).find(o=>o.value==='480p');if(opt480){opt480.disabled=isTurbo&&!dance480;opt480.hidden=isTurbo&&!dance480}if((isTurbo&&!dance480&&!preservePending480&&resolutionEl.value==='480p')||(no1080&&resolutionEl.value==='1080p'))resolutionEl.value='720p'}
   const aspectEl=$(aspectId);if(aspectEl){const optWide=Array.from(aspectEl.options).find(o=>o.value==='21:9');if(optWide){optWide.disabled=!is25;optWide.hidden=!is25}if(!is25&&aspectEl.value==='21:9')aspectEl.value='16:9'}
 }
-function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?.value||'';return r==='1080p'&&(m==='bytedance/seedance-2.0-fast'||m==='bytedance/seedance-2.0-lite')&&mode==='reference_to_video'}
-function syncComboWarning(){const mo=$('model')?.value||'';syncSelectModelCapabilities(mo,'duration','resolution','aspect');const isFastLite=mo==='bytedance/seedance-2.0-fast'||mo==='bytedance/seedance-2.0-lite';const isStandard=mo===SEEDANCE_25_STANDARD_MODEL;const isRefMode=mode==='reference_to_video';const resEl=$('resolution');if(resEl){const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=isStandard||(isFastLite&&isRefMode);}const el=$('comboWarning');if(!el)return;const blocked=isComboBlocked();if(blocked){el.textContent='このモデルとリファレンスモードでは1080pを利用できません。';el.style.display='block';}else el.style.display='none';}
+function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?.value||'';return r==='1080p'&&(m==='bytedance/seedance-2.0-fast'||(m==='bytedance/seedance-2.0-lite'&&mode==='reference_to_video'))}
+function syncComboWarning(){const mo=$('model')?.value||'';syncSelectModelCapabilities(mo,'duration','resolution','aspect');const isFastLite=mo==='bytedance/seedance-2.0-fast'||mo==='bytedance/seedance-2.0-lite';const isStandard=mo===SEEDANCE_25_STANDARD_MODEL;const isRefMode=mode==='reference_to_video';const resEl=$('resolution');if(resEl){const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=isStandard||mo==='bytedance/seedance-2.0-fast'||(isFastLite&&isRefMode);}const el=$('comboWarning');if(!el)return;const blocked=isComboBlocked();if(blocked){el.textContent='このモデルとリファレンスモードでは1080pを利用できません。';el.style.display='block';}else el.style.display='none';}
 
 function setMode(m){
   const wasSbLocked=sbLocked;
@@ -419,7 +436,7 @@ function setMode(m){
     $('file').multiple=m==='reference_to_video';
     const savedPrompt=readDraft()['prompt_'+m]||'';
     $('prompt').value=savedPrompt;
-    syncReferenceAudioUi();syncReferenceDanceUi();updateCreditUi();syncComboWarning();
+    syncReferenceAudioUi();syncReferenceDanceUi();syncComboWarning();updateCreditUi();
     renderAssets();
   }
   localStorage.setItem('flowvidGenerateMode',m);
@@ -1361,7 +1378,7 @@ if(!sbRestored){
   // 最初からvideo_editへ復元する。
   if(q==='video_edit'){onVideoEditTab()}else{setMode(['image_to_video','text_to_video','storyboard','reference_to_video'].includes(q)?q:'text_to_video')}
 }
-renderAssets();syncReferenceAudioUi();syncReferenceDanceUi();updateCreditUi();syncComboWarning();loadGenerationPlan();loadReferenceDanceAccess();
+renderAssets();syncReferenceAudioUi();syncReferenceDanceUi();syncComboWarning();updateCreditUi();loadGenerationPlan();loadReferenceDanceAccess();
 
 // ---- pending tasks ----
 const _pendingPollers={};
@@ -1390,7 +1407,7 @@ function _ptInsertCard(task){const list=$('pendingList');if(!list)return;list.qu
 function _ptUpdateCardId(oldId,newId){const c=document.querySelector('[data-ptask-id="'+oldId+'"]');if(!c)return;c.setAttribute('data-ptask-id',newId);const idLabel=c.querySelector('[data-pt-id-label]');if(idLabel)idLabel.textContent='タスクID: '+newId;_ptProgressTransfer(oldId,newId);const f=c.querySelector('[data-ptask-frame]');if(f){const lbl=f.querySelector('[data-pt-label]');if(lbl)lbl.textContent='生成中';const fill=f.querySelector('[data-pt-fill]');if(fill)fill.style.width=(_ptProgressVals[newId]||10)+'%';}}
 function _ptShowAccepted(taskId){const card=document.querySelector('[data-ptask-id="'+taskId+'"]');if(card?.getAttribute('data-ptask-ui-mode')!=='storyboard')return;$('pendingSection').style.display='block';if($('pendingTitle'))$('pendingTitle').textContent='生成中';const notice=$('pendingNotice');if(notice){notice.textContent='生成を受け付けました。タスクID: '+taskId;notice.style.display='block'}$('pendingSection').scrollIntoView({behavior:'smooth',block:'start'});}
 function _ptSafeErrMsg(msg){if(!msg)return'';const s=String(msg).slice(0,400);if(/apikey|api[_-]?key|authorization|bearer\s|fal[_-]key|openrouter\.ai\/api/i.test(s))return'';if(/\bstack\b[\s\S]{0,30}at\s+\w|\bSyntaxError\b|\bTypeError\b|\bReferenceError\b/i.test(s))return'';if(/\bpg\b|\bpostgres\b|\bsql\s*state\b|\bsupabase\.co\b/i.test(s))return'';if(/copyright|著作権|content\s*policy|policy\s*violation/i.test(s))return'出力動画が著作権または利用規約に関連する可能性があるため、生成できませんでした。';if(/nsfw|explicit|adult\s*content/i.test(s))return'コンテンツポリシーにより生成できませんでした。';if(/timeout|timed?\s*out/i.test(s))return'生成がタイムアウトしました。';if(/quota|rate.?limit|too\s*many\s*req/i.test(s))return'リクエストが集中しています。しばらくしてからお試しください。';if(s.length<200&&!/[<>{}[\]`]/.test(s)&&!/https?:\/\//i.test(s))return s;return'生成に失敗しました。クレジットの返金状況をご確認ください。'}
-function _ptRerun(card){const prompt=card.querySelector('[data-pt-prompt]')?.dataset?.fullPrompt||'';const m=card.dataset.ptaskMode||'';const aspect=card.dataset.ptaskAspect||'';const dur=card.dataset.ptaskDur||'';const res=card.dataset.ptaskRes||'';if(prompt&&$('prompt'))$('prompt').value=prompt;if(m&&['reference_to_video','image_to_video','text_to_video'].includes(m))setMode(m);if(aspect&&$('aspect'))$('aspect').value=aspect;if(dur&&$('duration'))$('duration').value=dur;if(res&&$('resolution'))$('resolution').value=res;updateCreditUi();$('create')?.scrollIntoView({behavior:'smooth',block:'nearest'})}
+function _ptRerun(card){const prompt=card.querySelector('[data-pt-prompt]')?.dataset?.fullPrompt||'';const m=card.dataset.ptaskMode||'';const aspect=card.dataset.ptaskAspect||'';const dur=card.dataset.ptaskDur||'';const res=card.dataset.ptaskRes||'';if(prompt&&$('prompt'))$('prompt').value=prompt;if(m&&['reference_to_video','image_to_video','text_to_video'].includes(m))setMode(m);if(aspect&&$('aspect'))$('aspect').value=aspect;if(dur&&$('duration'))$('duration').value=dur;if(res&&$('resolution'))$('resolution').value=res;syncComboWarning();updateCreditUi();$('create')?.scrollIntoView({behavior:'smooth',block:'nearest'})}
 document.addEventListener('click',function(e){const pt=e.target&&e.target.closest&&e.target.closest('[data-pt-prompt]');if(pt){e.preventDefault();e.stopPropagation();const text=pt.dataset.fullPrompt||pt.textContent||'';if(text&&typeof window.flowvidLoadHistory==='function'&&window._fvOpenPromptModal){window._fvOpenPromptModal(text)}else if(text){alert(text)}return}});
 // ---- end pending tasks ----
 
@@ -1456,6 +1473,7 @@ function sbUpdateCreditEstimate(){
     resolution:$('sbResolution').value||'720p',
     model:$('sbModel').value||'bytedance/seedance-2.0-fast',
     mode:'reference_to_video',
+    aspectRatio:$('sbAspect').value||'9:16',
     plan:activePlan
   });
   el.textContent=String(credits);
@@ -1486,6 +1504,7 @@ function sbSyncResolutionLock(){
 $('sbModel').addEventListener('change',()=>{sbSyncResolutionLock();sbUpdateCreditEstimate();});
 $('sbDuration').addEventListener('change',sbUpdateCreditEstimate);
 $('sbResolution').addEventListener('change',sbUpdateCreditEstimate);
+$('sbAspect').addEventListener('change',sbUpdateCreditEstimate);
 sbSyncResolutionLock();
 sbUpdateCreditEstimate();
 
