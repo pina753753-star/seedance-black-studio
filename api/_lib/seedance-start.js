@@ -33,6 +33,7 @@ const SEEDANCE_25_STANDARD_MODEL = 'bytedance/seedance-2.5-standard';
 const REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS = 72 * 60 * 60 * 1000;
 const REFERENCE_DANCE_START_MARGIN_MS = (REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS + 10 * 60) * 1000;
 const SEEDANCE_25_MODELS = new Set([SEEDANCE_25_TURBO_MODEL, SEEDANCE_25_STANDARD_MODEL]);
+const MAX_ESTIMATED_CREDITS = 100000;
 const WAVESPEED_MODELS = Object.freeze({
   [SEEDANCE_25_TURBO_MODEL]: Object.freeze({
     text: 'bytedance/seedance-2.5/text-to-video-turbo',
@@ -441,6 +442,17 @@ return async function handler(req, res) {
     });
     if (!options.ok) return res.status(400).json({ ok: false, error: options.error, message: options.message });
     const { resolution, aspectRatio, duration, mode, model } = options;
+    // estimated_credits: omitted (legacy clients) is allowed; a present value must
+    // be a JSON integer 1..MAX_ESTIMATED_CREDITS, otherwise refuse before any
+    // moderation, reservation, deduction or provider call.
+    let confirmedCredits = null;
+    if (Object.prototype.hasOwnProperty.call(body, 'estimated_credits')) {
+      const raw = body.estimated_credits;
+      if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 1 || raw > MAX_ESTIMATED_CREDITS) {
+        return res.status(400).json({ ok: false, error: 'invalid_estimated_credits', message: '表示金額を確認できませんでした。ページを再読み込みして、もう一度お試しください。' });
+      }
+      confirmedCredits = raw;
+    }
     const uiOrigin = body.ui_origin === 'storyboard' && mode === 'reference_to_video' ? 'storyboard' : '';
     const referenceDanceAssetId = String(body.reference_video_asset_id || '').trim();
     let referenceDance = null;
@@ -547,6 +559,33 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       });
     }
 
+    // Pass an exact server-built pricing object. Never spread the browser body
+    // into the trusted referenceDanceBillableSeconds field.
+    const creditCost = calculateVideoCreditCost({
+      mode,
+      duration,
+      resolution,
+      model,
+      plan: generationPlan,
+      aspectRatio,
+      referenceDanceBillableSeconds: referenceDance?.billableSeconds
+    });
+
+    // The amount the user confirmed on screen must never be raised silently.
+    // The server price still decides what is charged. Only the verified admin
+    // reference-dance path (referenceDance is set after its own checks, never
+    // from the request alone) is exempt: its on-screen estimate ignores the
+    // inspected source video, so it cannot be compared yet.
+    if (confirmedCredits !== null && !referenceDance && creditCost > confirmedCredits) {
+      return res.status(409).json({
+        ok: false,
+        error: 'credit_cost_changed',
+        message: `消費クレジットが表示金額（${confirmedCredits}）から${creditCost}に変わりました。ページを再読み込みして金額を確認してから、もう一度お試しください。`,
+        credits: creditCost,
+        estimatedCredits: confirmedCredits
+      });
+    }
+
     const normalizedAudio = normalizeReferenceAudioPaths(body.reference_audio_paths, user.id);
     const referenceAudioSyncMode = body.reference_audio_sync_mode === 'rhythm' ? 'rhythm' : 'singing';
     if (normalizedAudio.ok && normalizedAudio.paths.length && !hasSeedance25PlanAccess(generationAccess.plan, generationAccess.subscriptionExpiresAt)) {
@@ -636,18 +675,6 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         message: PROVIDER_ERROR_MESSAGES.content_policy
       });
     }
-
-    // Pass an exact server-built pricing object. Never spread the browser body
-    // into the trusted referenceDanceBillableSeconds field.
-    const creditCost = calculateVideoCreditCost({
-      mode,
-      duration,
-      resolution,
-      model,
-      plan: generationPlan,
-      aspectRatio,
-      referenceDanceBillableSeconds: referenceDance?.billableSeconds
-    });
 
     // Pre-check balance (read-only, no writes yet)
     const { data: bal } = await db

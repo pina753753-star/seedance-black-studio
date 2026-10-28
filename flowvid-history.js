@@ -164,7 +164,7 @@
     if(done)done.classList.remove('show');
     if(now)now.classList.add('show');
     if(job)job.textContent='送信中...';
-    const body={model:selectedModel(),prompt,duration:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',aspect_ratio:$('aspect')?.value||'9:16',generate_audio:true,estimated_credits:credits()};
+    const body={model:selectedModel(),prompt,duration:$('duration')?.value||'5',resolution:$('resolution')?.value||'720p',aspect_ratio:$('aspect')?.value||'9:16',generate_audio:true,mode,estimated_credits:credits()};
     if(mode==='image_to_video')body.first_frame_url=refs[0];
     if(mode==='reference_to_video'){
       body.reference_url=refs[0];
@@ -177,6 +177,10 @@
       const data=await parseJsonResponse(res);
       const jobId=data.jobId||extractJobId(data.response)||extractJobId(data);
       const pollingUrl=data.pollingUrl||extractPollingUrl(data.response)||extractPollingUrl(data);
+      if(res.status===409&&data.error==='credit_cost_changed'){
+        showError('消費クレジットが表示金額から変わりました（'+data.estimatedCredits+' → '+data.credits+'）。生成は開始していません。ページを再読み込みして金額を確認してください。');
+        return;
+      }
       if(!res.ok||!data.ok||(!jobId&&!pollingUrl)){
         showError(data.error||data.response?.error||data.message||('status '+res.status));
         return;
