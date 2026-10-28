@@ -1,0 +1,70 @@
+name: Test /edit endpoint (one-off, disposable)
+
+# 使い捨てワークフロー: 手動実行のみ。テスト後はこのファイルごと削除する。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-edit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch 2 completed video URLs from Supabase (SELECT only)
+        id: fetch
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const base = process.env.SUPABASE_URL.replace(/\/$/, '');
+          const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+          const headers = { apikey: key, Authorization: `Bearer ${key}` };
+
+          async function select(pathAndQuery) {
+            const res = await fetch(`${base}/rest/v1/${pathAndQuery}`, { headers });
+            if (!res.ok) throw new Error(`Supabase SELECT failed: ${res.status}`);
+            return res.json();
+          }
+
+          (async () => {
+            // Primary source: generated_videos (same query as api/generated-videos.js)
+            let urls = [];
+            try {
+              const rows = await select('generated_videos?select=video_uri,video_url&status=eq.completed&video_uri=not.is.null&order=created_at.desc&limit=2');
+              urls = rows.map(r => r.video_uri || r.video_url).filter(Boolean);
+            } catch (e) {
+              console.log('generated_videos query failed, trying generation_tasks:', e.message);
+            }
+            // Fallback: generation_tasks.output_url
+            if (urls.length < 2) {
+              const rows = await select('generation_tasks?select=output_url&status=eq.completed&output_url=not.is.null&order=created_at.desc&limit=2');
+              urls = rows.map(r => r.output_url).filter(Boolean);
+            }
+            if (urls.length < 2) throw new Error(`Need 2 video URLs, got ${urls.length}`);
+            console.log('Video URL 1:', urls[0]);
+            console.log('Video URL 2:', urls[1]);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `url1=${urls[0]}\nurl2=${urls[1]}\n`);
+          })().catch(err => { console.error(err.message); process.exit(1); });
+          EOF
+
+      - name: POST /edit to watermark server
+        env:
+          WATERMARK_SECRET: ${{ secrets.WATERMARK_SECRET }}
+          URL1: ${{ steps.fetch.outputs.url1 }}
+          URL2: ${{ steps.fetch.outputs.url2 }}
+        run: |
+          BODY=$(node -e 'console.log(JSON.stringify({clips:[{videoUrl:process.env.URL1},{videoUrl:process.env.URL2}],transition:"crossfade"}))')
+          echo "Request body: $BODY"
+          HTTP_CODE=$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST "https://seedance-black-studio-production.up.railway.app/edit" \
+            -H "Authorization: Bearer ${WATERMARK_SECRET}" \
+            -H "Content-Type: application/json" \
+            --max-time 900 \
+            -d "$BODY")
+          echo "HTTP status: $HTTP_CODE"
+          echo "Response JSON:"
+          cat response.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.stringify(JSON.parse(s),null,2))}catch(e){console.log(s)}})'
+          [ "$HTTP_CODE" = "200" ]
