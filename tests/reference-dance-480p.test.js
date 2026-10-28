@@ -12,7 +12,7 @@ test('all 4–15 second prices agree in UI/server at both resolutions; unsupport
   const elements = { duration: {value:'30'}, resolution: {value:'480p'}, model: {value:model}, danceRights: {checked:true} };
   const ctx = { $: id => elements[id], referenceDanceAccess:true, SEEDANCE_25_TURBO_MODEL:model, mode:'reference_to_video', sbLocked:false, urls:['mock'], referenceDanceAsset:{status:'ready',billableSeconds:4} };
   vm.createContext(ctx);
-  vm.runInContext(extract('canUseReferenceDance','syncReferenceDanceUi') + extract('creditEstimate','updateCreditUi'), ctx);
+  vm.runInContext(extract('canUseReferenceDance','syncReferenceDanceUi') + extract('seedance20Minimum','updateCreditUi'), ctx);
   for (const resolution of ['480p','720p']) for(let seconds=4; seconds<=15; seconds++) {
     elements.resolution.value=resolution; ctx.referenceDanceAsset.billableSeconds=seconds;
     const expected = Math.ceil(((seconds*(resolution==='480p'?22:44)*11/12)/5))*5;
@@ -28,7 +28,7 @@ test('all 4–15 second prices agree in UI/server at both resolutions; unsupport
 test('480p selector available only on admin reference form, never storyboard or ordinary modes', () => {
   const options=['480p','720p','1080p'].map(value=>({value}));
   const el={options,value:'480p'};
-  const ctx={$:id=>id.endsWith('Resolution')||id==='resolution'?el:null,SEEDANCE_25_TURBO_MODEL:model,SEEDANCE_25_STANDARD_MODEL:'standard',isSeedance25Model:()=>true,referenceDanceAccess:true,referenceDanceAccessPending:false,sbLocked:false,mode:'reference_to_video'};
+  const ctx={$:id=>id.endsWith('Resolution')||id==='resolution'?el:null,SEEDANCE_25_TURBO_MODEL:model,SEEDANCE_25_STANDARD_MODEL:'standard',isSeedance25Model:()=>true,resolution1080Access:true,generationAccessLoaded:true,referenceDanceAccess:true,referenceDanceAccessPending:false,sbLocked:false,mode:'reference_to_video'};
   vm.createContext(ctx);vm.runInContext(extract('syncSelectModelCapabilities','isComboBlocked'),ctx);
   ctx.syncSelectModelCapabilities(model,'unused','resolution','unused');
   assert.equal(options[0].disabled,false);assert.equal(el.value,'480p');
@@ -42,7 +42,7 @@ test('saved 480p survives startup access check without enabling generation early
   const options=['480p','720p','1080p'].map(value=>({value}));
   const el={options,value:'480p'};
   const rights={checked:true};
-  const ctx={$:id=>id==='resolution'?el:id==='model'?{value:model}:id==='danceRights'?rights:null,SEEDANCE_25_TURBO_MODEL:model,SEEDANCE_25_STANDARD_MODEL:'standard',isSeedance25Model:()=>true,referenceDanceAccess:false,referenceDanceAccessPending:true,sbLocked:false,mode:'reference_to_video'};
+  const ctx={$:id=>id==='resolution'?el:id==='model'?{value:model}:id==='danceRights'?rights:null,SEEDANCE_25_TURBO_MODEL:model,SEEDANCE_25_STANDARD_MODEL:'standard',isSeedance25Model:()=>true,resolution1080Access:true,generationAccessLoaded:true,referenceDanceAccess:false,referenceDanceAccessPending:true,sbLocked:false,mode:'reference_to_video'};
   vm.createContext(ctx);vm.runInContext(extract('syncSelectModelCapabilities','isComboBlocked')+extract('canUseReferenceDance','syncReferenceDanceUi'),ctx);
   ctx.syncSelectModelCapabilities(model,'unused','resolution','unused');
   assert.equal(el.value,'480p');assert.equal(options[0].disabled,true);assert.equal(ctx.canUseReferenceDance(),false);

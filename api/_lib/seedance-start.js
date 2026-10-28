@@ -475,6 +475,10 @@ return async function handler(req, res) {
     }
 if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.id);
     if (!generationAccess.ok) return res.status(503).json({ ok: false, error: 'plan_check_unavailable' });
+    // New requests only: never rewrite existing tasks, output policy or balances.
+    if (resolution === '1080p' && generationAccess.hasActiveSubscription !== true) {
+      return res.status(403).json({ ok: false, error: 'resolution_subscription_required', message: '1080pは有効なサブスク会員限定です。単体購入では720p以下を選択してください。' });
+    }
     if (referenceDanceAssetId) {
       if (!isReferenceDanceUuid(referenceDanceAssetId)) {
         return res.status(400).json({ ok: false, error: 'invalid_reference_video_id', message: '参考動画を確認できませんでした。もう一度添付してください。' });
