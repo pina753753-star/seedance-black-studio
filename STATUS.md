@@ -2,6 +2,51 @@
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
 
+## 2026年10月28日 作業ログ(PR #270でmain反映済み)
+
+### pricing.html 単体購入タブの解約案内の誤解を修正【完了: 説明文修正1件。本番HTML配信とソラ側の本番ブラウザ検証まで】
+
+- 事象: 追加クレジット(単体購入)タブでも、フッターに「解約はいつでもマイページから。」が表示され、サブスクと誤解される状態だった。
+- PR #270(説明文の修正1件のみ):
+  - フッターを `subscriptionPaymentNote`(従来の解約案内)と `creditPaymentNote`(「クレジットパックは買い切りです。自動更新はなく、解約手続きは不要です。」、初期hidden)の2つのspanに分割。
+  - `setView()` 内で、タブに応じて2つのspanの表示を切り替え。
+  - 回帰テスト `tests/standalone-payment-note.test.js`(7件)を追加。
+  - コード上は、料金・付与クレジット・消費クレジット・Checkout・権限・API・SQL・環境変数・MCP・Klingを変更していない。
+  - mainへマージ済み。
+  - merge commit: `c9d631b19f2fa89daa436fff88f74e3e89684ba2`
+- 公開前の本番deployment: `dpl_3qJn82vpvLzoRhsU7e3Mykzhfnp6`(main `75efb4c`、2026-10-26 23:39:56 UTC作成、READY)。
+- 反映後の本番deployment: `dpl_7oTwQroCh6hTWeTbzg22hpjeyqDA`(main `c9d631b`、2026-10-28 09:30:07 UTC作成、READY、production、`pinastudio.jp` / `www.pinastudio.jp` にalias済み)。Vercelの読み取りで確認。
+- 確認できたこと(Claude Codeのローカル検証。本番ブラウザ確認とは別):
+  - 新規テスト7件成功。修正を外すと6件失敗(回帰検知を確認)。
+  - 全体テストの失敗13件はmainでも同一(本変更と無関係)。
+  - Playwright(ローカル、390px / 1280px)で、初期表示・`#credit`・`#annual`・タブクリック・Enter操作が期待どおり。既存5パックの価格・購入ボタン・規約リンクはmainと一致。
+  - Vercel Preview(`dpl_WQN7ESvq6T93T6sz9FHKcTARiV5H`)がREADYで、配信HTMLに変更が入っていること。
+  - 本番 `https://www.pinastudio.jp/pricing.html` の配信HTMLに変更が入っていること(ETagはPreviewと一致)。
+- 確認できたこと(本番ブラウザ確認。ソラ側の報告に基づく記録):
+  - 確認日時: 2026-10-28 18:33〜18:35 JST。
+  - 確認URL: `https://www.pinastudio.jp/pricing.html`。実測画面幅: 1180px。
+  - 結果: 初期表示、`#credit` / `#annual` への直接アクセスと再読み込み、クリック・Enterでの往復切替が正常。2つの説明文が混在せず、既存5パックの価格・購入ボタン・規約リンクも確認済み。実購入・生成なし。
+  - Claude Codeは、作業環境のネットワーク制限により、本番URLを実ブラウザで確認できていない。
+- 未実施: 本番での390px / 1280px確認(ローカルPlaywrightの結果とは別)。
+- 実施していないこと: 実購入、有料生成、単体購入の決済E2E、料金改定、管理画面、Klingの確認。本件はこれらの完了を意味しない。
+- 異常時の戻し方: PR #270のみをrevertする。main全体のreset、DB・残高・キーの巻戻しは行わない。
+
+### 【別枠・未確認】以前保存された環境設定が今回のdeploymentに反映された可能性(読み取り確認の結果)
+
+上記PR #270のコード差分は説明文のみ(`pricing.html` とテスト1件)である。これとは別に、以前Vercelに保存された本番の環境設定が、今回のdeploymentで初めて反映された可能性がある。以下は読み取りのみ(値の取得・復号・設定変更・再デプロイなし)で確認した範囲で、決済設定の正しさは本件の完了に含めない。
+
+- 本番の `STRIPE_PRICE_*` は8件すべて存在する(月額・年額 × Standard / Premium / Ultimate / Team)。
+- このうち7件(Standard月額・年額、Premium月額・年額、Ultimate月額・年額、Team年額)は、2026-10-27 12:16〜12:17 UTC(21:16〜21:17 JST)に更新されている。
+- 前回の本番deployment(2026-10-26 23:39:56 UTC)は、この更新より前。今回のdeployment(2026-10-28 09:30:07 UTC)は、この更新後に作成された最初の本番deploymentである(本番deploymentはこの間に作成されていない)。
+- そのため、今回のdeploymentに更新後のPrice IDが適用された可能性がある。これは、Vercelが環境変数の変更を新規deploymentにのみ反映する仕様に基づく推測であり、適用済みとは断定しない。
+- この環境ではdeployment固有の適用値を取得できず、実際のCheckoutで使われるPriceとの対応は未確認。8件とも種別が `sensitive` で、プロジェクト設定からも値を読み取れなかった。
+- `STRIPE_PRICE_TEAM_MONTHLY` は 2026-05-29 以降更新されていない(更新時刻のメタ情報のみ)。実際のCheckoutで使われるPriceとの対応は未確認。
+- `PINA_MCP_ALLOW_GENERATION`:
+  - 確認できた事実: 現在のproject設定(本番、plain)で `false`。最終更新は2026-10-26 23:38:09 UTC で、前回の本番deployment作成(同23:39:56 UTC)の直前であり、以降の更新記録はない。
+  - 未確認: 今回のdeployment(`dpl_7oTwQroCh6hTWeTbzg22hpjeyqDA`)に適用された実値。この環境ではdeployment固有の値を取得できない。
+- 未確認: 各プランのCheckout開始時に使われるPrice IDと、プラン・月額/年額の対応。Stripe側のPrice設定との照合。いずれも実購入を伴うか、この環境から値を取得できないため未実施。
+- 実施していないこと: 設定変更、再デプロイ、実購入、生成。
+
 ## 2026年9月13日〜14日 作業ログ
 
 ### H3 Max / H3 Max Live 改善
