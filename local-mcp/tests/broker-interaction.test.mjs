@@ -12,7 +12,7 @@ test('first party consent requires session, CSRF, Origin and correct client/reso
  for(const args of [{origin:'https://evil.invalid'},{body:'csrf=wrong&decision=allow'},{body:'csrf=dummy&decision=allow&userId=bob'},{body:'csrf=dummy&decision=allow&csrf=dummy'}]){const f=fixture();assert.equal((await f.call(args)).status,403);assert.equal(f.state.saved,0);}
 });
 test('safe consent HTML has no purchase links; allow creates grant, deny creates none',async()=>{
- const f=fixture(),page=await f.call({method:'GET'});assert.equal(page.status,200);assert.match(page.body,/&lt;dummy&gt;/);assert.match(page.body,/接続するアカウント: alice/);assert.match(page.body,/mcp-session.html/);assert.doesNotMatch(page.body,/checkout|pricing\.html|アップグレード/);assert.equal(f.state.saved,0);
+ const f=fixture(),page=await f.call({method:'GET'});assert.equal(page.status,200);assert.match(page.body,/&lt;dummy&gt;/);assert.match(page.body,/接続するアカウント<\/small><p>alice/);assert.match(page.body,/mcp-session.html/);assert.doesNotMatch(page.body,/checkout|pricing\.html|アップグレード/);assert.equal(f.state.saved,0);
  await f.call();assert.equal(f.state.saved,1);assert.equal(f.state.finished[0].login.accountId,'alice');
  const denied=fixture();await denied.call({body:'csrf=dummy&decision=deny'});assert.equal(denied.state.saved,0);assert.equal(denied.state.finished[0].error,'access_denied');
 });
@@ -71,5 +71,29 @@ test('continuation has same-tab trusted resume link only, and retains restrictiv
 test('continuation rejects external, alternate, encoded and query-bearing resume locations',async()=>{
  for(const returnTo of ['https://evil.invalid/mcp/oauth/auth/x','//evil.invalid/mcp/oauth/auth/x','https://pina.invalid/mcp/oauth/token','https://pina.invalid/mcp/oauth/auth/x?code=x','https://pina.invalid/mcp/oauth/auth/x#x','https://pina.invalid/mcp/oauth/auth/x%2fy','https://user@pina.invalid/mcp/oauth/auth/x','javascript:alert(1)']){
   const f=fixture();f.state.returnTo=returnTo;const r=await f.call();assert.equal(r.status,403);assert.equal(r.body,'interaction_denied');assert.equal(r.headers.Location,undefined);
+ }
+});
+
+test('consent lists only requested capabilities and keeps user HTML escaped',async()=>{const f=fixture();f.state.details.params.scope='credits:read';f.state.user.email='<img src=x onerror=alert(1)>';const r=await f.call({method:'GET'});assert.match(r.body,/クレジット残高を確認/);assert.doesNotMatch(r.body,/動画の見積|本人が別途承認した動画/);assert.match(r.body,/&lt;img src=x/);assert.doesNotMatch(r.body,/<img src=x/);});
+
+
+test('unknown scope GET shows only fixed safe text without granting',async()=>{
+ for(const scope of ['credits:read admin','credits:read __proto__','credits:read <img/src=x/onerror=alert(1)>']){
+  const f=fixture();f.state.details.params.scope=scope;const r=await f.call({method:'GET'});
+  assert.equal(r.status,200);assert.match(r.body,/対応していない権限/);assert.match(r.body,/クレジット残高を確認/);
+  assert.doesNotMatch(r.body,/<img\/src|onerror=|__proto__|<li>admin/);assert.equal(f.state.saved,0);assert.equal(f.state.finished.length,0);
+ }
+});
+test('unknown scope allow denies, but valid cancellation preserves access_denied',async()=>{
+ for(const scope of ['credits:read admin','openid','offline_access'])for(const decision of ['allow','deny']){
+  const f=fixture();f.state.details.params.scope=scope;const r=await f.call({body:'csrf=dummy&decision='+decision});
+  assert.equal(f.state.saved,0);
+  if(decision==='allow'){assert.equal(r.status,403);assert.equal(f.state.finished.length,0);}
+  else{assert.equal(r.statusCode,200);assert.deepEqual(f.state.finished,[{error:'access_denied'}]);}
+ }
+});
+test('unknown scope cancellation cannot bypass Origin or CSRF validation',async()=>{
+ for(const args of [{body:'csrf=wrong&decision=deny'},{body:'csrf=dummy&csrf=dummy&decision=deny'},{body:'csrf=dummy&decision=deny',origin:'https://evil.invalid'}]){
+  const f=fixture();f.state.details.params.scope='admin';assert.equal((await f.call(args)).status,403);assert.equal(f.state.saved,0);assert.equal(f.state.finished.length,0);
  }
 });
