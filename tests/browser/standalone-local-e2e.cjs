@@ -72,7 +72,7 @@ async function model(page,value,resolution) {
  try{
  browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-background-networking','--disable-component-update','--disable-sync','--host-resolver-rules=MAP * ~NOTFOUND']});
  await run('2.0 1080 aspect prices persist through history refresh and storyboard estimates',async()=>{
-  const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:false,storyboard25:false,watermarkRequired:true});
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:false,storyboard25:false,watermarkRequired:false});
   try{
    await model(f.page,'bytedance/seedance-2.0','1080p');
    await f.page.locator('#duration').selectOption('15');
@@ -88,8 +88,21 @@ async function model(page,value,resolution) {
    assert.deepEqual(f.pageErrors,[]);
   }finally{await f.context.close()}
  });
+ await run('active subscriber saved1080 survives qualification loading; expired storyboard requotes',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
+  try{
+   await f.page.evaluate(()=>localStorage.setItem('flowvidGenerateDraft',JSON.stringify({model:'bytedance/seedance-2.0',resolution:'1080p',duration:15,aspect:'16:9',mode:'text_to_video',prompt_text_to_video:'Dummy'})));
+   await f.page.reload({waitUntil:'networkidle'});
+   assert.equal(await f.page.locator('#resolution').inputValue(),'1080p');assert.equal(await f.page.evaluate(()=>creditEstimate()),535);
+   await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');await f.page.locator('#sbResolution').selectOption('1080p');await f.page.locator('#sbDuration').selectOption('15');
+   const before=await f.page.locator('#sbCreditEstimateValue').textContent();
+   await f.page.evaluate(()=>{generationAccessLoaded=true;resolution1080Access=false;syncSeedance25PlanUi()});
+   assert.equal(await f.page.locator('#sbResolution').inputValue(),'720p');assert.notEqual(await f.page.locator('#sbCreditEstimateValue').textContent(),before);assert.match(await f.page.locator('#sbFastResolutionNotice').textContent(),/720pに変更/);
+   assert.equal(f.starts.length,0);assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
  for(const prepared of [false,true])await run('Fast saved 1080p restores visibly to 720p, prepared='+prepared,async()=>{
-  const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:false,storyboard25:false,watermarkRequired:true});
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:false,storyboard25:false,watermarkRequired:false});
   try{
    await f.page.evaluate(prepared=>{localStorage.setItem(prepared?'flowvidStoryboardDraft':'flowvidGenerateDraft',JSON.stringify({model:'bytedance/seedance-2.0-fast',resolution:'1080p',duration:5,aspect:'16:9',mode:'text_to_video',prompt_text_to_video:'A paper boat',prompt:'A paper boat',prepared,imageUrl:prepared?'https://synthetic.invalid/image.png':undefined}));},prepared);
    await f.page.reload({waitUntil:'networkidle'});
@@ -114,11 +127,23 @@ async function model(page,value,resolution) {
  await run('purchase: 2.5 Turbo enabled, audio/storyboard restricted, ordinary start sends one authenticated mock request',async()=>{
   const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:false,storyboard25:false,watermarkRequired:true});
   try{
-   await model(f.page,'bytedance/seedance-2.5','1080p');assert.equal(await f.page.locator('#create').isDisabled(),false);assert.equal(await f.page.locator('#audioFile').isDisabled(),true);
+   await model(f.page,'bytedance/seedance-2.5','720p');assert.equal(await f.page.locator('#resolution option[value="1080p"]').evaluate(e=>e.disabled&&e.hidden),true);assert.equal(await f.page.locator('#create').isDisabled(),false);assert.equal(await f.page.locator('#audioFile').isDisabled(),true);
    await f.page.locator('#create').click();await f.page.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
    assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.model,'bytedance/seedance-2.5');assert.equal(f.starts[0].headers.authorization,'Bearer synthetic-browser-session');assert.equal(f.starts[0].body.reference_audio_paths,undefined);
    await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.5');assert.equal(await f.page.locator('#sbAnalyzeBtn').isDisabled(),true);assert.match(await f.page.locator('#sbAnalyzeBtn').textContent(),/Premium/);
    assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
+
+ for(const selected of ['bytedance/seedance-2.0','bytedance/seedance-2.5'])await run('purchase/expired saved1080 resets visibly '+selected,async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:false,referenceAudio:false,storyboard25:false,watermarkRequired:true});
+  try{
+   await f.page.evaluate(model=>localStorage.setItem('flowvidGenerateDraft',JSON.stringify({model,resolution:'1080p',duration:5,aspect:'16:9',mode:'text_to_video',prompt_text_to_video:'Dummy'})),selected);
+   await f.page.reload({waitUntil:'networkidle'});
+   assert.equal(await f.page.locator('#resolution').inputValue(),'720p');
+   assert.equal(await f.page.locator('#resolution option[value="1080p"]').evaluate(e=>e.disabled&&e.hidden),true);
+   assert.match(await f.page.locator('#fastResolutionNotice').textContent(),/720pに変更/);
+   assert.equal(f.starts.length,0);assert.deepEqual(f.pageErrors,[]);
   }finally{await f.context.close()}
  });
  await run('free-only: 2.5 blocked, 2.0 and Fast remain usable',async()=>{
@@ -126,11 +151,11 @@ async function model(page,value,resolution) {
   try{await model(f.page,'bytedance/seedance-2.5');assert.equal(await f.page.locator('#create').isDisabled(),true);for(const value of ['bytedance/seedance-2.0','bytedance/seedance-2.0-fast']){await model(f.page,value,'720p');assert.equal(await f.page.locator('#create').isDisabled(),false)}assert.equal(f.starts.length,0);assert.deepEqual(f.pageErrors,[])}finally{await f.context.close()}
  });
  await run('active Premium: 2.5, audio, and storyboard capabilities preserved',async()=>{
-  const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
+  const f=await fixture(browser,{ok:true,resolution1080:true,seedance25:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
   try{await model(f.page,'bytedance/seedance-2.5','1080p');assert.equal(await f.page.locator('#create').isDisabled(),false);assert.equal(await f.page.locator('#audioFile').isDisabled(),false);await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.5');await f.page.evaluate(()=>{sbFile={name:'synthetic-no-upload'};sbSyncPlanAccess()});assert.equal(await f.page.locator('#sbAnalyzeBtn').isDisabled(),false);assert.deepEqual(f.pageErrors,[])}finally{await f.context.close()}
  });
  await run('active Standard plus purchase: normal 2.5 enabled, high-tier extras remain blocked',async()=>{
-  const f=await fixture(browser,{ok:true,seedance25:true,referenceAudio:false,storyboard25:false,watermarkRequired:false});
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:false,storyboard25:false,watermarkRequired:false});
   try{await model(f.page,'bytedance/seedance-2.5-standard','720p');assert.equal(await f.page.locator('#create').isDisabled(),false);await model(f.page,'bytedance/seedance-2.5','1080p');assert.equal(await f.page.locator('#audioFile').isDisabled(),true);assert.deepEqual(f.pageErrors,[])}finally{await f.context.close()}
  });
  await run('capability API unavailable: restricted model fails closed and 2.0 remains available',async()=>{

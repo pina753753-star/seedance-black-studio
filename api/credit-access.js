@@ -19,6 +19,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       seedance25: access.allowed === true,
+      resolution1080: access.hasActiveSubscription === true,
       referenceAudio: subscriptionExtras,
       storyboard25: subscriptionExtras,
       watermarkRequired: access.watermarkRequired !== false

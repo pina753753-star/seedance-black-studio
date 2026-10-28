@@ -87,6 +87,7 @@ function createCore({ authenticate, store, backend, integrity, now = Date.now, c
       const input = { prompt: args.prompt.trim(), model: options.model, mode: options.mode, duration: options.duration, resolution: options.resolution, aspect_ratio: options.aspectRatio };
       const a = await access(p, true);
       if (!a.models.includes(input.model)) fail('feature_unavailable');
+      if (input.resolution === '1080p' && a.watermarkRequired) fail('resolution_subscription_required');
       const credits = price(input);
       if (!Number.isInteger(credits) || credits <= 0) fail('price_unavailable');
       const q = { id: createId(), userId: p.userId, input, credits, watermarkRequired: a.watermarkRequired, expiresAt: now() + 600000, approved: false };
@@ -106,6 +107,7 @@ function createCore({ authenticate, store, backend, integrity, now = Date.now, c
       if (q.approved !== true || q.approval?.userId !== p.userId || q.approval?.fingerprint !== q.fingerprint) fail('approval_required');
       const a = await access(p, true);
       if (!a.models.includes(q.input.model)) fail('feature_unavailable');
+      if (q.input.resolution === '1080p' && a.watermarkRequired) fail('resolution_subscription_required');
       if (price(q.input) !== q.credits || a.watermarkRequired !== q.watermarkRequired) fail('requote_required');
       if (a.availableCredits < q.credits) fail('insufficient_credits');
       // Atomic consume-proposal + unique(user,request) claim BEFORE any start.

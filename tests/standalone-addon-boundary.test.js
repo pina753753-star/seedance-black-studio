@@ -62,14 +62,14 @@ function harness({ subscription = false } = {}) {
   vm.runInNewContext(source, context);
   return { calls, async request(body) {
     const res = { status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
-    await context.module.exports({ method: 'POST', body: { prompt: 'A paper boat', model: 'bytedance/seedance-2.5', resolution: '1080p', duration: 5, aspect_ratio: '16:9', ...body } }, res);
+    await context.module.exports({ method: 'POST', body: { prompt: 'A paper boat', model: 'bytedance/seedance-2.5', resolution: subscription ? '1080p' : '720p', duration: 5, aspect_ratio: '16:9', ...body } }, res);
     return res;
   } };
 }
 function noSpendOrProvider(calls) { assert.equal(calls.rpc, 0); assert.equal(calls.provider, 0); }
 
 for (const model of ['bytedance/seedance-2.5', 'bytedance/seedance-2.5-standard']) {
-  const resolution = model.endsWith('-standard') ? '720p' : '1080p';
+  const resolution = '720p';
   for (const body of [{ mode: 'storyboard' }, { mode: 'reference_to_video', ui_origin: 'storyboard' }]) {
     test(`purchase-only ${model} rejects ${body.ui_origin ? 'ui_origin storyboard' : 'explicit storyboard'} before any paid or external work`, async () => {
       const h = harness(); const res = await h.request({ model, resolution, ...body });
@@ -141,4 +141,16 @@ for (const mode of ['text_to_video','image_to_video','reference_to_video','story
     const h=harness();const res=await h.request({model:'bytedance/seedance-2.0-fast',resolution,mode});
     assert.equal(res.statusCode,503);assert.equal(res.body.error,'content_safety_check_unavailable');assert.equal(h.calls.moderation,1);noSpendOrProvider(h.calls);
   });
+}
+
+for(const model of ['bytedance/seedance-2.0','bytedance/seedance-2.5']){
+ test(model+' purchase-only 1080p replay denied before any work',async()=>{
+  const h=harness();const r=await h.request({model,resolution:'1080p'});
+  assert.equal(r.statusCode,403);assert.equal(r.body.error,'resolution_subscription_required');
+  assert.equal(h.calls.moderation,0);assert.equal(h.calls.dbWrites,0);noSpendOrProvider(h.calls);
+ });
+ test(model+' active subscription retains 1080p',async()=>{
+  const h=harness({subscription:true});const r=await h.request({model,resolution:'1080p'});
+  assert.equal(r.body.error,'content_safety_check_unavailable');assert.equal(h.calls.moderation,1);noSpendOrProvider(h.calls);
+ });
 }
