@@ -27,7 +27,21 @@ function seedance20Minimum(model,resolution,duration,aspectRatio='9:16'){
   return Math.ceil((providerUsd*180*1.055*1.2+20)/netYenPerCredit/5)*5;
 }
 
-  function computeCredits({duration,resolution,model,mode,plan,aspectRatio,aspect_ratio}){
+// Seedance 2.0 / Fast 480p 4-15s (text/image/image-reference): see api/_lib/video-pricing.js.
+function seedance20Right480Credits(model,resolution,mode,duration,aspectRatio='9:16',storyboardOrigin=false){
+  const unit={'bytedance/seedance-2.0':7.0,'bytedance/seedance-2.0-fast':4.2}[model];
+  // storyboard-origin generations (reference_to_video + ui_origin=storyboard) keep the legacy price
+  if(!unit||resolution!=='480p'||storyboardOrigin===true)return null;
+  if(!['text_to_video','image_to_video','reference_to_video'].includes(mode))return null;
+  if(!Number.isInteger(duration)||duration<4||duration>15)return null;
+  const size={'16:9':[854,480],'9:16':[480,854],'4:3':[640,480],'3:4':[480,640],'1:1':[480,480]}[aspectRatio]||[480,854];
+  const credits=(size[0]*size[1]*duration*24/1024/1000000)*unit*170*1.055*2/3.725;
+  return Math.max(10,Math.ceil(credits/5-1e-9)*5);
+}
+
+  function computeCredits({duration,resolution,model,mode,plan,aspectRatio,aspect_ratio,storyboardOrigin}){
+    const right480=seedance20Right480Credits(model,resolution,mode,duration,aspectRatio||aspect_ratio||'9:16',storyboardOrigin===true);
+    if(right480!==null)return right480;
     const minimum=seedance20Minimum(model,resolution,duration,aspectRatio||aspect_ratio||'9:16');
     const seedance25Pricing=SEEDANCE_25_PRICING[model];
     if(seedance25Pricing){
@@ -54,7 +68,7 @@ function seedance20Minimum(model,resolution,duration,aspectRatio='9:16'){
     const model=document.getElementById('model')?.value||FAST_MODEL;
     const mode=window.flowvidGenerationMode||document.querySelector('[data-mode].on')?.dataset?.mode||localStorage.getItem('flowvidGenerateMode')||'reference_to_video';
     const plan=localStorage.getItem('flowvidPlan')||localStorage.getItem('plan')||'free';
-    return computeCredits({duration,resolution,model,mode,plan,aspectRatio:document.getElementById('aspect')?.value||'9:16'});
+    return computeCredits({duration,resolution,model,mode,plan,aspectRatio:document.getElementById('aspect')?.value||'9:16',storyboardOrigin:window.flowvidStoryboardOrigin===true});
   }
 
   function syncCreditButton(){

@@ -143,6 +143,70 @@ async function model(page,value,resolution) {
    assert.deepEqual(f.pageErrors,[]);
   }finally{await f.context.close()}
  });
+ await run('2.0 / Fast 480p right-sized: displayed estimate, button and sent estimate agree; 720p stays as before',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
+  try{
+   const p=f.page;
+   const expectAt=async(m,res,dur,aspect,credits)=>{
+    await model(p,m,res);await p.locator('#duration').selectOption(String(dur));await p.locator('#aspect').selectOption(aspect);await p.waitForTimeout(850);
+    assert.equal(await p.evaluate(()=>creditEstimate()),credits,[m,res,dur,aspect].join('/'));
+    assert.match(await p.locator('#create').textContent(),new RegExp(credits+'$'),[m,res,dur,aspect,'button'].join('/'));
+   };
+   await expectAt('bytedance/seedance-2.0-fast','480p',5,'16:9',20);
+   await expectAt('bytedance/seedance-2.0-fast','480p',10,'9:16',40);
+   await expectAt('bytedance/seedance-2.0-fast','480p',15,'16:9',60);
+   await expectAt('bytedance/seedance-2.0','480p',5,'16:9',35);
+   await expectAt('bytedance/seedance-2.0','480p',10,'9:16',65);
+   await expectAt('bytedance/seedance-2.0','480p',15,'16:9',100);
+   await expectAt('bytedance/seedance-2.0-fast','480p',5,'1:1',15);
+   await expectAt('bytedance/seedance-2.0','480p',5,'1:1',20);
+   await expectAt('bytedance/seedance-2.0-fast','480p',8,'16:9',35);
+   await expectAt('bytedance/seedance-2.0','480p',8,'16:9',55);
+   await expectAt('bytedance/seedance-2.0-fast','720p',5,'16:9',70);
+   await expectAt('bytedance/seedance-2.0-fast','480p',5,'16:9',20);
+   await p.locator('#create').click();await p.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
+   assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.estimated_credits,20);assert.equal(f.starts[0].body.resolution,'480p');
+   assert.deepEqual(f.pageErrors,[]);
+   await p.screenshot({path:process.env.PINA_SHOT_DIR?process.env.PINA_SHOT_DIR+'/fast480-'+(await p.evaluate(()=>innerWidth))+'.png':undefined,fullPage:true}).catch(()=>{});
+  }finally{await f.context.close()}
+ });
+ await run('storyboard-origin 2.0 Fast 480p keeps the legacy 70: storyboard tab estimate, locked main form, button and sent estimate agree; unlocking returns to 20',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false},{query:'?mode=storyboard'});
+  try{
+   const p=f.page;
+   await p.waitForFunction(()=>getComputedStyle(document.getElementById('sbSection')).display!=='none');
+   await p.locator('#sbModel').selectOption('bytedance/seedance-2.0-fast');await p.locator('#sbResolution').selectOption('480p');await p.locator('#sbDuration').selectOption('5');await p.locator('#sbAspect').selectOption('16:9');
+   assert.equal(await p.locator('#sbCreditEstimateValue').textContent(),'70','storyboard tab estimate keeps the old price');
+   await p.locator('#sbModel').selectOption('bytedance/seedance-2.0');
+   assert.equal(await p.locator('#sbCreditEstimateValue').textContent(),'90');
+   // prepared / locked storyboard flow uses the main form with mode reference_to_video
+   await p.evaluate(()=>{setMode('reference_to_video')});
+   await model(p,'bytedance/seedance-2.0-fast','480p');await p.locator('#duration').selectOption('5');await p.locator('#aspect').selectOption('16:9');await p.waitForTimeout(850);
+   assert.equal(await p.evaluate(()=>creditEstimate()),20,'ordinary reference generation uses the new price');
+   await p.evaluate(()=>{sbGenerationImageUrl='https://example.test/sb.png';sbApplyLock(true)});await p.waitForTimeout(850);
+   assert.equal(await p.evaluate(()=>creditEstimate()),70,'locked storyboard flow keeps the legacy price');
+   assert.match(await p.locator('#create').textContent(),/70$/);
+   await p.locator('#create').click();await p.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
+   assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.estimated_credits,70);assert.equal(f.starts[0].body.ui_origin,'storyboard');assert.equal(f.starts[0].body.resolution,'480p');
+   await p.locator('.tabs button[data-mode="reference_to_video"]').click();await p.waitForTimeout(850);
+   assert.equal(await p.evaluate(()=>sbLocked),false);
+   assert.equal(await p.evaluate(()=>creditEstimate()),20,'leaving the storyboard flow via a visible tab returns to the ordinary new price');
+   assert.match(await p.locator('#create').textContent(),/20$/);
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
+ await run('tab switching keeps each tab saved prompt and the storyboard reset does not leak its prompt into a normal draft (sbApplyLock must not persist drafts)',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
+  try{
+   const p=f.page;
+   await p.evaluate(()=>{const d=readDraft();d.prompt_image_to_video='SAVED-I2V';localStorage.setItem('flowvidGenerateDraft',JSON.stringify(d));setMode('text_to_video');$('prompt').value='TYPED-T2V';setMode('image_to_video')});
+   assert.equal(await p.locator('#prompt').inputValue(),'SAVED-I2V','the target tab keeps its own saved prompt');
+   await p.evaluate(()=>{setMode('reference_to_video');$('prompt').value='NORMAL-REF';persistDraft();sbGenerationImageUrl='https://example.test/sb.png';sbApplyLock(true);$('prompt').value='STORYBOARD-PROMPT';resetStoryboardInputs()});
+   const draft=await p.evaluate(()=>JSON.parse(localStorage.getItem('flowvidGenerateDraft')||'{}'));
+   assert.notEqual(draft.prompt_reference_to_video,'STORYBOARD-PROMPT','storyboard prompt must not leak into the normal reference draft');
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
  await run('credit_cost_changed (409) shows the old and new amount without a shortage prompt or a started job',async()=>{
   const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false},{costChanged:true});
   try{

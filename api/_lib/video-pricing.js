@@ -41,6 +41,26 @@ function seedance20Minimum(model,resolution,duration,aspectRatio='9:16'){
   return Math.ceil((providerUsd*180*1.055*1.2+20)/netYenPerCredit/5)*5;
 }
 
+// Seedance 2.0 / 2.0 Fast, 480p, 4-15s, plain text / image / image-reference only
+// (video input and storyboard are excluded; 2.0 never receives video input).
+// API cost USD = width*height*seconds*24/1024/1e6*unit ($7.00 standard, $4.20 fast).
+// credits = API cost * 170 JPY * 1.055 (OpenRouter 5.5%) * 2 / 3.725 JPY per credit
+// (Standard 2980 JPY / 800 cr), rounded up to 5. Minimum 10 for this case only;
+// the global MIN_CREDITS (50) is intentionally not applied here.
+// Budget assumptions, not a guarantee of actual profit.
+const SEEDANCE_20_480P_UNIT_USD = Object.freeze({ 'bytedance/seedance-2.0': 7.0, 'bytedance/seedance-2.0-fast': 4.2 });
+const SEEDANCE_20_480P_SIZE = Object.freeze({ '16:9': [854, 480], '9:16': [480, 854], '4:3': [640, 480], '3:4': [480, 640], '1:1': [480, 480] });
+function seedance20Right480Credits(model, resolution, mode, duration, aspectRatio = '9:16', storyboardOrigin = false) {
+  const unit = SEEDANCE_20_480P_UNIT_USD[model];
+  // Storyboard-origin generations are sent as reference_to_video + ui_origin=storyboard; they keep the legacy price.
+  if (!unit || resolution !== '480p' || storyboardOrigin === true) return null;
+  if (!['text_to_video', 'image_to_video', 'reference_to_video'].includes(mode)) return null;
+  if (!Number.isInteger(duration) || duration < 4 || duration > 15) return null;
+  const [width, height] = SEEDANCE_20_480P_SIZE[aspectRatio] || SEEDANCE_20_480P_SIZE['9:16'];
+  const credits = (width * height * duration * 24 / 1024 / 1000000) * unit * 170 * 1.055 * 2 / 3.725;
+  return Math.max(10, Math.ceil(credits / 5 - 1e-9) * 5);
+}
+
 function calculateVideoCreditCost(input) {
   const body = input || {};
   const mode = String(body.mode || 'reference_to_video').trim();
@@ -80,6 +100,9 @@ function calculateVideoCreditCost(input) {
     return roundUpToFive(duration * creditsPerSecond, seedance25Pricing.maxCredits);
   }
 
+  const right480 = seedance20Right480Credits(modelId, resolution, mode, duration, body.aspectRatio || body.aspect_ratio || '9:16', body.storyboardOrigin === true);
+  if (right480 !== null) return right480;
+
   const minimum = seedance20Minimum(modelId, resolution, duration, body.aspectRatio || body.aspect_ratio || '9:16');
   if (mode === 'storyboard') {
     return Math.max(minimum, roundUpToFive(
@@ -111,5 +134,6 @@ module.exports = {
   PRICING_SAFETY_MULTIPLIER,
   PRICING_PROFILES,
   roundUpToFive,
+  seedance20Right480Credits,
   calculateVideoCreditCost
 };

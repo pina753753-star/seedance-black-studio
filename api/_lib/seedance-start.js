@@ -568,6 +568,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       model,
       plan: generationPlan,
       aspectRatio,
+      storyboardOrigin: uiOrigin === 'storyboard',
       referenceDanceBillableSeconds: referenceDance?.billableSeconds
     });
 
