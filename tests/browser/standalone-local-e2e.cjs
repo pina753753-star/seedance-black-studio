@@ -26,6 +26,7 @@ async function fixture(browser, capabilities, options = {}) {
  await context.addInitScript(syntheticAuth);
  if(options.authFailure)await context.addInitScript(()=>{if(!sessionStorage.getItem('synthetic-auth-recovered'))sessionStorage.setItem('synthetic-auth-failure','1')});
  const starts = [], finishes = [], pageErrors = [];
+ const rev = {serverPrice:null,revised:false};
  let completed = false;
  await context.route('**/*', async route => {
   const request=route.request(),url=new URL(request.url());
@@ -40,7 +41,9 @@ async function fixture(browser, capabilities, options = {}) {
   if(url.pathname==='/api/credit-access') return json(capabilities,options.capabilityFailure?503:200);
   if(url.pathname==='/api/generated-videos') return json({ok:true,rows:completed?[{id:'legacy-job',job_id:'legacy-job',video_url:origin+'/watermarked.mp4',prompt:'Stored owned video',status:'completed',model:'bytedance/seedance-2.0',mode:'text_to_video'}]:[],watermarkPending:options.pending&&!completed?[{jobId:'legacy-job',prompt:'Stored owned video',createdAt:'2026-10-25T00:00:00Z'}]:[]});
   if(url.pathname==='/api/pending-tasks')return json({ok:true,tasks:[]});
-  if(url.pathname==='/api/seedance-start') {starts.push({headers:request.headers(),body:request.postDataJSON()});return json({ok:false,error:'mock_insufficient_balance',balance:0,required:100},402);}
+  if(url.pathname==='/api/seedance-start') {starts.push({headers:request.headers(),body:request.postDataJSON()});if(options.priceRevision){const est=request.postDataJSON().estimated_credits;if(rev.serverPrice===null)rev.serverPrice=est+5;if(est<rev.serverPrice){rev.revised=true;return json({ok:false,error:'credit_cost_changed',credits:rev.serverPrice,estimatedCredits:est},409);}}
+  if(options.costChanged)return json({ok:false,error:'credit_cost_changed',credits:999,estimatedCredits:request.postDataJSON().estimated_credits},409);
+  return json({ok:false,error:'mock_insufficient_balance',balance:0,required:100},402);}
   if(url.pathname==='/api/seedance-status') {
    finishes.push({query:url.searchParams.get('jobId'),authorization:request.headers().authorization});
    if(options.finishFailure)return json({ok:true,done:false,watermarkPending:true});
@@ -48,6 +51,7 @@ async function fixture(browser, capabilities, options = {}) {
   }
   if(url.pathname.startsWith('/api/')) {unexpectedApi.push(url.pathname);return json({ok:false,error:'unmocked_api'},503);}
   const name=url.pathname.slice(1);
+  if(options.priceRevision&&rev.revised&&name==='flowvid-open-inline.js'){const src=fs.readFileSync(path.join(root,name),'utf8');assert.equal(src.split('function calculateCredits(){').length,2);return route.fulfill({contentType:'application/javascript',body:src.replace('function calculateCredits(){','function calculateCredits(){return calculateCreditsBase()+5}function calculateCreditsBase(){')});}
   if(allowedFiles.has(name))return route.fulfill({contentType:name.endsWith('.html')?'text/html':'application/javascript',body:fs.readFileSync(path.join(root,name),'utf8')});
   // Images and synthetic media are inert; never fetch the real assets/CDNs.
   return route.fulfill({status:204,body:''});
@@ -85,6 +89,43 @@ async function model(page,value,resolution) {
    assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.estimated_credits,535);assert.equal(f.starts[0].body.aspect_ratio,'9:16');
    await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');await f.page.locator('#sbResolution').selectOption('1080p');await f.page.locator('#sbDuration').selectOption('15');
    for(const [aspect,credits] of [['16:9',535],['1:1',400],['4:3',405]]){await f.page.locator('#sbAspect').selectOption(aspect);assert.equal(await f.page.locator('#sbCreditEstimateValue').textContent(),String(credits));}
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
+ await run('credit_cost_changed (409) shows the old and new amount without a shortage prompt or a started job',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false},{costChanged:true});
+  try{
+   await model(f.page,'bytedance/seedance-2.0','1080p');
+   await f.page.locator('#create').click();await f.page.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
+   const text=await f.page.locator('#creditStatus').textContent();
+   assert.match(text,/消費クレジットが変わりました/);assert.match(text,/999 cr/);assert.doesNotMatch(text,/クレジットが足りません/);
+   assert.match(text,/再読み込み/);assert.equal(await f.page.locator('#creditStatus button:has-text("再読み込みして確認")').count(),1);
+   assert.equal(f.starts.length,1);assert.equal(await f.page.locator('#create').isDisabled(),false);
+   await f.page.waitForTimeout(1500);assert.equal(f.starts.length,1,'no automatic resend');
+   await f.page.locator('#create').click();await f.page.waitForTimeout(500);assert.equal(f.starts.length,2,'explicit resend after confirming');
+   assert.equal(await f.page.locator('#create').isDisabled(),false);
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
+ await run('simulated price revision: 409, reload re-quotes the displayed and sent amount, explicit click resends once',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false},{priceRevision:true});
+  try{
+   await model(f.page,'bytedance/seedance-2.0','1080p');
+   const before=await f.page.evaluate(()=>creditEstimate());
+   await f.page.locator('#create').click();await f.page.waitForFunction(()=>/消費クレジットが変わりました/.test(document.getElementById('creditStatus').textContent));
+   assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.estimated_credits,before);
+   assert.match(await f.page.locator('#creditStatus').textContent(),new RegExp((before+5)+' cr'));
+   await f.page.waitForTimeout(1200);assert.equal(f.starts.length,1,'no automatic resend');
+   await f.page.locator('#creditStatus button:has-text("再読み込みして確認")').click();
+   await f.page.waitForLoadState('networkidle');
+   await f.page.waitForFunction(()=>typeof generationAccessLoaded!=='undefined'&&generationAccessLoaded===true);
+   await model(f.page,'bytedance/seedance-2.0','1080p');await f.page.waitForTimeout(850);
+   const after=await f.page.evaluate(()=>creditEstimate());
+   assert.equal(after,before+5);assert.match(await f.page.locator('#create').textContent(),new RegExp(after+'$'));
+   assert.equal(f.starts.length,1,'reload alone sends nothing');
+   await f.page.locator('#create').click();await f.page.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
+   assert.equal(f.starts.length,2);assert.equal(f.starts[1].body.estimated_credits,before+5);
+   assert.doesNotMatch(await f.page.locator('#creditStatus').textContent(),/消費クレジットが変わりました/);
    assert.deepEqual(f.pageErrors,[]);
   }finally{await f.context.close()}
  });
