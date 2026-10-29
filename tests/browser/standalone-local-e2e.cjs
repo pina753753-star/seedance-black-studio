@@ -207,6 +207,21 @@ async function model(page,value,resolution) {
    assert.deepEqual(f.pageErrors,[]);
   }finally{await f.context.close()}
  });
+ await run('no launch-price notice on the generation screen; 2.5 Turbo 1080p estimate and button stay in sync',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
+  try{
+   const p=f.page;
+   await model(p,'bytedance/seedance-2.5','1080p');await p.locator('#duration').selectOption('15');await p.waitForTimeout(850);
+   assert.equal(await p.locator('#seedance25Promo').count(),0);
+   assert.equal(/公開記念|終了前にサイト内/.test(await p.locator('body').innerText()),false);
+   const est=await p.evaluate(()=>creditEstimate());
+   assert.equal(est,300,'2.5 Turbo 1080p 15s keeps its real price');
+   assert.match(await p.locator('#create').textContent(),new RegExp(est+'$'));
+   await p.locator('#create').click();await p.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
+   assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.estimated_credits,300);
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
  await run('credit_cost_changed (409) shows the old and new amount without a shortage prompt or a started job',async()=>{
   const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false},{costChanged:true});
   try{
