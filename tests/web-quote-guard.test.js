@@ -350,3 +350,56 @@ test('history entrance: the quote inputs are exactly the fields sent to the serv
   assert.equal(quoted.aspectRatio, sent.aspect_ratio);
   assert.equal(quoted.model, sent.model);
 });
+
+// ---- Seedance 2.0 Fast / standard 480p right-sizing: quote == reserve == deduct, guard intact ----
+
+test('2.0 Fast 480p 5s 16:9: server price 20; quote 20 is reserved and deducted as 20', async () => {
+  const body = { model: 'bytedance/seedance-2.0-fast', resolution: '480p', duration: 5, aspect_ratio: '16:9' };
+  const r = await runStart({ ...body, estimated_credits: 20 });
+  assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+  assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, 20);
+  assert.equal(deductions(r).length, 1);
+  assert.equal(deductions(r)[0].args.p_credit_cost, 20);
+});
+
+test('2.0 standard 480p 15s 9:16 image-reference: 100 credits; a stale lower quote is refused (409) before any side effect', async () => {
+  const body = { model: 'bytedance/seedance-2.0', resolution: '480p', duration: 15, aspect_ratio: '9:16', mode: 'reference_to_video', reference_url: 'https://example.test/a.png', reference_urls: ['https://example.test/a.png'] };
+  const ok = await runStart({ ...body, estimated_credits: 100 });
+  assert.equal(ok.res.code, 202, JSON.stringify(ok.res.body));
+  assert.equal(deductions(ok)[0].args.p_credit_cost, 100);
+  const stale = await runStart({ ...body, estimated_credits: 99 });
+  assert.equal(stale.res.code, 409);
+  assert.equal(stale.res.body.credits, 100);
+  noSideEffects(stale);
+});
+
+test('an old (higher) client quote for the now cheaper 480p case is accepted and charged only the new, lower server price', async () => {
+  const r = await runStart({ model: 'bytedance/seedance-2.0-fast', resolution: '480p', duration: 5, aspect_ratio: '16:9', estimated_credits: 70 });
+  assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+  assert.equal(deductions(r)[0].args.p_credit_cost, 20);
+});
+
+test('720p and 1080p 2.0 requests keep their previous server prices at the handler level', async () => {
+  const r720 = await runStart({ model: 'bytedance/seedance-2.0-fast', resolution: '720p', duration: 5, aspect_ratio: '16:9', estimated_credits: 100000 });
+  assert.equal(r720.res.code, 202, JSON.stringify(r720.res.body));
+  assert.equal(deductions(r720)[0].args.p_credit_cost, calculateVideoCreditCost({ model: 'bytedance/seedance-2.0-fast', mode: 'text_to_video', resolution: '720p', duration: 5, aspectRatio: '16:9' }));
+  assert.equal(deductions(r720)[0].args.p_credit_cost, 70);
+});
+
+test('storyboard-origin 2.0 Fast 480p keeps the legacy server price (70) and its quote; the new 480p quote (20) is refused with 409', async () => {
+  const body = { model: 'bytedance/seedance-2.0-fast', resolution: '480p', duration: 5, aspect_ratio: '16:9', mode: 'reference_to_video', ui_origin: 'storyboard', reference_url: 'https://example.test/sb.png', reference_urls: ['https://example.test/sb.png'] };
+  const ok = await runStart({ ...body, estimated_credits: 70 });
+  assert.equal(ok.res.code, 202, JSON.stringify(ok.res.body));
+  assert.equal(ok.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, 70);
+  assert.equal(deductions(ok)[0].args.p_credit_cost, 70);
+  const lowQuote = await runStart({ ...body, estimated_credits: 20 });
+  assert.equal(lowQuote.res.code, 409);
+  assert.equal(lowQuote.res.body.credits, 70);
+  noSideEffects(lowQuote);
+});
+
+test('the same 480p request without ui_origin=storyboard is the new 20-credit price', async () => {
+  const r = await runStart({ model: 'bytedance/seedance-2.0-fast', resolution: '480p', duration: 5, aspect_ratio: '16:9', mode: 'reference_to_video', reference_url: 'https://example.test/a.png', reference_urls: ['https://example.test/a.png'], estimated_credits: 20 });
+  assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+  assert.equal(deductions(r)[0].args.p_credit_cost, 20);
+});
