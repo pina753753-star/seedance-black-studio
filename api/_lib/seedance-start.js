@@ -23,7 +23,8 @@ const {
   authorizeReferenceDanceAdmin,
   validateReadyReferenceDance,
   validateReferenceDanceVariant,
-  buildReferenceDanceProviderPrompt
+  buildReferenceDanceProviderPrompt,
+  klingDance
 } = require('./reference-dance.js');
 
 const OPENROUTER_VIDEO_ENDPOINT = 'https://openrouter.ai/api/v1/videos';
@@ -457,6 +458,19 @@ return async function handler(req, res) {
     const referenceDanceAssetId = String(body.reference_video_asset_id || '').trim();
     let referenceDance = null;
     let referenceDanceSignedUrl = '';
+    // Kling dance is opt-in per request and always rides on a verified reference
+    // video; an unknown method is refused instead of falling back to Seedance.
+    let danceMethod = '';
+    try {
+      danceMethod = klingDance.parseKlingDanceMethod(body);
+    } catch (_) {
+      return res.status(400).json({ ok: false, error: 'invalid_dance_method', message: 'ダンスの生成方式を確認できませんでした。ページを再読み込みして、もう一度お試しください。' });
+    }
+    const isKlingDance = danceMethod === klingDance.KLING_DANCE_METHOD;
+    if (isKlingDance && !referenceDanceAssetId) {
+      return res.status(400).json({ ok: false, error: 'reference_video_required', message: 'ダンスには参考動画の添付が必要です。' });
+    }
+    let klingDanceSeconds = 0;
     let generationPlan = 'free';
     let generationAccess;
     if (SEEDANCE_25_MODELS.has(model)) {
@@ -521,6 +535,23 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       if (collectModerationImageUrls(body).length < 1) {
         return res.status(400).json({ ok: false, error: 'identity_reference_image_required', message: '人物を維持するための参考画像を1枚以上追加してください。' });
       }
+      if (isKlingDance) {
+        // Never trim or switch method: an unsupported length is refused as-is.
+        if (collectModerationImageUrls(body).length !== 1) {
+          return res.status(400).json({ ok: false, error: 'kling_dance_single_image_required', message: 'ダンスではキャラクター画像を1枚だけ指定してください。' });
+        }
+        try {
+          klingDanceSeconds = klingDance.validateKlingDanceDuration({ durationMs: referenceDance.durationMs, billableSeconds: referenceDance.billableSeconds });
+        } catch (_) {
+          return res.status(400).json({ ok: false, error: 'kling_dance_duration_unsupported', message: `ダンスで使える参考動画は${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.KLING_DANCE_MAX_SECONDS}秒です。自動では短くしません。動画を差し替えてください。` });
+        }
+        if (klingDance.getKlingDanceCreditsPerSecond() === null) {
+          return res.status(503).json({ ok: false, error: 'kling_dance_price_undecided', message: 'ダンスは現在準備中です。料金確定後にご利用いただけます。' });
+        }
+        if (confirmedCredits === null) {
+          return res.status(400).json({ ok: false, error: 'invalid_estimated_credits', message: '表示金額を確認できませんでした。ページを再読み込みして、もう一度お試しください。' });
+        }
+      }
       const createdMs = Date.parse(String(referenceDanceRow.created_at || ''));
       const maxRetentionMs = createdMs + REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS;
       if (!Number.isFinite(createdMs) || maxRetentionMs - Date.now() < REFERENCE_DANCE_START_MARGIN_MS) {
@@ -561,7 +592,9 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
 
     // Pass an exact server-built pricing object. Never spread the browser body
     // into the trusted referenceDanceBillableSeconds field.
-    const creditCost = calculateVideoCreditCost({
+    const creditCost = isKlingDance
+      ? klingDance.klingDanceCredits(klingDanceSeconds)
+      : calculateVideoCreditCost({
       mode,
       duration,
       resolution,
@@ -577,7 +610,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     // reference-dance path (referenceDance is set after its own checks, never
     // from the request alone) is exempt: its on-screen estimate ignores the
     // inspected source video, so it cannot be compared yet.
-    if (confirmedCredits !== null && !referenceDance && creditCost > confirmedCredits) {
+    if (confirmedCredits !== null && (!referenceDance || isKlingDance) && creditCost > confirmedCredits) {
       return res.status(409).json({
         ok: false,
         error: 'credit_cost_changed',
@@ -789,7 +822,8 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
           duration_ms: referenceDance.durationMs,
           width: referenceDance.width,
           height: referenceDance.height
-        }
+        },
+        ...(isKlingDance ? { dance_method: klingDance.KLING_DANCE_METHOD, provider_model: klingDance.KLING_DANCE_PROVIDER_MODEL } : {})
       };
       const { data: settingsRows, error: settingsError } = await db.from('generation_tasks')
         .update({ settings: danceSettings, updated_at: new Date().toISOString() })
@@ -889,7 +923,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     // audio does not invent music that may trigger output copyright checks.
     const providerPrompt = buildProviderPrompt({
       model,
-      prompt: referenceDance ? buildReferenceDanceProviderPrompt(prompt) : prompt,
+      prompt: isKlingDance ? prompt : referenceDance ? buildReferenceDanceProviderPrompt(prompt) : prompt,
       generateAudio: !referenceDance,
       hasReferenceAudio: signedAudio.urls.length > 0,
       referenceAudioSyncMode
@@ -905,7 +939,13 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     // 2.5 variants use WaveSpeed's request shape, but their endpoint IDs remain
     // separate so standard and Turbo can never be substituted implicitly.
     const payload = provider === 'wavespeed'
-      ? referenceDance
+      ? isKlingDance
+        ? klingDance.buildKlingDancePayload({
+          prompt: providerPrompt,
+          imageUrl: collectWaveSpeedReferenceImageUrls({ frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls })[0],
+          videoUrl: referenceDanceSignedUrl
+        })
+      : referenceDance
         ? buildWaveSpeedMotionControlPayload({
           providerPrompt,
           resolution,
@@ -1020,7 +1060,9 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       }
     }
 
-    const providerModel = resolveWaveSpeedModel(model, mode, Boolean(referenceDance));
+    const providerModel = isKlingDance
+      ? klingDance.KLING_DANCE_PROVIDER_MODEL
+      : resolveWaveSpeedModel(model, mode, Boolean(referenceDance));
     const providerEndpoint = provider === 'wavespeed'
       ? `${WAVESPEED_API_BASE}/${providerModel}`
       : OPENROUTER_VIDEO_ENDPOINT;

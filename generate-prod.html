@@ -47,6 +47,7 @@
   <button class="on" data-mode="text_to_video">テキストから動画</button>
   <button data-mode="storyboard" hidden>絵コンテ</button>
   <button data-mode="video_edit" id="videoEditTab" hidden>動画編集</button>
+  <button data-mode="dance" id="danceTab" hidden>ダンス</button>
 </div>
 
 <!-- 動画編集: 有料プラン案内モーダル -->
@@ -76,6 +77,31 @@
 <p id="fastResolutionNotice" role="status" hidden></p><div id="creditStatus" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:14px 16px;"></div><div id="planWarning" style="display:none;margin-top:10px;background:rgba(232,203,116,.07);border:1px solid rgba(232,203,116,.28);border-radius:14px;padding:12px 16px;color:#f4d98d;font-size:13px;font-weight:700;line-height:1.6">通常のSeedance 2.5生成は購入クレジットまたは対象の有効なサブスクで利用できます。単体購入は最大720p・ウォーターマーク付きです。1080pは有効なサブスク限定です（モデル・プランの対応範囲内）。曲アップロード・Seedance 2.5の絵コンテは有効なPremium以上のサブスクが必要です。<br><a href="./pricing.html#monthly" style="color:#fff;text-decoration:underline">プランを見る →</a></div><div id="comboWarning" style="display:none;margin-top:10px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 16px;color:#fca5a5;font-size:13px;font-weight:700;line-height:1.5;"></div>
 <div class="mini"></div>
 <pre class="log" id="log"></pre>
+</section>
+
+<!-- ダンス(Kling v3.0 Pro Motion Control・運営専用BETA): mainCard/sbSectionとは独立した専用セクション。
+     状態・下書きはdance-kling.jsが保持し、タブ切替ではDOMを隠すだけで破棄しない -->
+<section class="card" id="kdSection" style="display:none">
+  <div style="margin-bottom:12px;color:#c8cad6;font-size:12px;line-height:1.8">キャラクター画像1枚に、参考動画のダンスを写します。画像の顔・体型・服・背景を保つ保証はなく、カメラの動きは変わることがあります。参考動画の音声は使わず、結果は無音です。</div>
+  <div class="kdRow" style="display:grid;gap:12px">
+    <div class="kdBox" style="background:#101319;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:12px">
+      <label style="position:relative;display:inline-flex;min-width:138px;justify-content:center;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800">＋ キャラクター画像<input id="kdImageFile" type="file" accept="image/png,image/jpeg,image/webp" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></label>
+      <div id="kdImageNote" style="margin-top:8px;color:#9f96b5;font-size:11px;line-height:1.6">PNG／JPEG／WebP・1枚のみ</div>
+      <img id="kdImagePreview" alt="" style="display:none;margin-top:8px;max-width:120px;max-height:120px;border-radius:10px">
+      <button id="kdImageRemove" type="button" style="display:none;margin-top:8px" class="danceRemove" aria-label="画像を削除">×</button>
+    </div>
+    <div class="kdBox" style="background:#101319;border:1px solid rgba(196,181,253,.3);border-radius:15px;padding:12px">
+      <label style="position:relative;display:inline-flex;min-width:138px;justify-content:center;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800">♬ ダンス動画<input id="kdVideoFile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></label>
+      <div id="kdVideoName" style="margin-top:8px;font-size:13px;font-weight:800;word-break:break-all">MP4／MOV・4〜10秒・最大50MB</div>
+      <div id="kdVideoNote" style="margin-top:3px;color:#9f96b5;font-size:11px;line-height:1.6">10秒を超える動画は使えません。自動では短くしません。</div>
+      <button id="kdVideoRetry" type="button" style="display:none;margin-top:8px" class="danceRetry">再検査</button>
+      <button id="kdVideoRemove" type="button" style="display:none;margin-top:8px" class="danceRemove" aria-label="参考動画を削除">×</button>
+      <label class="danceRights" style="display:flex"><input id="kdRights" type="checkbox"><span>自分で作成した動画、または使用許可のある動画です。実在人物へのなりすましには使用しません。</span></label>
+    </div>
+  </div>
+  <div class="prompt" style="margin-top:12px"><textarea id="kdPrompt" placeholder="動きや雰囲気の補足を入力してください。"></textarea></div>
+  <button class="create" id="kdCreate" type="button" disabled>作成する</button>
+  <div id="kdStatus" role="status" aria-live="polite" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 14px;color:#fca5a5;font-size:13px;line-height:1.8"></div>
 </section>
 
 <!-- 絵コンテセクション: 絵コンテ画像1枚→Claudeが単一の統合プロンプトを生成→
@@ -172,7 +198,7 @@
 <script>
 window.FlowVidAuthGuard.requireConfirmedUser(window.flowvidSupabaseClient?.());
 </script>
-<script src="./flowvid-history.js?v=112"></script>
+<script src="./flowvid-history.js?v=113"></script>
 <script src="./flowvid-open-inline.js?v=4"></script>
 
 <script>
@@ -265,6 +291,8 @@ async function loadGenerationPlan(){
 // (mode==='storyboard')も同様に、タブ選択状態(d.mode)だけは記録しつつ画像・プロンプトは
 // 専用のsbWriteDraft()側で管理し、通常タブの下書きに混入させない。
 function persistDraft(){
+  // ダンス(Kling)はdance-kling.jsが専用に保持する。mainCardの下書きに mode:'dance' を書かない。
+  if(mode==='dance')return;
   if(sbLocked)return;
   const d=readDraft();
   d.mode=mode;
@@ -414,10 +442,19 @@ function setMode(m){
   if(typeof sbApplyLock==='function')sbApplyLock(false);
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
   const isSb=m==='storyboard';
-  $('mainCard').style.display=isSb?'none':'block';
+  const isDance=m==='dance';
+  $('mainCard').style.display=(isSb||isDance)?'none':'block';
   $('sbSection').style.display=isSb?'block':'none';
+  // ダンス(Kling)はdance-kling.jsが専用セクションと状態を持つ。ここでは表示を切り替えるだけで、
+  // mainCardの入力・下書き・assetsには一切触れない。
+  if($('kdSection'))$('kdSection').style.display=isDance?'block':'none';
   // 絵コンテでも受付済みタスクの状態を見失わない。表示の有無は
   // loadPendingTasks()と現在のカード件数だけで決める。
+  if(isDance){
+    if(wasSbLocked){sbGenerationImageUrl='';files=[];}
+    if(typeof window.flowvidLoadHistory==='function')window.flowvidLoadHistory('dance');
+    return;
+  }
   if(!isSb){
     // 絵コンテ確定プレビュー(sbLocked)中に他タブへ切り替えた場合、専用の
     // sbGenerationImageUrlだけをクリアする。通常タブのassets/urlsは絵コンテとは
@@ -919,7 +956,7 @@ function restoreDraft(){draft=readDraft();const p=draft['prompt_'+mode]||'';if(p
 // ---- 動画編集タブ（有料プラン限定）----
 function showVideoEditModal(){const m=$('videoEditModal');if(!m)return;$('videoEditModalTitle').textContent='動画編集は有料プランで利用できます';$('videoEditModalBody').textContent='生成済み動画のトリミング、結合、字幕追加、BGM追加は有料プラン限定機能です。プランをアップグレードすると、SNS用の動画編集機能を利用できます。';$('videoEditModalUpgrade').style.display='block';$('videoEditModalLater').textContent='あとで';m.style.display='block';}
 function hideVideoEditModal(){const m=$('videoEditModal');if(m)m.style.display='none';}
-async function onVideoEditTab(){const token=await getToken();if(!token){location.href='./login.html';return}document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode==='video_edit'));mode='video_edit';$('mainCard').style.display='none';$('sbSection').style.display='none';$('pendingSection').style.display='none';$('videoEditSection').style.display='block';localStorage.setItem('flowvidGenerateMode','video_edit');veLoadVideos()}
+async function onVideoEditTab(){const token=await getToken();if(!token){location.href='./login.html';return}document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.mode==='video_edit'));mode='video_edit';$('mainCard').style.display='none';$('sbSection').style.display='none';if($('kdSection'))$('kdSection').style.display='none';$('pendingSection').style.display='none';$('videoEditSection').style.display='block';localStorage.setItem('flowvidGenerateMode','video_edit');veLoadVideos()}
 $('videoEditModalLater').onclick=hideVideoEditModal;
 $('videoEditModalShade').onclick=hideVideoEditModal;
 
@@ -1707,5 +1744,6 @@ function resetStoryboardInputs(){
 $('sbRedoBtn').onclick=resetStoryboardInputs;
 // ========== END STORYBOARD ==========
 </script>
+<script src="./dance-kling.js?v=1"></script>
 </body>
 </html>

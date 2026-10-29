@@ -175,7 +175,98 @@ Keep the @Image 1 character consistent throughout. Perform the motion at the nat
 Preserve normal anatomy, stable hands and feet, continuous movement, and the requested framing. Do not copy the source video's person's identity or audio.`;
 }
 
+// ---- Kling v3.0 Pro Motion Control dance (admin BETA) ----
+// A separate method from the Seedance 2.5 Motion Control dance above and from the
+// disabled Kling candidate in video-models.js. It never trims or converts a video
+// and never falls back to another method.
+const KLING_DANCE_METHOD = 'kling_v3_motion_control';
+const KLING_DANCE_PROVIDER_MODEL = 'kwaivgi/kling-v3.0-pro/motion-control';
+// WaveSpeed bills a 3 s minimum, but PinaStudio accepts 4-10 s only: the existing
+// inspector already rejects anything under 4 s, and that rule is kept as-is.
+const KLING_DANCE_MIN_SECONDS = 4;
+const KLING_DANCE_MAX_SECONDS = 10;
+const KLING_DANCE_CHARACTER_ORIENTATION = 'image';
+
+// Kling-only credits per second (owner decision: 19 cr/s, i.e. 5 s = 95, 10 s = 190).
+// Never derived from Seedance pricing and never read from the request. If it is
+// ever null/invalid, the server refuses to start (kling_dance_price_undecided)
+// and the access endpoint reports no rate, so the UI disables sending.
+// Tests override it via config.
+const config = { creditsPerSecond: 19 };
+
+function getKlingDanceCreditsPerSecond() {
+  const rate = config.creditsPerSecond;
+  return Number.isSafeInteger(rate) && rate > 0 ? rate : null;
+}
+
+function isKlingDanceRequested(body) {
+  return Boolean(body && String(body.dance_method || '').trim());
+}
+
+// Throws on an unknown method so a typo can never silently select another path.
+function parseKlingDanceMethod(body) {
+  const raw = String((body && body.dance_method) || '').trim();
+  if (!raw) return '';
+  if (raw !== KLING_DANCE_METHOD) throw error('invalid_dance_method');
+  return KLING_DANCE_METHOD;
+}
+
+// Measured length of the server-inspected video decides acceptance (no rounding
+// is applied before the range check): < 4000 ms or > 10000 ms is refused.
+// Billed seconds are the existing inspector value, ceil(durationMs / 1000), e.g.
+// 4000 ms -> 4, 4001 ms -> 5, 9500 ms -> 10, 10000 ms -> 10, 10001 ms -> refused.
+function validateKlingDanceDuration({ durationMs, billableSeconds }) {
+  if (!Number.isFinite(durationMs)
+      || durationMs < KLING_DANCE_MIN_SECONDS * 1000
+      || durationMs > KLING_DANCE_MAX_SECONDS * 1000
+      || billableSeconds !== Math.ceil(durationMs / 1000)) {
+    throw error('kling_dance_duration_unsupported');
+  }
+  return billableSeconds;
+}
+
+// seconds: whole billable seconds of the inspected reference video.
+function validateKlingDanceSeconds(seconds) {
+  if (!Number.isInteger(seconds) || seconds < KLING_DANCE_MIN_SECONDS || seconds > KLING_DANCE_MAX_SECONDS) {
+    throw error('kling_dance_duration_unsupported');
+  }
+  return seconds;
+}
+
+function klingDanceCredits(seconds, creditsPerSecond = getKlingDanceCreditsPerSecond()) {
+  validateKlingDanceSeconds(seconds);
+  if (!Number.isSafeInteger(creditsPerSecond) || creditsPerSecond < 1) throw error('kling_dance_price_undecided');
+  return seconds * creditsPerSecond;
+}
+
+// Server owns orientation and sound. Nothing from the browser body is spread in.
+function buildKlingDancePayload({ prompt, imageUrl, videoUrl }) {
+  return {
+    image: String(imageUrl || '').trim(),
+    video: String(videoUrl || '').trim(),
+    prompt: String(prompt || '').trim(),
+    character_orientation: KLING_DANCE_CHARACTER_ORIENTATION,
+    keep_original_sound: false
+  };
+}
+
+const klingDance = Object.freeze({
+  KLING_DANCE_METHOD,
+  KLING_DANCE_PROVIDER_MODEL,
+  KLING_DANCE_MIN_SECONDS,
+  KLING_DANCE_MAX_SECONDS,
+  config,
+  getKlingDanceCreditsPerSecond,
+  isKlingDanceRequested,
+  parseKlingDanceMethod,
+  validateKlingDanceSeconds,
+  validateKlingDanceDuration,
+  klingDanceCredits,
+  buildKlingDancePayload
+});
+
 module.exports = {
+  klingDance,
   REFERENCE_DANCE_BUCKET,
   REFERENCE_DANCE_TABLE,
   REFERENCE_DANCE_MODEL,
