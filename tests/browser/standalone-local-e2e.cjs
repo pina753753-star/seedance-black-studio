@@ -24,6 +24,7 @@ const syntheticAuth = `(function(){
 async function fixture(browser, capabilities, options = {}) {
  const context = await browser.newContext({serviceWorkers:'block',viewport:{width:1100,height:1000}});
  await context.addInitScript(syntheticAuth);
+ if(options.savedMode)await context.addInitScript(mode=>{try{localStorage.setItem('flowvidGenerateMode',mode)}catch(_){}},options.savedMode);
  if(options.authFailure)await context.addInitScript(()=>{if(!sessionStorage.getItem('synthetic-auth-recovered'))sessionStorage.setItem('synthetic-auth-failure','1')});
  const starts = [], finishes = [], pageErrors = [];
  const rev = {serverPrice:null,revised:false};
@@ -57,7 +58,7 @@ async function fixture(browser, capabilities, options = {}) {
   return route.fulfill({status:204,body:''});
  });
  const page=await context.newPage();page.on('pageerror',error=>pageErrors.push(error.message));
- await page.goto(origin+'/'+(options.profile?'profile.html':'generate-prod.html'),{waitUntil:'networkidle'});
+ await page.goto(origin+'/'+(options.profile?'profile.html':'generate-prod.html')+(options.query||''),{waitUntil:'networkidle'});
  if(options.authFailure)await page.locator('#authConnectionBlocked').waitFor();
  else if(options.profile)await page.evaluate(()=>window.showHistorySection());
  else {await page.waitForFunction(()=>typeof generationAccessLoaded!=='undefined');if(!options.capabilityFailure)await page.waitForFunction(()=>generationAccessLoaded===true);}
@@ -87,8 +88,58 @@ async function model(page,value,resolution) {
    }
    await f.page.locator('#create').click();await f.page.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
    assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.estimated_credits,535);assert.equal(f.starts[0].body.aspect_ratio,'9:16');
-   await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');await f.page.locator('#sbResolution').selectOption('1080p');await f.page.locator('#sbDuration').selectOption('15');
+   await f.page.locator('[data-mode="storyboard"]').evaluate(el=>el.click());await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');await f.page.locator('#sbResolution').selectOption('1080p');await f.page.locator('#sbDuration').selectOption('15');
    for(const [aspect,credits] of [['16:9',535],['1:1',400],['4:3',405]]){await f.page.locator('#sbAspect').selectOption(aspect);assert.equal(await f.page.locator('#sbCreditEstimateValue').textContent(),String(credits));}
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
+ await run('storyboard and video-edit entrances are hidden, skipped by Tab, remaining modes fill the row (DOM/ids/data-mode kept)',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
+  try{
+   const p=f.page;
+   for(const mode of ['storyboard','video_edit'])assert.equal(await p.locator('.tabs button[data-mode="'+mode+'"]').count(),1);
+   assert.equal(await p.locator('#videoEditTab').count(),1);
+   assert.equal(await p.locator('.tabs button[data-mode="storyboard"]').isVisible(),false);
+   assert.equal(await p.locator('#videoEditTab').isVisible(),false);
+   const visible=await p.locator('.tabs button:visible').evaluateAll(b=>b.map(x=>x.dataset.mode));
+   assert.deepEqual(visible,['reference_to_video','image_to_video','text_to_video']);
+   const seen=new Set();await p.locator('.tabs button:visible').first().focus();
+   for(let i=0;i<14;i++){const m=await p.evaluate(()=>document.activeElement?.closest?.('.tabs')?document.activeElement.dataset.mode:null);if(m)seen.add(m);await p.keyboard.press('Tab');}
+   assert.deepEqual([...seen].sort(),['image_to_video','reference_to_video','text_to_video']);
+   const box=await p.evaluate(()=>{const t=document.querySelector('.tabs').getBoundingClientRect();const b=[...document.querySelectorAll('.tabs button')].filter(x=>x.offsetParent).map(x=>x.getBoundingClientRect());return{left:t.left,right:t.right,first:b[0].left,last:b[b.length-1].right,widths:b.map(x=>Math.round(x.width))}});
+   assert.ok(Math.abs(box.first-box.left)<=1&&Math.abs(box.last-box.right)<=1,'visible tabs fill the row: '+JSON.stringify(box));
+   assert.ok(Math.max(...box.widths)-Math.min(...box.widths)<=1,'equal widths: '+JSON.stringify(box));
+   assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+   assert.equal(await p.locator('#history').count(),1);
+   assert.deepEqual(f.pageErrors,[]);
+  }finally{await f.context.close()}
+ });
+ for(const [label,opts,section] of [['?mode=storyboard',{query:'?mode=storyboard'},'sbSection'],['saved mode storyboard',{savedMode:'storyboard'},'sbSection']]){
+  await run('restore from '+label+' still works and returns to ordinary generation via a visible tab',async()=>{
+   const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false},opts);
+   try{
+    const p=f.page;
+    await p.waitForFunction(id=>document.getElementById(id)&&getComputedStyle(document.getElementById(id)).display!=='none',section);
+    assert.equal(await p.locator('#mainCard').isVisible(),false);
+    assert.equal(await p.locator('.tabs button[data-mode="storyboard"]').isVisible(),false);
+    await p.locator('.tabs button[data-mode="text_to_video"]').click();
+    assert.equal(await p.locator('#mainCard').isVisible(),true);assert.equal(await p.locator('#'+section).isVisible(),false);
+    assert.equal(await p.evaluate(()=>mode),'text_to_video');
+    assert.equal(await p.locator('#create').isVisible(),true);
+    assert.deepEqual(f.pageErrors,[]);
+   }finally{await f.context.close()}
+  });
+ }
+ await run('restore from ?mode=video_edit still shows the edit section and returns to ordinary generation via a visible tab',async()=>{
+  const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:true,storyboard25:true,watermarkRequired:false},{query:'?mode=video_edit'});
+  try{
+   const p=f.page;
+   await p.waitForFunction(()=>getComputedStyle(document.getElementById('videoEditSection')).display!=='none');
+   assert.equal(await p.locator('#mainCard').isVisible(),false);
+   assert.equal(await p.locator('#videoEditTab').isVisible(),false);
+   await p.locator('.tabs button[data-mode="reference_to_video"]').click();
+   assert.equal(await p.locator('#videoEditSection').isVisible(),false);assert.equal(await p.locator('#mainCard').isVisible(),true);
+   assert.equal(await p.evaluate(()=>mode),'reference_to_video');
    assert.deepEqual(f.pageErrors,[]);
   }finally{await f.context.close()}
  });
@@ -135,7 +186,7 @@ async function model(page,value,resolution) {
    await f.page.evaluate(()=>localStorage.setItem('flowvidGenerateDraft',JSON.stringify({model:'bytedance/seedance-2.0',resolution:'1080p',duration:15,aspect:'16:9',mode:'text_to_video',prompt_text_to_video:'Dummy'})));
    await f.page.reload({waitUntil:'networkidle'});
    assert.equal(await f.page.locator('#resolution').inputValue(),'1080p');assert.equal(await f.page.evaluate(()=>creditEstimate()),535);
-   await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');await f.page.locator('#sbResolution').selectOption('1080p');await f.page.locator('#sbDuration').selectOption('15');
+   await f.page.locator('[data-mode="storyboard"]').evaluate(el=>el.click());await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');await f.page.locator('#sbResolution').selectOption('1080p');await f.page.locator('#sbDuration').selectOption('15');
    const before=await f.page.locator('#sbCreditEstimateValue').textContent();
    await f.page.evaluate(()=>{generationAccessLoaded=true;resolution1080Access=false;syncSeedance25PlanUi()});
    assert.equal(await f.page.locator('#sbResolution').inputValue(),'720p');assert.notEqual(await f.page.locator('#sbCreditEstimateValue').textContent(),before);assert.match(await f.page.locator('#sbFastResolutionNotice').textContent(),/720pに変更/);
@@ -155,7 +206,7 @@ async function model(page,value,resolution) {
    await f.page.locator('#mainCard details.settings').evaluate(el=>{el.open=true});
    await f.page.locator('#model').selectOption('bytedance/seedance-2.0');
    assert.equal(await f.page.locator('#resolution option[value="1080p"]').evaluate(el=>el.disabled||el.hidden),false);
-   await f.page.locator('[data-mode="storyboard"]').click();
+   await f.page.locator('[data-mode="storyboard"]').evaluate(el=>el.click());
    await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0');
    await f.page.locator('#sbResolution').selectOption('1080p');
    await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.0-fast');
@@ -171,7 +222,7 @@ async function model(page,value,resolution) {
    await model(f.page,'bytedance/seedance-2.5','720p');assert.equal(await f.page.locator('#resolution option[value="1080p"]').evaluate(e=>e.disabled&&e.hidden),true);assert.equal(await f.page.locator('#create').isDisabled(),false);assert.equal(await f.page.locator('#audioFile').isDisabled(),true);
    await f.page.locator('#create').click();await f.page.waitForFunction(()=>document.getElementById('creditStatus').style.display!=='none');
    assert.equal(f.starts.length,1);assert.equal(f.starts[0].body.model,'bytedance/seedance-2.5');assert.equal(f.starts[0].headers.authorization,'Bearer synthetic-browser-session');assert.equal(f.starts[0].body.reference_audio_paths,undefined);
-   await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.5');assert.equal(await f.page.locator('#sbAnalyzeBtn').isDisabled(),true);assert.match(await f.page.locator('#sbAnalyzeBtn').textContent(),/Premium/);
+   await f.page.locator('[data-mode="storyboard"]').evaluate(el=>el.click());await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.5');assert.equal(await f.page.locator('#sbAnalyzeBtn').isDisabled(),true);assert.match(await f.page.locator('#sbAnalyzeBtn').textContent(),/Premium/);
    assert.deepEqual(f.pageErrors,[]);
   }finally{await f.context.close()}
  });
@@ -193,7 +244,7 @@ async function model(page,value,resolution) {
  });
  await run('active Premium: 2.5, audio, and storyboard capabilities preserved',async()=>{
   const f=await fixture(browser,{ok:true,resolution1080:true,seedance25:true,referenceAudio:true,storyboard25:true,watermarkRequired:false});
-  try{await model(f.page,'bytedance/seedance-2.5','1080p');assert.equal(await f.page.locator('#create').isDisabled(),false);assert.equal(await f.page.locator('#audioFile').isDisabled(),false);await f.page.locator('[data-mode="storyboard"]').click();await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.5');await f.page.evaluate(()=>{sbFile={name:'synthetic-no-upload'};sbSyncPlanAccess()});assert.equal(await f.page.locator('#sbAnalyzeBtn').isDisabled(),false);assert.deepEqual(f.pageErrors,[])}finally{await f.context.close()}
+  try{await model(f.page,'bytedance/seedance-2.5','1080p');assert.equal(await f.page.locator('#create').isDisabled(),false);assert.equal(await f.page.locator('#audioFile').isDisabled(),false);await f.page.locator('[data-mode="storyboard"]').evaluate(el=>el.click());await f.page.locator('#sbModel').selectOption('bytedance/seedance-2.5');await f.page.evaluate(()=>{sbFile={name:'synthetic-no-upload'};sbSyncPlanAccess()});assert.equal(await f.page.locator('#sbAnalyzeBtn').isDisabled(),false);assert.deepEqual(f.pageErrors,[])}finally{await f.context.close()}
  });
  await run('active Standard plus purchase: normal 2.5 enabled, high-tier extras remain blocked',async()=>{
   const f=await fixture(browser,{ok:true,seedance25:true,resolution1080:true,referenceAudio:false,storyboard25:false,watermarkRequired:false});
