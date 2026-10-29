@@ -29,11 +29,11 @@ const allowed = new Set(['generate-prod.html', 'flowvid-history.js', 'flowvid-op
 async function fixture(browser, o = {}) {
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width, height: 900 } });
   await context.addInitScript(syntheticAuth);
-  const calls = { starts: [], deletes: [], confirms: [], imageUploads: 0, videoUploads: 0, polls: 0 }, pageErrors = [];
+  const calls = { starts: [], deletes: [], confirms: [], imageUploads: 0, videoUploads: 0, polls: 0, inflight: 0, maxInflight: 0 }, pageErrors = [];
   // Stateful backend for the start -> processing -> complete -> history flow.
   const flow = { task: null, completed: false, failed: false, pollScript: o.pollScript || ['processing', 'processing', 'done'] };
   // The page polls every 12 s; shorten it so the mock flow finishes quickly.
-  await context.addInitScript(() => { const si = window.setInterval; window.setInterval = (fn, ms, ...a) => si(fn, ms === 12000 ? 150 : ms, ...a); });
+  await context.addInitScript((tick) => { const si = window.setInterval; window.setInterval = (fn, ms, ...a) => si(fn, ms === 12000 ? tick : ms, ...a); }, o.tick || 150);
   await context.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url());
     if (url.hostname !== 'pina.local') {
@@ -49,10 +49,18 @@ async function fixture(browser, o = {}) {
     if (p === '/api/pending-tasks') return json({ ok: true, tasks: flow.task && !flow.completed && !flow.failed ? [flow.task] : [] });
     if (p === '/api/seedance-status') {
       calls.polls++;
+      calls.inflight++; calls.maxInflight = Math.max(calls.maxInflight, calls.inflight);
+      if (o.pollDelay) await new Promise(r => setTimeout(r, o.pollDelay));
+      calls.inflight--;
       const step = flow.task ? flow.pollScript[Math.min(calls.pollIndex = (calls.pollIndex || 0), flow.pollScript.length - 1)] : 'processing';
       calls.pollIndex = (calls.pollIndex || 0) + 1;
       if (step === 'network') return route.abort('failed');
-      if (step === 'http502') return json({ ok: false, error: 'status_lookup_failed' }, 502);
+      // Same shape api/seedance-status.js returns for a provider HTTP error: body.status is the numeric HTTP code.
+      const httpErr = { http502: 502, http503: 503, http429: 429, http401: 401, http403: 403, http404: 404 }[step];
+      if (httpErr) return json({ ok: false, status: httpErr, provider: 'wavespeed', jobId: 'job-1', jobStatus: step === 'http502' ? 'error' : '', done: false, error: 'status_lookup_failed', response: { message: 'upstream ' + httpErr } }, httpErr);
+      if (step === 'html502') return route.fulfill({ status: 502, contentType: 'text/html', body: '<html>Bad Gateway</html>' });
+      // Real failure shape of the watermark / result-unavailable paths: HTTP 200, body ok:false, jobStatus failed.
+      if (step === 'wmfail') { flow.failed = true; return json({ ok: false, status: 200, jobStatus: 'failed', done: false, error: 'watermark_failed', refunded: true }); }
       if (step === 'failed') { flow.failed = true; return json({ ok: true, status: 200, jobStatus: 'failed', done: false, refunded: true, refundConfirmed: true }); }
       if (step === 'done') { flow.completed = true; return json({ ok: true, status: 200, jobStatus: 'completed', done: true, videoUrl: origin + '/out.mp4' }); }
       return json({ ok: true, status: 200, jobStatus: 'processing', done: false });
@@ -295,19 +303,114 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         await p.waitForFunction(() => document.querySelector('[data-ptask-id="task-1"]'), null, { timeout: 8000 });
         await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
         assert.equal(f.calls.starts.length, 1, 'no new generation request after reload');
+        assert.equal(await p.evaluate(() => Object.keys(_pendingPollers).length), 0, 'poller removed after completion');
+        assert.equal(f.calls.maxInflight, 1);
         assert.equal(f.flow.completed, true);
       } finally { await f.context.close(); }
     });
-    await run(`[${width}] transient status failures (network abort, HTTP 502 without job status) keep polling; no new start, no failure card`, async () => {
-      const f = await fixture(browser, { pollScript: ['network', 'http502', 'processing', 'done'] });
+    await run(`[${width}] HTTP 502 -> processing -> completed: polling is not stopped, the video is shown, one start only`, async () => {
+      const f = await fixture(browser, { pollScript: ['http502', 'processing', 'done'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
         await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
         assert.equal(f.calls.starts.length, 1);
-        assert.ok(f.calls.polls >= 4);
-        assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '失敗' }).count(), 0);
+        assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
+        assert.equal(f.flow.completed, true);
+        assert.deepEqual(f.pageErrors, []);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] 503, 429, network drop, HTML 502 then recovery: shows "status being checked", never a failure card, no extra start/refund`, async () => {
+      const f = await fixture(browser, { pollScript: ['http503', 'network', 'http429', 'html502', 'http502', 'processing', 'done'], pollDelay: 260 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdPrompt').fill('dance');
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => /状態を確認中/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 8000 });
+        assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 15000 });
+        assert.equal(f.calls.starts.length, 1);
+        assert.equal(f.calls.deletes.length, 0);
+        assert.equal(await p.locator('[data-pt-net]').count(), 0);
+        assert.equal(f.calls.maxInflight, 1, 'status requests never overlap');
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] 401/403/404 are shown as "cannot check status" (not a generation failure), polling continues slowly, then completes`, async () => {
+      for (const bad of ['http401', 'http404']) {
+        const f = await fixture(browser, { pollScript: [bad, 'processing', 'done'] });
+        try {
+          const p = f.page; await openDance(p); await fill(p);
+          await p.locator('#kdPrompt').fill('dance');
+          await p.locator('#kdCreate').click();
+          await p.waitForFunction(() => /生成が失敗したとは限りません/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 8000 });
+          assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
+          assert.equal(f.calls.starts.length, 1);
+          await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 15000 });
+        } finally { await f.context.close(); }
+      }
+    });
+    await run(`[${width}] regression: a normal (text-to-video) generation shares the poller - 502 then completion works, and a confirmed failure still ends with a refund notice`, async () => {
+      for (const [script, expectVideo] of [[['http502', 'http503', 'processing', 'done'], true], [['processing', 'failed'], false]]) {
+        const f = await fixture(browser, { pollScript: script });
+        try {
+          const p = f.page;
+          await p.locator('.tabs button[data-mode="text_to_video"]').click();
+          await p.locator('#prompt').fill('A paper boat at sunset');
+          await p.waitForFunction(() => !document.getElementById('create').disabled);
+          await p.locator('#create').click();
+          if (expectVideo) {
+            await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 10000 });
+          } else {
+            await p.waitForFunction(() => /生成に失敗/.test(document.querySelector('[data-ptask-id]')?.textContent || '') && /返金|返還/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 10000 });
+          }
+          assert.equal(f.calls.starts.length, 1);
+          assert.equal(f.calls.starts[0].body.dance_method, undefined);
+        } finally { await f.context.close(); }
+      }
+    });
+    await run(`[${width}] reload while processing leaves exactly one poller for the task`, async () => {
+      const f = await fixture(browser, { pollScript: ['processing'], pollDelay: 260 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdPrompt').fill('dance');
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
+        await p.reload({ waitUntil: 'networkidle' });
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id="task-1"]'), null, { timeout: 8000 });
+        await p.evaluate(() => loadPendingTasks());
+        await p.evaluate(() => _ptStartPoll({ id: 'task-1', polling_url: 'https://api.wavespeed.ai/api/v3/predictions/job-1/result' }));
+        assert.deepEqual(await p.evaluate(() => Object.keys(_pendingPollers)), ['task-1']);
+        assert.equal(await p.locator('[data-ptask-id="task-1"]').count(), 1);
+        await p.waitForTimeout(1200);
+        assert.equal(f.calls.maxInflight, 1);
+        assert.equal(f.calls.starts.length, 1);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] persistent 404 (cannot check status): gives up after 5 tries with a neutral message, no failure card, no restart`, async () => {
+      const f = await fixture(browser, { pollScript: ['http404'], tick: 25 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdPrompt').fill('dance');
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => /タスクIDを添えて/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 10000 });
+        const polls = f.calls.polls; await p.waitForTimeout(700);
+        assert.equal(f.calls.polls, polls, 'polling stopped');
+        assert.equal(polls, 5);
+        assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
+        assert.equal(f.calls.starts.length, 1);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] HTTP 200 with ok:false + jobStatus failed (watermark_failed shape) ends the card with the refund notice`, async () => {
+      const f = await fixture(browser, { pollScript: ['processing', 'wmfail'] });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdPrompt').fill('dance');
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => /生成に失敗/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 8000 });
+        assert.match(await p.locator('[data-ptask-id]').first().textContent(), /自動返金/);
+        const polls = f.calls.polls; await p.waitForTimeout(500);
+        assert.equal(f.calls.polls, polls);
       } finally { await f.context.close(); }
     });
     await run(`[${width}] confirmed provider failure: card shows failure with refund notice, send re-enabled only by new inputs, one start only`, async () => {
@@ -316,7 +419,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const p = f.page; await openDance(p); await fill(p);
         await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
-        await p.waitForFunction(() => /返還|返金/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 8000 });
+        await p.waitForFunction(() => /生成に失敗/.test(document.querySelector('[data-ptask-id]')?.textContent || '') && /返金|返還/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 8000 });
         assert.equal(f.calls.starts.length, 1);
         const polls = f.calls.polls; await p.waitForTimeout(600);
         assert.equal(f.calls.polls, polls, 'polling stops after a confirmed failure');
