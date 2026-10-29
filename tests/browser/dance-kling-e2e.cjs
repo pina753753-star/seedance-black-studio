@@ -60,6 +60,12 @@ async function fixture(browser, o = {}) {
       if (httpErr) return json({ ok: false, status: httpErr, provider: 'wavespeed', jobId: 'job-1', jobStatus: step === 'http502' ? 'error' : '', done: false, error: 'status_lookup_failed', response: { message: 'upstream ' + httpErr } }, httpErr);
       if (step === 'html502') return route.fulfill({ status: 502, contentType: 'text/html', body: '<html>Bad Gateway</html>' });
       // Real failure shape of the watermark / result-unavailable paths: HTTP 200, body ok:false, jobStatus failed.
+      // WaveSpeed provider job timeout: HTTP 200, provider wavespeed, jobStatus timeout. The server tries the refund; refunded may be false.
+      if (step === 'timeout_refunded' || step === 'timeout_unrefunded') { flow.failed = true; return json({ ok: true, status: 200, provider: 'wavespeed', jobStatus: 'timeout', done: false, refunded: step === 'timeout_refunded', refundConfirmed: step === 'timeout_refunded' }); }
+      // A gateway error whose body happens to mention timeout must stay a transient status-check failure.
+      if (step === 'timeout_other') return json({ ok: true, status: 200, provider: 'openrouter', jobStatus: 'timeout', done: false });
+      if (step === 'http502_timeout') return json({ ok: false, status: 502, provider: 'wavespeed', jobStatus: 'timeout', done: false, error: 'status_lookup_failed' }, 502);
+      if (step === 'http408') return json({ ok: false, status: 408, provider: 'wavespeed', jobStatus: '', done: false, error: 'request_timeout' }, 408);
       if (step === 'wmfail') { flow.failed = true; return json({ ok: false, status: 200, jobStatus: 'failed', done: false, error: 'watermark_failed', refunded: true }); }
       if (step === 'failed') { flow.failed = true; return json({ ok: true, status: 200, jobStatus: 'failed', done: false, refunded: true, refundConfirmed: true }); }
       if (step === 'done') { flow.completed = true; return json({ ok: true, status: 200, jobStatus: 'completed', done: true, videoUrl: origin + '/out.mp4' }); }
@@ -411,6 +417,46 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.match(await p.locator('[data-ptask-id]').first().textContent(), /自動返金/);
         const polls = f.calls.polls; await p.waitForTimeout(500);
         assert.equal(f.calls.polls, polls);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] WaveSpeed provider timeout (HTTP 200): ends the card, polling stops, refund wording only when refunded===true`, async () => {
+      for (const [step, refunded] of [['timeout_refunded', true], ['timeout_unrefunded', false]]) {
+        const f = await fixture(browser, { pollScript: ['processing', step] });
+        try {
+          const p = f.page; await openDance(p); await fill(p);
+          await p.locator('#kdPrompt').fill('dance');
+          await p.locator('#kdCreate').click();
+          await p.waitForFunction(() => /生成に失敗/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 8000 });
+          const text = await p.locator('[data-ptask-id]').first().textContent();
+          if (refunded) assert.match(text, /自動返金されました/);
+          else { assert.doesNotMatch(text, /自動返金されました/); assert.match(text, /返金状況を確認できませんでした/); }
+          const polls = f.calls.polls; await p.waitForTimeout(600);
+          assert.equal(f.calls.polls, polls, 'no further status requests');
+          assert.equal(f.calls.starts.length, 1, 'no regeneration');
+          assert.equal(await p.evaluate(() => Object.keys(_pendingPollers).length), 0);
+        } finally { await f.context.close(); }
+      }
+    });
+    await run(`[${width}] HTTP 502/408 whose body mentions timeout is NOT a final failure: recovers and completes`, async () => {
+      const f = await fixture(browser, { pollScript: ['http502_timeout', 'http408', 'processing', 'done'] });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdPrompt').fill('dance');
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => /状態を確認中/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 8000 });
+        assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 10000 });
+        assert.equal(f.calls.starts.length, 1);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] timeout from a non-wavespeed provider is not treated as final (other providers unchanged)`, async () => {
+      const f = await fixture(browser, { pollScript: ['timeout_other', 'done'] });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdPrompt').fill('dance');
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
+        assert.equal(f.calls.starts.length, 1);
       } finally { await f.context.close(); }
     });
     await run(`[${width}] confirmed provider failure: card shows failure with refund notice, send re-enabled only by new inputs, one start only`, async () => {

@@ -829,7 +829,9 @@ function extractJobId(d){if(!d||typeof d!=='object')return'';for(const k of ['jo
 // 生成の「確定失敗」は、HTTP成功(r.ok)かつ提供元ジョブの状態が失敗系のときだけ。HTTPの番号(502/503等)や
 // 状態取得の失敗だけでは、生成失敗と断定しない(サーバーも r.ok でない応答では返金しない)。
 function pollJobStatus(d){return String(d?.jobStatus||d?.response?.status||d?.response?.data?.status||(typeof d?.status==='string'?d.status:'')).toLowerCase()}
-function failed(d,httpOk){return httpOk===true&&['failed','error','cancelled','canceled'].includes(pollJobStatus(d))}
+// WaveSpeedの提供元ジョブ状態 timeout は、サーバーも最終失敗として返金処理を試みる(api/seedance-status.js)。HTTP成功かつ提供元がwavespeedの場合だけ最終失敗とする。
+// 通信のタイムアウトや408/502/503などの状態取得失敗(r.okでない)とは混同しない。
+function failed(d,httpOk){if(httpOk!==true)return false;const s=pollJobStatus(d);return['failed','error','cancelled','canceled'].includes(s)||(s==='timeout'&&d?.provider==='wavespeed')}
 // 状態取得1回ぶんの分類: done / failed(確定失敗) / processing / transient(通信断・429・5xx等) / auth(401・403) / permanent(その他の4xx)
 function ptPollClass(r,d){if(findVideo(d))return'done';if(failed(d,r?.ok===true))return'failed';if(r?.ok===true)return d==null?'transient':'processing';const s=Number(r?.status||0);if(!s)return'transient';if(s===401||s===403)return'auth';if(s===408||s===425||s===429||s>=500)return'transient';return'permanent'}
 const PT_NET_MSG={transient:'状態を確認中です（通信が不安定です）。生成は続いている可能性があります。自動で再確認します。',auth:'ログイン状態を確認できません。ページを再読み込みして再ログインしてください。生成が失敗したとは限りません。',permanent:'状態を確認できませんでした。ページを再読み込みしてください。生成が失敗したとは限りません。',giveup:'状態を確認できません。履歴を確認するか、タスクIDを添えてサポートへお知らせください。生成が失敗したとは限りません。'};
