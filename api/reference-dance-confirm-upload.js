@@ -15,10 +15,16 @@ const {
   approvedPath,
   reviewFramePath,
   authorizeReferenceDanceAdmin,
-  referenceDanceCredits
+  referenceDanceCredits,
+  klingDance
 } = require('./_lib/reference-dance.js');
 
 const INSPECTION_TIMEOUT_MS = 120000;
+// Set in inspection_error only when a motion length change failed (the master already exists then).
+const MOTION_RECUT_FAILURE_PREFIX = 'MOTION_RECUT:';
+// Stored in inspection_error of a READY row only when the motion pipeline sealed it, i.e. staging holds the audio-free
+// master a length change can start from. A Seedance asset (staging deleted after success) never carries it.
+const MOTION_MASTER_MARKER = 'MOTION_MASTER';
 const STORAGE_CAPABILITY_TTL_SECONDS = 3 * 60;
 const DEFAULT_SUPABASE_URL = 'https://jflpjsdjmlkmkqfahxwy.supabase.co';
 // Public browser configuration, not a service-role credential. Keep in sync
@@ -47,9 +53,13 @@ function safeDurationDiagnostics(value) {
   return result;
 }
 
-function inspectionMessage(code, diagnostics) {
+function inspectionMessage(code, diagnostics, motion = false) {
   const durations = safeDurationDiagnostics(diagnostics);
   const values = [durations.containerSeconds, durations.videoSeconds].filter(n => n !== null);
+  if (motion && code === 'VIDEO_DURATION_INVALID') {
+    const measured = values.length ? `読み取った長さは${Math.max(...values).toFixed(3)}秒です。` : '';
+    return `${measured}お手本動画は${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.KLING_DANCE_SOURCE_MAX_SECONDS}秒の動画を選んでください（使えるのは先頭${klingDance.KLING_DANCE_SELECTABLE_MAX_SECONDS}秒までです）。`;
+  }
   if (code === 'VIDEO_DURATION_INVALID' && values.length) {
     return `読み取った長さは${Math.max(...values).toFixed(3)}秒です。4〜15秒の動画、または「先頭15秒を使う」を選んで60秒以下の動画をアップロードしてください。`;
   }
@@ -70,8 +80,17 @@ async function removeObjects(db, paths) {
   return !error;
 }
 
-function validateInspection(data, userId, assetId) {
+// motion: { maxDurationMs, useSeconds } — the motion profile is answered only by an inspector that says
+// so (an older inspector that ignores `profile` is refused, never trusted), and a requested length must
+// match the sealed file exactly: never longer than chosen and billed (ceil) as exactly that many seconds.
+function validateInspection(data, userId, assetId, motion = null) {
   if (!data || data.ok !== true) return null;
+  if (motion) {
+    if (data.inspectorProfile !== 'motion-v1') return null;
+    const ms = Number(data.durationMs);
+    if (!Number.isSafeInteger(ms) || ms > motion.maxDurationMs) return null;
+    if (Number.isInteger(motion.useSeconds) && (ms > motion.useSeconds * 1000 || Math.ceil(ms / 1000) !== motion.useSeconds)) return null;
+  }
   if (!validateOwnedPath('approved', userId, assetId, data.approvedPath)) return null;
   const reviewPaths = Array.isArray(data.reviewPaths) ? data.reviewPaths : [];
   if (reviewPaths.length !== 5 || !reviewPaths.every((p) => validateOwnedPath('review', userId, assetId, p))) return null;
@@ -82,7 +101,7 @@ function validateInspection(data, userId, assetId) {
   const height = Number(data.height);
   const fps = Number(data.fps);
   if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > MAX_REFERENCE_DANCE_BYTES) return null;
-  if (!Number.isSafeInteger(durationMs) || durationMs < MIN_REFERENCE_DANCE_DURATION_MS || durationMs > MAX_REFERENCE_DANCE_DURATION_MS) return null;
+  if (!Number.isSafeInteger(durationMs) || durationMs < MIN_REFERENCE_DANCE_DURATION_MS || durationMs > (motion ? motion.maxDurationMs : MAX_REFERENCE_DANCE_DURATION_MS)) return null;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 64 || height < 64 || width > 4096 || height > 4096) return null;
   if (!Number.isFinite(fps) || fps < 1 || fps > 120 || data.videoCodec !== 'h264' || !/^[0-9a-f]{64}$/i.test(String(data.sha256 || ''))) return null;
   return {
@@ -99,6 +118,11 @@ function validateInspection(data, userId, assetId) {
   };
 }
 
+// The Seedance sample price exists only for the Seedance dance's 4-15 s; a longer (motion) asset has none.
+function sampleCredits(seconds, resolution) {
+  return Number.isInteger(seconds) && seconds <= 15 ? referenceDanceCredits(seconds, resolution) : null;
+}
+
 function readyResponse(row) {
   return {
     ok: true,
@@ -106,14 +130,34 @@ function readyResponse(row) {
     status: 'ready',
     durationMs: row.duration_ms,
     billableSeconds: row.billable_seconds,
-    sampleCredits: referenceDanceCredits(Number(row.billable_seconds)),
+    sampleCredits: sampleCredits(Number(row.billable_seconds)),
     sampleCreditsResolution: '720p',
-    sampleCreditsByResolution: { '480p': referenceDanceCredits(Number(row.billable_seconds), '480p'), '720p': referenceDanceCredits(Number(row.billable_seconds)) },
+    sampleCreditsByResolution: { '480p': sampleCredits(Number(row.billable_seconds), '480p'), '720p': sampleCredits(Number(row.billable_seconds)) },
     expiresAt: row.expires_at
   };
 }
 
-async function createStorageCapabilities(db, userId, assetId, stagingPath) {
+// 'yes' | 'no' | 'unknown' (a failed lookup is never read as "missing": nothing is changed on either answer).
+async function stagingMasterState(db, userId, assetId) {
+  const { data, error } = await db.storage.from(REFERENCE_DANCE_BUCKET)
+    .list(`staging/${userId}`, { limit: 5, search: `${assetId}.mp4` });
+  if (error || !Array.isArray(data)) return 'unknown';
+  return data.some((item) => item?.name === `${assetId}.mp4`) ? 'yes' : 'no';
+}
+
+const MOTION_LENGTH_UNAVAILABLE = {
+  ok: false,
+  error: 'motion_length_unavailable',
+  message: 'このお手本動画は長さを変更できません。使う場合はそのまま選ぶか、もう一度アップロードしてください。'
+};
+const MOTION_LENGTH_CHECK_FAILED = {
+  ok: false,
+  error: 'reference_video_check_failed',
+  retryable: true,
+  message: '元動画の状態を確認できませんでした。少し待ってからもう一度お試しください。'
+};
+
+async function createStorageCapabilities(db, userId, assetId, stagingPath, { withMaster = false } = {}) {
   const supabaseUrl = String(process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/+$/, '');
   const publishableKey = String(
     process.env.SUPABASE_PUBLISHABLE_KEY
@@ -141,7 +185,7 @@ async function createStorageCapabilities(db, userId, assetId, stagingPath) {
   );
   if (sourceError || !source?.signedUrl) throw new Error('STORAGE_DOWNLOAD_CAPABILITY_FAILED');
 
-  const uploads = await Promise.all([approved, ...reviews].map(async (path) => {
+  const uploads = await Promise.all([approved, ...reviews, ...(withMaster ? [stagingPath] : [])].map(async (path) => {
     const { data, error } = await storage.createSignedUploadUrl(path, { upsert: true });
     if (error || !data?.token) throw new Error('STORAGE_UPLOAD_CAPABILITY_FAILED');
     return { path, token: data.token };
@@ -152,11 +196,13 @@ async function createStorageCapabilities(db, userId, assetId, stagingPath) {
     publishableKey,
     sourceUrl: source.signedUrl,
     approvedUpload: uploads[0],
-    reviewUploads: uploads.slice(1)
+    reviewUploads: uploads.slice(1, 1 + reviews.length),
+    // Motion first run only: scoped token to rewrite staging with the audio-free master.
+    ...(withMaster ? { masterUpload: uploads[1 + reviews.length] } : {})
   };
 }
 
-async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim = false }) {
+async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim = false, profile, useSeconds }) {
   const baseUrl = String(process.env.WATERMARK_SERVER_URL || '').replace(/\/+$/, '');
   const secret = String(process.env.WATERMARK_SECRET || '');
   if (!baseUrl || !secret) throw new Error('reference_dance_inspector_not_configured');
@@ -166,7 +212,7 @@ async function inspectOnRailway({ userId, assetId, stagingPath, storageCapabilit
     const response = await fetch(`${baseUrl}/reference-dance-inspect`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim: allowBoundaryTrim === true }),
+      body: JSON.stringify({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim: allowBoundaryTrim === true, ...(profile === 'motion' ? { profile: 'motion', useSeconds: useSeconds === undefined ? null : useSeconds } : {}) }),
       signal: controller.signal
     });
     const raw = await response.text();
@@ -191,6 +237,8 @@ module.exports = async function handler(req, res) {
   let assetId = '';
   let claimedRow = null;
   let trimConsent = false;
+  let motion = false;
+  let recut = false;
   try {
     const access = await authorizeReferenceDanceAdmin(auth);
     if (!access.ok) return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden' });
@@ -199,24 +247,105 @@ module.exports = async function handler(req, res) {
     assetId = String(body.assetId || '').trim();
     if (!isUuid(assetId)) return res.status(400).json({ ok: false, error: 'invalid_reference_video_id' });
 
+    // Motion (Kling) profile: opt-in, closed set, and only while the length choice is enabled
+    // (config.maxUseSeconds > 10, flipped after the DB constraint and the inspector are live).
+    let useSeconds = null;
+    const hasUseSeconds = Object.prototype.hasOwnProperty.call(body, 'useSeconds');
+    if (body.profile !== undefined && body.profile !== 'motion') {
+      return res.status(400).json({ ok: false, error: 'invalid_profile' });
+    }
+    motion = body.profile === 'motion';
+    if (motion) {
+      if (!klingDance.isKlingDanceLengthSelectEnabled()) {
+        return res.status(400).json({ ok: false, error: 'motion_profile_disabled' });
+      }
+      if (hasUseSeconds && body.useSeconds !== null) {
+        const n = body.useSeconds;
+        if (!Number.isInteger(n) || n < klingDance.KLING_DANCE_MIN_SECONDS || n > klingDance.getKlingDanceMaxSeconds()) {
+          return res.status(400).json({ ok: false, error: 'invalid_use_seconds', message: `使用する長さは${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.getKlingDanceMaxSeconds()}秒の整数で指定してください。` });
+        }
+        useSeconds = n;
+      }
+    } else if (hasUseSeconds) {
+      return res.status(400).json({ ok: false, error: 'invalid_use_seconds' });
+    }
+    const motionMaxMs = klingDance.KLING_DANCE_STORED_MAX_MS;
+
     const { data: row, error: rowError } = await auth.supabase.from(REFERENCE_DANCE_TABLE)
       .select('*').eq('id', assetId).eq('user_id', auth.user.id).maybeSingle();
     if (rowError || !row) return res.status(404).json({ ok: false, error: 'reference_video_not_found' });
     if (!validateOwnedPath('staging', auth.user.id, assetId, row.staging_path)) {
       return res.status(400).json({ ok: false, error: 'invalid_reference_video_path' });
     }
-    if (row.status === 'ready') {
+    if (row.status === 'ready' && !(motion && hasUseSeconds)) {
       return res.status(200).json(readyResponse(row));
     }
 
-    const { data: claim, error: claimError } = await auth.supabase.rpc('claim_seedance_reference_video_inspection', {
-      p_asset_id: assetId,
-      p_user_id: auth.user.id
-    });
-    if (claimError) throw claimError;
-    if (claim?.code === 'busy') return res.status(409).json({ ok: false, error: 'reference_video_checking', retryable: true, message: '参考動画を確認中です。しばらくお待ちください。' });
-    if (claim?.ok !== true) return res.status(409).json({ ok: false, error: `reference_video_${claim?.code || 'not_ready'}` });
-    if (claim.code === 'ready') {
+    let claim = null;
+    if (row.status === 'ready') {
+      // Length change on a ready motion asset: a conditional ready -> checking transition that does not
+      // consume an inspection attempt, is refused once a task has used the asset (or it expired), and is
+      // throttled so rapid changes cannot queue heavy inspections. The staging object is the audio-free
+      // master, so nothing is re-uploaded. Exactly one concurrent request can win this update.
+      if (row.used_at || Date.parse(String(row.expires_at || '')) <= Date.now()) {
+        return res.status(409).json({ ok: false, error: 'reference_video_in_use', message: 'このお手本動画はすでに生成に使われたため、長さを変更できません。' });
+      }
+      // Only an asset the motion pipeline sealed has a master to cut from. Anything else (a Seedance asset whose
+      // source was deleted, a lost object) is refused BEFORE the row is touched and stays exactly as it was.
+      if (row.inspection_error !== MOTION_MASTER_MARKER) return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
+      const masterState = await stagingMasterState(auth.supabase, auth.user.id, assetId);
+      if (masterState === 'unknown') return res.status(503).json(MOTION_LENGTH_CHECK_FAILED);
+      if (masterState === 'no') return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
+      const throttleBefore = new Date(Date.now() - 1000).toISOString();
+      const { data: recutClaim, error: recutClaimError } = await auth.supabase.from(REFERENCE_DANCE_TABLE)
+        .update({ status: 'checking', updated_at: new Date().toISOString(), expires_at: new Date(Math.max(Date.parse(String(row.expires_at || '')) || 0, Date.now() + 60 * 60 * 1000)).toISOString() })
+        .eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'ready').is('used_at', null)
+        .gt('expires_at', new Date().toISOString())
+        .lt('updated_at', throttleBefore).select('id');
+      if (recutClaimError) throw recutClaimError;
+      if (!recutClaim || recutClaim.length !== 1) {
+        return res.status(409).json({ ok: false, error: 'reference_video_checking', retryable: true, message: '長さを変更中です。少し待ってからもう一度お試しください。' });
+      }
+      recut = true;
+    } else if (motion && row.status === 'uploading' && String(row.inspection_error || '').startsWith(MOTION_RECUT_FAILURE_PREFIX)) {
+      // The previous length change failed after the master existed: staging is the audio-free master, so this
+      // is again a length change. It does not consume an inspection attempt (a few transient errors must not
+      // permanently fail a healthy asset) and never rewrites the master.
+      // Same rules as a length change on a ready asset: an expired asset is never revived (cleanup owns it), and
+      // the lease is extended (never shortened) so the re-inspection has time to finish.
+      if (Date.parse(String(row.expires_at || '')) <= Date.now()) {
+        return res.status(409).json({ ok: false, error: 'reference_video_in_use', message: 'このお手本動画は保存期限が切れました。もう一度アップロードしてください。' });
+      }
+      const masterState = await stagingMasterState(auth.supabase, auth.user.id, assetId);
+      if (masterState === 'unknown') return res.status(503).json(MOTION_LENGTH_CHECK_FAILED);
+      if (masterState === 'no') return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
+      const throttleBefore = new Date(Date.now() - 1000).toISOString();
+      const { data: retryClaim, error: retryClaimError } = await auth.supabase.from(REFERENCE_DANCE_TABLE)
+        .update({ status: 'checking', updated_at: new Date().toISOString(), expires_at: new Date(Math.max(Date.parse(String(row.expires_at || '')) || 0, Date.now() + 60 * 60 * 1000)).toISOString() })
+        .eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'uploading').is('used_at', null)
+        .gt('expires_at', new Date().toISOString())
+        .lt('updated_at', throttleBefore).select('id');
+      if (retryClaimError) throw retryClaimError;
+      if (!retryClaim || retryClaim.length !== 1) {
+        return res.status(409).json({ ok: false, error: 'reference_video_checking', retryable: true, message: '長さを変更中です。少し待ってからもう一度お試しください。' });
+      }
+      recut = true;
+    } else {
+      // A first inspection of a motion asset always uses the whole video (it also writes the audio-free master).
+      // A cut is only possible once that master exists, i.e. as a length change above.
+      if (motion && useSeconds !== null) {
+        return res.status(400).json({ ok: false, error: 'invalid_use_seconds', message: '最初にお手本動画全体を確認してから、使う長さを選んでください。' });
+      }
+      const claimResult = await auth.supabase.rpc('claim_seedance_reference_video_inspection', {
+        p_asset_id: assetId,
+        p_user_id: auth.user.id
+      });
+      if (claimResult.error) throw claimResult.error;
+      claim = claimResult.data;
+      if (claim?.code === 'busy') return res.status(409).json({ ok: false, error: 'reference_video_checking', retryable: true, message: '参考動画を確認中です。しばらくお待ちください。' });
+      if (claim?.ok !== true) return res.status(409).json({ ok: false, error: `reference_video_${claim?.code || 'not_ready'}` });
+    }
+    if (claim?.code === 'ready') {
       const { data: readyRow, error: readyError } = await auth.supabase.from(REFERENCE_DANCE_TABLE)
         .select('*').eq('id', assetId).eq('user_id', auth.user.id).maybeSingle();
       if (readyError || readyRow?.status !== 'ready') throw new Error('reference_video_ready_persist_failed');
@@ -224,20 +353,24 @@ module.exports = async function handler(req, res) {
     }
 
     claimedRow = row;
+    // The audio-free master is written back to staging only on a whole-source run of a motion asset
+    // that has not been through the motion pipeline yet (never when cutting, never on a length change).
     const storageCapabilities = await createStorageCapabilities(
       auth.supabase,
       auth.user.id,
       assetId,
-      row.staging_path
+      row.staging_path,
+      { withMaster: motion && !recut && useSeconds === null }
     );
     const railwayData = await inspectOnRailway({
       userId: auth.user.id,
       assetId,
       stagingPath: row.staging_path,
       storageCapabilities,
-      allowBoundaryTrim: trimConsent
+      allowBoundaryTrim: motion ? false : trimConsent,
+      ...(motion ? { profile: 'motion', useSeconds } : {})
     });
-    const inspected = validateInspection(railwayData, auth.user.id, assetId);
+    const inspected = validateInspection(railwayData, auth.user.id, assetId, motion ? { maxDurationMs: motionMaxMs, useSeconds } : null);
     if (!inspected) throw new Error('invalid_inspection_response');
 
     const reviewUrls = [];
@@ -275,25 +408,36 @@ module.exports = async function handler(req, res) {
       video_codec: inspected.videoCodec,
       sha256: inspected.sha256,
       moderation_categories: [],
-      inspection_error: null,
-      expires_at: expiresAt,
+      inspection_error: motion ? MOTION_MASTER_MARKER : null,
+      // A length change keeps the retention it already had (extended at the claim only as far as the re-inspection
+      // needs); only a first inspection starts the full retention. A change never renews the asset.
+      ...(recut ? {} : { expires_at: expiresAt }),
       updated_at: new Date().toISOString()
-    }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking').select('id');
+    }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking').select('id,expires_at');
     if (updateError || !updated || updated.length !== 1) throw new Error('reference_video_ready_persist_failed');
-    await removeObjects(auth.supabase, [row.staging_path]);
+    // Motion keeps staging: it now holds the audio-free master used for later length changes
+    // (removed with the asset by the expiry cleanup).
+    if (!motion) await removeObjects(auth.supabase, [row.staging_path]);
 
     return res.status(200).json({
       ok: true,
       assetId,
       status: 'ready',
+      ...(motion ? { motion: {
+        mode: railwayData.motion?.mode === 'cut' ? 'cut' : 'whole',
+        useSeconds: Number.isInteger(railwayData.motion?.useSeconds) ? railwayData.motion.useSeconds : null,
+        capped: railwayData.motion?.capped === true,
+        sourceDurationMs: Number.isSafeInteger(railwayData.motion?.sourceDurationMs) ? railwayData.motion.sourceDurationMs : null,
+        masterDurationMs: Number.isSafeInteger(railwayData.motion?.masterDurationMs) ? railwayData.motion.masterDurationMs : null
+      } } : {}),
       durationMs: inspected.durationMs,
       billableSeconds: inspected.billableSeconds,
-      sampleCredits: referenceDanceCredits(inspected.billableSeconds),
+      sampleCredits: sampleCredits(inspected.billableSeconds),
       sampleCreditsResolution: '720p',
-      sampleCreditsByResolution: { '480p': referenceDanceCredits(inspected.billableSeconds, '480p'), '720p': referenceDanceCredits(inspected.billableSeconds) },
+      sampleCreditsByResolution: { '480p': sampleCredits(inspected.billableSeconds, '480p'), '720p': sampleCredits(inspected.billableSeconds) },
       trimApplied: railwayData.trimApplied === true || railwayData.boundaryTrimmed === true,
       durationDiagnostics: safeDurationDiagnostics(railwayData.durationDiagnostics),
-      expiresAt
+      expiresAt: recut ? (updated[0].expires_at || null) : expiresAt
     });
   } catch (error) {
     console.error('[reference-dance-confirm] failed', error?.message || String(error), 'assetId:', assetId || null);
@@ -301,7 +445,7 @@ module.exports = async function handler(req, res) {
     const measuredSeconds = Math.max(durations.containerSeconds || 0, durations.videoSeconds || 0);
     // A reload can lose the browser's trim choice while retaining the upload.
     // Missing opt-in is recoverable, not permission to delete that source.
-    if (claimedRow && !trimConsent && error?.inspectionCode === 'VIDEO_DURATION_INVALID'
+    if (claimedRow && !motion && !trimConsent && error?.inspectionCode === 'VIDEO_DURATION_INVALID'
         && measuredSeconds > 15 && measuredSeconds <= 60) {
       const { error: retryPersistError } = await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
         status: 'uploading',
@@ -320,7 +464,31 @@ module.exports = async function handler(req, res) {
         message: `読み取った長さは${measuredSeconds.toFixed(3)}秒です。動画は保持しています。「先頭15秒を使う」にチェックしてから再検査してください。`
       });
     }
-    if (claimedRow && isPermanentReferenceDanceInspectionError(error?.inspectionCode)) {
+    // A rejected length request (longer than the source, out of range) touched nothing: the sealed file and
+    // its stored numbers are unchanged, so a length change simply goes back to ready.
+    if (claimedRow && motion && ['MOTION_USE_SECONDS_INVALID', 'MOTION_USE_EXCEEDS_SOURCE'].includes(error?.inspectionCode)) {
+      if (recut) {
+        // Back to exactly the state it was in: 'ready' only if it was ready (its numbers still match the sealed file);
+        // a retry state after an earlier failure must never be promoted to ready.
+        const { error: restoreError } = await auth.supabase.from(REFERENCE_DANCE_TABLE).update({ status: claimedRow.status === 'ready' ? 'ready' : 'uploading', updated_at: new Date().toISOString() })
+          .eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
+        if (restoreError) console.error('[reference-dance-confirm] ready restore failed', restoreError.message);
+      } else {
+        await auth.supabase.from(REFERENCE_DANCE_TABLE).update({ status: 'uploading', inspection_error: error.inspectionCode, updated_at: new Date().toISOString() })
+          .eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
+      }
+      return res.status(400).json({
+        ok: false,
+        error: 'motion_length_invalid',
+        reason: error.inspectionCode,
+        message: error.inspectionCode === 'MOTION_USE_EXCEEDS_SOURCE'
+          ? '元の動画より長い区間は選べません。短い長さを選んでください。'
+          : `使用する長さは${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.getKlingDanceMaxSeconds()}秒の整数で指定してください。`
+      });
+    }
+    // A failed LENGTH CHANGE never deletes the asset it started from: even a permanent-looking inspection code goes to the
+    // retry state (the master in staging is intact), so a healthy asset is never destroyed by a change request.
+    if (claimedRow && !recut && isPermanentReferenceDanceInspectionError(error?.inspectionCode)) {
       const paths = [
         claimedRow.staging_path,
         approvedPath(auth.user.id, assetId),
@@ -347,7 +515,7 @@ module.exports = async function handler(req, res) {
         error: 'reference_video_invalid',
         reason: error.inspectionCode,
         durationDiagnostics: safeDurationDiagnostics(error.durationDiagnostics),
-        message: inspectionMessage(error.inspectionCode, error.durationDiagnostics)
+        message: inspectionMessage(error.inspectionCode, error.durationDiagnostics, motion)
       });
     }
     const reason = safeInspectionReason(error);
@@ -355,7 +523,7 @@ module.exports = async function handler(req, res) {
       const now = new Date().toISOString();
       const { error: retryPersistError } = await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
         status: 'uploading',
-        inspection_error: reason,
+        inspection_error: recut ? `${MOTION_RECUT_FAILURE_PREFIX}${reason}` : reason,
         updated_at: now
       }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
       if (retryPersistError) console.error('[reference-dance-confirm] retry state persist failed', retryPersistError.message);

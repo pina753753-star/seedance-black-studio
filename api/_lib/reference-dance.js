@@ -110,7 +110,7 @@ function referenceDanceCredits(referenceBillableSeconds, resolution = REFERENCE_
   return Math.ceil(((cents * 11) / 12) / 5) * 5;
 }
 
-function validateReadyReferenceDance(row, userId) {
+function validateReadyReferenceDance(row, userId, { maxDurationMs = MAX_REFERENCE_DANCE_DURATION_MS } = {}) {
   if (!row || row.user_id !== userId || !isUuid(row.id)) throw error('reference_video_not_found');
   if (row.status !== 'ready') throw error('reference_video_not_ready');
   const expiresMs = Date.parse(String(row.expires_at || ''));
@@ -124,7 +124,7 @@ function validateReadyReferenceDance(row, userId) {
   const billable = Number(row.billable_seconds);
   if (!Number.isSafeInteger(durationMs)
       || durationMs < MIN_REFERENCE_DANCE_DURATION_MS
-      || durationMs > MAX_REFERENCE_DANCE_DURATION_MS
+      || durationMs > maxDurationMs
       || !Number.isInteger(billable)
       || billable !== Math.max(4, Math.ceil(durationMs / 1000))) {
     throw error('invalid_reference_video_duration');
@@ -184,8 +184,23 @@ const KLING_DANCE_PROVIDER_MODEL = 'kwaivgi/kling-v3.0-pro/motion-control';
 // WaveSpeed bills a 3 s minimum, but PinaStudio accepts 4-10 s only: the existing
 // inspector already rejects anything under 4 s, and that rule is kept as-is.
 const KLING_DANCE_MIN_SECONDS = 4;
+// KLING_DANCE_MAX_SECONDS is the longest clip the proven `character_orientation:"image"` setting
+// accepts. Up to KLING_DANCE_SELECTABLE_MAX_SECONDS the `"video"` setting is used instead (chosen by
+// the server from the measured length, shown to the user, never silently). Which maximum is
+// currently accepted is config.maxUseSeconds (10 until the DB constraint, the inspection service and
+// this API are all deployed; then 20).
 const KLING_DANCE_MAX_SECONDS = 10;
-const KLING_DANCE_CHARACTER_ORIENTATION = 'image';
+const KLING_DANCE_SELECTABLE_MAX_SECONDS = 20;
+const KLING_DANCE_SOURCE_MAX_SECONDS = 30;
+// Two different limits, never to be confused:
+//  - config.maxUseSeconds is the FEATURE GATE: how long a motion generation may be right now (10 or 20).
+//    Closing it (back to 10) stops NEW 11-20 s acceptance only.
+//  - KLING_DANCE_STORED_MAX_MS is the longest asset the stored-data validation will still read (the DB
+//    constraint's 20 s). Assets of 16-20 s that already exist stay readable, restorable and deletable by
+//    the normal expiry whatever the gate says; the gate alone decides whether they may start a generation.
+const KLING_DANCE_STORED_MAX_MS = KLING_DANCE_SELECTABLE_MAX_SECONDS * 1000;
+const KLING_DANCE_IMAGE_ORIENTATION = 'image';
+const KLING_DANCE_VIDEO_ORIENTATION = 'video';
 
 // The motion tab takes no user prompt. The server owns both texts, so nothing typed on
 // another tab can leak in. TASK_PROMPT is what is stored (history) and moderated; the
@@ -198,7 +213,24 @@ const KLING_DANCE_PROVIDER_PROMPT = 'Keep the character from the input image as 
 // ever null/invalid, the server refuses to start (kling_dance_price_undecided)
 // and the access endpoint reports no rate, so the UI disables sending.
 // Tests override it via config.
-const config = { creditsPerSecond: 19 };
+// maxUseSeconds: 10 keeps today's 4-10 s behaviour exactly; 20 enables the length choice. Flip it only
+// after the DB constraint migration and the inspection service are live.
+const config = { creditsPerSecond: 19, maxUseSeconds: KLING_DANCE_MAX_SECONDS };
+
+function getKlingDanceMaxSeconds() {
+  const max = config.maxUseSeconds;
+  return Number.isInteger(max) && max >= KLING_DANCE_MAX_SECONDS && max <= KLING_DANCE_SELECTABLE_MAX_SECONDS
+    ? max : KLING_DANCE_MAX_SECONDS;
+}
+
+function isKlingDanceLengthSelectEnabled() {
+  return getKlingDanceMaxSeconds() > KLING_DANCE_MAX_SECONDS;
+}
+
+// From the measured length of the file actually sent: <= 10 s keeps the proven image setting.
+function klingDanceOrientation(durationMs) {
+  return Number(durationMs) <= KLING_DANCE_MAX_SECONDS * 1000 ? KLING_DANCE_IMAGE_ORIENTATION : KLING_DANCE_VIDEO_ORIENTATION;
+}
 
 function getKlingDanceCreditsPerSecond() {
   const rate = config.creditsPerSecond;
@@ -224,7 +256,7 @@ function parseKlingDanceMethod(body) {
 function validateKlingDanceDuration({ durationMs, billableSeconds }) {
   if (!Number.isFinite(durationMs)
       || durationMs < KLING_DANCE_MIN_SECONDS * 1000
-      || durationMs > KLING_DANCE_MAX_SECONDS * 1000
+      || durationMs > getKlingDanceMaxSeconds() * 1000
       || billableSeconds !== Math.ceil(durationMs / 1000)) {
     throw error('kling_dance_duration_unsupported');
   }
@@ -233,7 +265,7 @@ function validateKlingDanceDuration({ durationMs, billableSeconds }) {
 
 // seconds: whole billable seconds of the inspected reference video.
 function validateKlingDanceSeconds(seconds) {
-  if (!Number.isInteger(seconds) || seconds < KLING_DANCE_MIN_SECONDS || seconds > KLING_DANCE_MAX_SECONDS) {
+  if (!Number.isInteger(seconds) || seconds < KLING_DANCE_MIN_SECONDS || seconds > getKlingDanceMaxSeconds()) {
     throw error('kling_dance_duration_unsupported');
   }
   return seconds;
@@ -246,12 +278,13 @@ function klingDanceCredits(seconds, creditsPerSecond = getKlingDanceCreditsPerSe
 }
 
 // Server owns orientation and sound. Nothing from the browser body is spread in.
-function buildKlingDancePayload({ prompt, imageUrl, videoUrl }) {
+function buildKlingDancePayload({ prompt, imageUrl, videoUrl, orientation = KLING_DANCE_IMAGE_ORIENTATION }) {
+  if (orientation !== KLING_DANCE_IMAGE_ORIENTATION && orientation !== KLING_DANCE_VIDEO_ORIENTATION) throw error('invalid_kling_orientation');
   return {
     image: String(imageUrl || '').trim(),
     video: String(videoUrl || '').trim(),
     prompt: String(prompt || '').trim(),
-    character_orientation: KLING_DANCE_CHARACTER_ORIENTATION,
+    character_orientation: orientation,
     keep_original_sound: false
   };
 }
@@ -261,10 +294,16 @@ const klingDance = Object.freeze({
   KLING_DANCE_PROVIDER_MODEL,
   KLING_DANCE_MIN_SECONDS,
   KLING_DANCE_MAX_SECONDS,
+  KLING_DANCE_SELECTABLE_MAX_SECONDS,
+  KLING_DANCE_SOURCE_MAX_SECONDS,
+  KLING_DANCE_STORED_MAX_MS,
   KLING_DANCE_TASK_PROMPT,
   KLING_DANCE_PROVIDER_PROMPT,
   config,
   getKlingDanceCreditsPerSecond,
+  getKlingDanceMaxSeconds,
+  isKlingDanceLengthSelectEnabled,
+  klingDanceOrientation,
   isKlingDanceRequested,
   parseKlingDanceMethod,
   validateKlingDanceSeconds,

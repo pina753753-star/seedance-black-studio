@@ -14,7 +14,11 @@ const { probeVideoFile } = require('./worker-probe.js');
 const {
   validateReferenceDanceProbe,
   validateReferenceDanceDurationMatch,
-  referenceDanceDurationDiagnostics
+  referenceDanceDurationDiagnostics,
+  planMotionOutput,
+  validateMotionOutput,
+  motionOutputOptions,
+  videoStreamSeconds
 } = require('./reference-dance-inspection.js');
 
 // ffmpeg-static is not used; system ffmpeg is used via Dockerfile
@@ -877,6 +881,8 @@ function validateReferenceDanceStorageCapabilities(value, stagingPath, approvedP
   if (!validUpload(value.approvedUpload, approvedPath)
     || !Array.isArray(value.reviewUploads) || value.reviewUploads.length !== reviewPaths.length
     || value.reviewUploads.some((item, index) => !validUpload(item, reviewPaths[index]))) throw invalid();
+  // Motion profile only: a scoped token to rewrite the staging object with the audio-free master.
+  if (value.masterUpload !== undefined && !validUpload(value.masterUpload, stagingPath)) throw invalid();
   return { ...value, baseUrl: base.origin };
 }
 
@@ -1061,6 +1067,117 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath, stora
   }
 }
 
+// Motion (Kling) profile. Differences from the Seedance inspection above:
+//  - the source may be up to 30 s; at most the first 20 s are ever used;
+//  - the output is always transcoded to constant 30 fps with an exact frame count, so the sealed
+//    file's measured duration is the planned one (no keyframe-dependent overshoot) and the billed
+//    second count (ceil of that measured duration) can never silently exceed what was chosen;
+//  - with useSeconds the first useSeconds seconds are cut; without it the whole source is used
+//    (the first 20 s if longer). Nothing is extended, looped or padded;
+//  - staging is not deleted. On a whole-source run it is replaced with the audio-free master so the
+//    length can be chosen again later without a re-upload (and without keeping the original audio).
+async function runMotionReferenceInspection({ userId, assetId, stagingPath, storageCapabilities, useSeconds = null }) {
+  if (!SUPABASE_URL || (!storageCapabilities && !SUPABASE_SERVICE_KEY)) throw referenceDanceError('SERVICE_NOT_CONFIGURED');
+  if (!REFERENCE_DANCE_UUID_RE.test(userId) || !REFERENCE_DANCE_UUID_RE.test(assetId)) throw referenceDanceError('INVALID_REQUEST');
+  if (stagingPath !== referenceDancePath('staging', userId, assetId)) throw referenceDanceError('INVALID_REQUEST');
+  if (useSeconds !== null && !Number.isInteger(useSeconds)) throw referenceDanceError('MOTION_USE_SECONDS_INVALID');
+
+  const approvedPath = referenceDancePath('approved', userId, assetId);
+  const reviewPaths = Array.from({ length: 5 }, (_, i) => `review/${userId}/${assetId}/frame-${i + 1}.jpg`);
+  const capabilities = storageCapabilities === undefined ? null : validateReferenceDanceStorageCapabilities(
+    storageCapabilities, stagingPath, approvedPath, reviewPaths
+  );
+  let jobDirectory;
+  const processingDeadline = Date.now() + REFERENCE_DANCE_PROCESS_TIMEOUT_MS;
+  let durationDiagnostics;
+  try {
+    jobDirectory = fs.mkdtempSync('/tmp/pina-motion-');
+    const inputFile = path.join(jobDirectory, 'input.mp4');
+    const approvedFile = path.join(jobDirectory, 'approved.mp4');
+    const frameFiles = reviewPaths.map((_, i) => path.join(jobDirectory, `frame-${i + 1}.jpg`));
+    let sourceBuffer = capabilities
+      ? await signedReferenceDanceDownload(capabilities, processingDeadline)
+      : await storageBlobBuffer(stagingPath, processingDeadline);
+    if (!sourceBuffer) throw referenceDanceError('VIDEO_NOT_FOUND');
+    fs.writeFileSync(inputFile, sourceBuffer);
+
+    const probe = await referenceDanceProbe(inputFile, referenceDanceRemainingMs(processingDeadline));
+    durationDiagnostics = referenceDanceDurationDiagnostics(probe);
+    const inputMetadata = validateReferenceDanceProbe(probe, { allowHevcInput: true, motion: true });
+    const plan = planMotionOutput({ sourceDurationSeconds: videoStreamSeconds(probe, inputMetadata.durationSeconds), useSeconds });
+    if (capabilities?.masterUpload && plan.mode !== 'whole') throw referenceDanceError('MOTION_MASTER_INVALID');
+
+    await runFfmpeg(
+      () => ffmpeg(inputFile).inputOptions('-protocol_whitelist', 'file,pipe', '-threads', '1')
+        .outputOptions(...motionOutputOptions(plan, REFERENCE_DANCE_MAX_BYTES)).output(approvedFile),
+      referenceDanceRemainingMs(processingDeadline)
+    );
+
+    // The sealed file that will be moderated, billed and sent is probed again: its measured
+    // duration must be the planned one (never longer, at most one second shorter).
+    const approvedProbe = await referenceDanceProbe(approvedFile, referenceDanceRemainingMs(processingDeadline));
+    const approvedMetadata = validateReferenceDanceProbe(approvedProbe, { requireNoAudio: true, motion: true });
+    validateMotionOutput(plan, approvedMetadata);
+    const { durationSeconds: approvedDuration, durationMs, width, height, fps } = approvedMetadata;
+
+    const positions = [0.05, 0.25, 0.5, 0.75, 0.95].map((ratio) =>
+      Math.min(Math.max(0, approvedDuration * ratio), Math.max(0, approvedDuration - 0.05))
+    );
+    for (let i = 0; i < positions.length; i++) {
+      await runFfmpeg(
+        () => ffmpeg(approvedFile).seekInput(positions[i]).frames(1).outputOptions('-q:v', '2').output(frameFiles[i]),
+        referenceDanceRemainingMs(processingDeadline)
+      );
+    }
+    const approvedSize = fs.statSync(approvedFile).size;
+    if (!approvedSize || approvedSize > REFERENCE_DANCE_MAX_BYTES) throw referenceDanceError('VIDEO_SIZE_INVALID');
+    const approvedBuffer = fs.readFileSync(approvedFile);
+    const sha256 = crypto.createHash('sha256').update(approvedBuffer).digest('hex');
+    if (capabilities) {
+      await signedReferenceDanceUpload(capabilities, capabilities.approvedUpload, approvedFile, 'video/mp4', processingDeadline, 'APPROVED_UPLOAD_FAILED');
+      for (let i = 0; i < frameFiles.length; i++) {
+        await signedReferenceDanceUpload(capabilities, capabilities.reviewUploads[i], frameFiles[i], 'image/jpeg', processingDeadline, 'REVIEW_UPLOAD_FAILED');
+      }
+      if (capabilities.masterUpload) {
+        await signedReferenceDanceUpload(capabilities, capabilities.masterUpload, approvedFile, 'video/mp4', processingDeadline, 'MASTER_UPLOAD_FAILED');
+      }
+    } else {
+      await referenceDanceUpload(approvedFile, approvedPath, 'video/mp4', processingDeadline, 'APPROVED_UPLOAD_FAILED');
+      for (let i = 0; i < frameFiles.length; i++) {
+        await referenceDanceUpload(frameFiles[i], reviewPaths[i], 'image/jpeg', processingDeadline, 'REVIEW_UPLOAD_FAILED');
+      }
+    }
+    return {
+      ok: true,
+      inspectorProfile: 'motion-v1',
+      approvedPath,
+      reviewPaths,
+      sizeBytes: approvedBuffer.length,
+      durationMs,
+      width,
+      height,
+      fps: Number(fps.toFixed(3)),
+      videoCodec: 'h264',
+      sha256,
+      durationDiagnostics,
+      trimApplied: false,
+      boundaryTrimmed: false,
+      motion: {
+        mode: plan.mode,
+        useSeconds: plan.useSeconds,
+        capped: plan.capped,
+        sourceDurationMs: inputMetadata.durationMs,
+        masterDurationMs: plan.mode === 'whole' ? durationMs : inputMetadata.durationMs
+      }
+    };
+  } catch (error) {
+    if (durationDiagnostics) error.durationDiagnostics = durationDiagnostics;
+    throw error;
+  } finally {
+    try { if (jobDirectory) fs.rmSync(jobDirectory, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
 app.post('/reference-dance-inspect', async (req, res) => {
   // This endpoint also fails closed when the shared secret is missing;
   // it must never become public because it reads private
@@ -1068,12 +1185,16 @@ app.post('/reference-dance-inspect', async (req, res) => {
   if (!WATERMARK_SECRET) return res.status(503).json({ ok: false, error: 'SERVICE_NOT_CONFIGURED' });
   const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
   if (auth !== WATERMARK_SECRET) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
-  const { userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim } = req.body || {};
+  const { userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim, profile, useSeconds } = req.body || {};
   let acquired = false;
   try {
     await acquireSlot('edit', REFERENCE_DANCE_QUEUE_TIMEOUT_MS);
     acquired = true;
-    const result = await runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim });
+    // Only the two known profiles exist; anything else fails closed instead of falling back.
+    if (profile !== undefined && profile !== 'motion') throw referenceDanceError('INVALID_REQUEST');
+    const result = profile === 'motion'
+      ? await runMotionReferenceInspection({ userId, assetId, stagingPath, storageCapabilities, useSeconds: useSeconds === undefined ? null : useSeconds })
+      : await runReferenceDanceInspection({ userId, assetId, stagingPath, storageCapabilities, allowBoundaryTrim });
     return res.status(200).json(result);
   } catch (error) {
     if (error?.httpStatus === 429) return replyQueueError(res, error);

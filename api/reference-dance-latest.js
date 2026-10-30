@@ -16,6 +16,8 @@ module.exports = async function handler(req, res) {
       .eq('user_id', auth.user.id)
       .in('status', ['uploading', 'checking', 'ready'])
       .is('last_task_id', null)
+      // Motion assets of 16-20 s exist only for the motion tab; they must not be restored into the Seedance panel.
+      .or('duration_ms.is.null,duration_ms.lte.15000')
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1)
@@ -31,7 +33,7 @@ module.exports = async function handler(req, res) {
         billableSeconds: data.status === 'ready' ? data.billable_seconds : null,
         expiresAt: data.expires_at,
         name: String(data.original_filename || '前回の参考動画').slice(0, 180),
-        reason: String(data.inspection_error || '').slice(0, 80)
+        reason: data.status === 'ready' ? '' : String(data.inspection_error || '').slice(0, 80)
       }
     });
   } catch (error) {

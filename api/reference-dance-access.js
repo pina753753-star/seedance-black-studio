@@ -21,7 +21,10 @@ module.exports = async function handler(req, res) {
           method: klingDance.KLING_DANCE_METHOD,
           creditsPerSecond: klingDance.getKlingDanceCreditsPerSecond(),
           minSeconds: klingDance.KLING_DANCE_MIN_SECONDS,
-          maxSeconds: klingDance.KLING_DANCE_MAX_SECONDS
+          maxSeconds: klingDance.getKlingDanceMaxSeconds(),
+          imageOrientationMaxSeconds: klingDance.KLING_DANCE_MAX_SECONDS,
+          sourceMaxSeconds: klingDance.KLING_DANCE_SOURCE_MAX_SECONDS,
+          lengthSelectEnabled: klingDance.isKlingDanceLengthSelectEnabled()
         }
       } : {})
     });

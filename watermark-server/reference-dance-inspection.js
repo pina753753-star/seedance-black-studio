@@ -3,6 +3,12 @@
 const MIN_SECONDS = 4;
 const MAX_SECONDS = 15;
 const MAX_TRIMMABLE_INPUT_SECONDS = 60;
+// Motion (Kling) profile: the source may be up to 30 s (well inside the existing 60 s
+// trimmable-input precedent), but at most the first 20 s are ever transcoded or used.
+const MOTION_MIN_USE_SECONDS = 4;
+const MOTION_MAX_USE_SECONDS = 20;
+const MOTION_MAX_SOURCE_SECONDS = 30;
+const MOTION_FPS = 30;
 
 function inspectionError(code) {
   return Object.assign(new Error(code), { publicCode: code });
@@ -30,7 +36,7 @@ function referenceDanceDurationDiagnostics(probe) {
   });
 }
 
-function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcInput = false, allowBoundaryTrim = false } = {}) {
+function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcInput = false, allowBoundaryTrim = false, motion = false } = {}) {
   const streams = Array.isArray(probe?.streams) ? probe.streams : [];
   const video = streams.find((stream) => stream?.codec_type === 'video');
   if (!video) throw inspectionError('VIDEO_STREAM_MISSING');
@@ -50,11 +56,15 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
   // Neither a short container nor a short video stream may conceal the other
   // exceeding the input ceiling. An audio/container tail is not a free bypass.
   const durationSeconds = Math.max(containerDuration, videoDuration);
-  const requiresBoundaryTrim = durationSeconds > MAX_SECONDS;
-  const inputLimit = allowBoundaryTrim === true && !requireNoAudio ? MAX_TRIMMABLE_INPUT_SECONDS : MAX_SECONDS;
+  // Motion never uses the 15 s boundary-trim mechanism: it plans its own exact cut.
+  const requiresBoundaryTrim = !motion && durationSeconds > MAX_SECONDS;
+  const inputLimit = motion ? MOTION_MAX_SOURCE_SECONDS
+    : (allowBoundaryTrim === true && !requireNoAudio ? MAX_TRIMMABLE_INPUT_SECONDS : MAX_SECONDS);
   // Never round a fractional millisecond down across a billable-second
   // boundary: provider pricing rounds the exact source duration upward.
-  const durationMs = Math.ceil(durationSeconds * 1000);
+  // Motion output durations are exact multiples of 1/30 s printed with 6 decimals; the epsilon only
+  // removes binary-float noise (16.1 * 1000 = 16100.000000000002) and never rounds a real overshoot down.
+  const durationMs = motion ? Math.ceil(durationSeconds * 1000 - 1e-6) : Math.ceil(durationSeconds * 1000);
   if (!Number.isSafeInteger(durationMs) || durationSeconds < MIN_SECONDS || durationSeconds > inputLimit) {
     throw Object.assign(inspectionError('VIDEO_DURATION_INVALID'), { durationDiagnostics: referenceDanceDurationDiagnostics(probe) });
   }
@@ -64,7 +74,7 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
     throw inspectionError('VIDEO_DIMENSIONS_INVALID');
   }
   let fps = parseFps(video.r_frame_rate || video.avg_frame_rate);
-  if (codec === 'hevc' || requiresBoundaryTrim) {
+  if (codec === 'hevc' || requiresBoundaryTrim || motion) {
     // Bound source decoding, not merely the scaled output. Compressed byte
     // size and duration alone do not bound decoded frame memory or work.
     const codedWidth = Number(video.coded_width || width);
@@ -129,4 +139,62 @@ function validateReferenceDanceDurationMatch(inputMetadata, approvedMetadata, ma
   return true;
 }
 
-module.exports = { validateReferenceDanceProbe, validateReferenceDanceDurationMatch, referenceDanceDurationDiagnostics };
+// The video stream's own length: a muted output cannot be longer than its video, so the motion plan uses this
+// (never the container/audio tail, which would ask for frames that do not exist).
+function videoStreamSeconds(probe, fallbackSeconds) {
+  const video = (Array.isArray(probe?.streams) ? probe.streams : []).find((stream) => stream?.codec_type === 'video');
+  const n = Number(video?.duration);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, fallbackSeconds) : fallbackSeconds;
+}
+
+// Plans the exact frame count of the motion output. Frames are counted at a constant
+// 30 fps so the sealed file's duration is frames / 30 and never exceeds the plan:
+//  - useSeconds (integer 4..20, at most the measured source): exactly useSeconds * 30 frames;
+//  - otherwise the whole source, floored to a whole frame, capped at the first 20 s.
+// Nothing is extended, looped or padded.
+function planMotionOutput({ sourceDurationSeconds, useSeconds = null } = {}) {
+  const source = Number(sourceDurationSeconds);
+  if (!Number.isFinite(source) || source < MOTION_MIN_USE_SECONDS) throw inspectionError('VIDEO_DURATION_INVALID');
+  if (useSeconds !== null && useSeconds !== undefined) {
+    if (!Number.isInteger(useSeconds) || useSeconds < MOTION_MIN_USE_SECONDS || useSeconds > MOTION_MAX_USE_SECONDS) {
+      throw inspectionError('MOTION_USE_SECONDS_INVALID');
+    }
+    // A tiny tolerance absorbs container rounding (e.g. 15.999 s for a "16 s" clip is not >= 16).
+    if (useSeconds > source + 0.0005) throw inspectionError('MOTION_USE_EXCEEDS_SOURCE');
+    return Object.freeze({ mode: 'cut', frames: useSeconds * MOTION_FPS, useSeconds, capped: false });
+  }
+  const capped = source > MOTION_MAX_USE_SECONDS;
+  const frames = capped ? MOTION_MAX_USE_SECONDS * MOTION_FPS : Math.floor((source + 1e-6) * MOTION_FPS);
+  if (frames < MOTION_MIN_USE_SECONDS * MOTION_FPS) throw inspectionError('VIDEO_DURATION_INVALID');
+  return Object.freeze({ mode: 'whole', frames, useSeconds: null, capped });
+}
+
+// The sealed file must be exactly what was planned: never longer than the plan, and at
+// most one second shorter, so that ceil(duration) is the billed second count the plan implies.
+function validateMotionOutput(plan, approvedMetadata) {
+  const planMs = Math.ceil(plan.frames / MOTION_FPS * 1000 - 1e-6);
+  const ms = Number(approvedMetadata?.durationMs);
+  if (!Number.isSafeInteger(ms) || ms > planMs || ms <= planMs - 1000 || ms > MOTION_MAX_USE_SECONDS * 1000) {
+    throw inspectionError('VIDEO_DURATION_MISMATCH');
+  }
+  return true;
+}
+
+// The exact FFmpeg output options of the motion transcode (also used by the real-FFmpeg tests).
+function motionOutputOptions(plan, maxBytes) {
+  return [
+    '-map', '0:v:0', '-c:v', 'libx264', '-threads', '2', '-filter_threads', '1',
+    '-preset', 'veryfast', '-crf', '23', '-maxrate', '6M', '-bufsize', '12M',
+    '-vf', "fps=30,scale=w='min(iw,if(gte(iw,ih),1280,720))':h='min(ih,if(gte(iw,ih),720,1280))':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+    '-frames:v', String(plan.frames),
+    '-pix_fmt', 'yuv420p', '-metadata:s:v:0', 'rotate=0',
+    '-fs', String(maxBytes),
+    '-an', '-movflags', '+faststart'
+  ];
+}
+
+module.exports = {
+  validateReferenceDanceProbe, validateReferenceDanceDurationMatch, referenceDanceDurationDiagnostics,
+  planMotionOutput, validateMotionOutput, motionOutputOptions, videoStreamSeconds,
+  MOTION_MIN_USE_SECONDS, MOTION_MAX_USE_SECONDS, MOTION_MAX_SOURCE_SECONDS, MOTION_FPS
+};

@@ -27,6 +27,12 @@ function dbFor(rows, rpc) {
         in(k,v) { found = found.filter(r => v.includes(r[k])); return q; },
         is(k,v) { found = found.filter(r => r[k] === v); return q; },
         gt(k,v) { found = found.filter(r => r[k] > v); return q; },
+        // Evaluates the only PostgREST filter strings the handlers use: "col.is.null,col.lte.N".
+        or(expr) {
+          const parts = String(expr).split(',').map(x => x.split('.'));
+          found = found.filter(r => parts.some(([col, op, val]) => (op === 'is' && val === 'null' ? r[col] == null : op === 'lte' ? r[col] != null && r[col] <= Number(val) : false)));
+          return q;
+        },
         order(k) { found.sort((a,b) => String(b[k]).localeCompare(String(a[k]))); return q; },
         limit(n) { found = found.slice(0,n); return q; },
         async maybeSingle() { return { data: found[0] ? { ...found[0] } : null }; }
@@ -116,6 +122,15 @@ test('latest restores unused ready metadata but never used, expired, or foreign 
   assert.equal(res.body.asset.status, 'ready');
   assert.equal(res.body.asset.billableSeconds, 5);
   assert.equal(res.body.asset.durationMs, 5000);
+});
+test('latest never restores a 16-20 s motion asset into the Seedance panel, but still restores 15 s and not-yet-measured rows', async () => {
+  const file = 'api/reference-dance-latest.js';
+  const long = row({ status: 'ready', duration_ms: 16200, billable_seconds: 17 });
+  assert.equal((await invoke(load(file, dbFor([long])), 'GET')).body.asset, null);
+  const fifteen = await invoke(load(file, dbFor([row({ status: 'ready', duration_ms: 15000, billable_seconds: 15 })])), 'GET');
+  assert.equal(fifteen.body.asset.durationMs, 15000);
+  const unmeasured = await invoke(load(file, dbFor([row({ status: 'uploading', duration_ms: null, billable_seconds: null })])), 'GET');
+  assert.equal(unmeasured.body.asset.status, 'uploading');
 });
 test('ordinary accounts remain forbidden at both endpoints', async () => {
   for (const file of [confirmFile, 'api/reference-dance-latest.js']) {

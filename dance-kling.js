@@ -9,15 +9,19 @@
   const $=id=>document.getElementById(id);
   if(!$('kdSection')||!$('danceTab'))return;
 
-  const access={allowed:false,rate:null,min:4,max:10};
+  const access={allowed:false,rate:null,min:4,max:10,sourceMax:30,imageMax:10,lengthSelect:false};
   const state={
     image:{status:'idle',url:'',name:'',error:'',previewUrl:''},
-    video:{status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false},
+    video:newVideo(),
     inFlight:false
   };
+  // seq invalidates late responses (replaced asset, newer length choice); masterMs = longest usable length of
+  // the inspected file (<= 20 s), sourceMs = the original's length as reported at inspection, useSeconds = chosen
+  // cut (null = the whole master), chosen = the user has confirmed a length (required when the original is longer than the maximum).
+  function newVideo(){return {status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false,masterMs:0,sourceMs:0,useSeconds:null,chosen:true,recutting:false,seq:0}}
 
   const token=()=>window.FlowVidAuthGuard.getVerifiedToken(window.flowvidSupabaseClient?window.flowvidSupabaseClient():undefined);
-  const busy=()=>state.inFlight||['uploading','checking'].includes(state.video.status)||state.image.status==='uploading';
+  const busy=()=>state.inFlight||state.video.recutting||['uploading','checking'].includes(state.video.status)||state.image.status==='uploading';
 
   // 表示・送信・サーバーの見積もりを同じ式(秒数×サーバー提供の単価)に統一する。
   // Acceptance uses the measured length (no rounding first); billing uses the server's billed seconds.
@@ -36,7 +40,42 @@
     if(state.image.status!=='completed')return 'キャラクター画像を1枚追加してください';
     if(state.video.status==='ready'&&!inRange(state.video))return `お手本動画は${access.min}〜${access.max}秒のものを選んでください。自動では短くしません。`;
     if(state.video.status!=='ready')return 'お手本動画を追加してください';
+    if(state.video.recutting)return '使用する長さを反映中です';
+    if(access.lengthSelect&&!state.video.chosen)return '使用する長さを選んでください';
     return '';
+  }
+
+  // Seconds text without trailing zeros: 16200 -> "16.2", 15000 -> "15".
+  const fmtSec=ms=>String(Number((ms/1000).toFixed(3)));
+  const orientationOf=ms=>ms>access.imageMax*1000?'video':'image';
+
+  // Length choice: whole master, or the first N seconds (N whole seconds shorter than the master).
+  function renderLength(){
+    const v=state.video,box=$('kdLengthBox');
+    const show=access.lengthSelect&&v.id&&['ready','failed'].includes(v.status)&&v.masterMs>0;
+    box.style.display=show?'block':'none';
+    if(!show)return;
+    const sel=$('kdLength');
+    const capped=v.sourceMs>access.max*1000;
+    const wholeLabel=capped?`先頭${access.max}秒（元動画は${fmtSec(v.sourceMs)}秒）`:`お手本全体（${fmtSec(v.masterMs)}秒）`;
+    const opts=[];
+    if(!v.chosen)opts.push(['','長さを選んでください']);
+    for(let n=access.min;n*1000<v.masterMs&&n<=access.max;n++)opts.push([String(n),`先頭${n}秒`]);
+    opts.push(['whole',wholeLabel]);
+    const key=opts.map(o=>o.join('=')).join('|');
+    if(sel.dataset.key!==key){sel.innerHTML='';opts.forEach(([val,label])=>{const o=document.createElement('option');o.value=val;o.textContent=label;sel.appendChild(o)});sel.dataset.key=key}
+    sel.value=!v.chosen?'':(v.useSeconds===null?'whole':String(v.useSeconds));
+    sel.disabled=state.inFlight||v.recutting||v.status==='uploading';
+    $('kdSourceInfo').textContent=capped?`元動画は${fmtSec(v.sourceMs)}秒です。使えるのは先頭${access.max}秒までで、使う長さを選べます。`:`元動画は${fmtSec(v.sourceMs||v.masterMs)}秒です。初期状態ではお手本全体を使います。`;
+    let summary='';
+    if(v.recutting)summary='使用する長さを反映中…';
+    else if(v.status==='ready'&&v.chosen&&inRange(v)){
+      const cut=v.useSeconds!==null;
+      const whole=Number.isInteger(v.durationMs/1000)?`${fmtSec(v.durationMs)}秒`:`${fmtSec(v.durationMs)}秒（課金は端数を切り上げて${v.billableSeconds}秒分）`;
+      summary=(cut?`先頭${v.useSeconds}秒を使用`:(capped?`先頭${access.max}秒を使用`:`お手本全体 ${whole}を使用`))+`・${v.billableSeconds}秒分・${v.billableSeconds*access.rate}cr`;
+    }
+    $('kdUseSummary').textContent=summary;
+    $('kdOrientationNote').style.display=v.status==='ready'&&inRange(v)&&orientationOf(v.durationMs)==='video'?'block':'none';
   }
 
   function render(){
@@ -48,20 +87,21 @@
     $('kdImageFile').disabled=busy();
     $('kdRights').disabled=busy()||vid.status!=='idle';
     $('kdVideoFile').disabled=busy()||!access.allowed||!access.rate||!$('kdRights').checked;
-    $('kdVideoName').textContent=vid.name||`お手本動画: MP4／MOV・${access.min}〜${access.max}秒・最大50MB`;
-    let note=`${access.max}秒を超える動画は使えません。自動では短くしません。`;
+    $('kdVideoName').textContent=vid.name||(access.lengthSelect?`お手本動画: MP4／MOV・${access.min}〜${access.sourceMax}秒・最大50MB`:`お手本動画: MP4／MOV・${access.min}〜${access.max}秒・最大50MB`);
+    let note=access.lengthSelect?`使えるのは先頭${access.max}秒までです。使う長さは選べます。自動では延長・ループしません。`:`${access.max}秒を超える動画は使えません。自動では短くしません。`;
     if(vid.status==='uploading')note='非公開領域へアップロード中…';
     else if(vid.status==='checking')note='形式・長さ・安全性を検査中…';
-    else if(vid.status==='ready')note=`検査完了・${(vid.durationMs/1000).toFixed(3)}秒（課金${vid.billableSeconds}秒）`;
+    else if(vid.status==='ready')note=`検査完了・使用${(vid.durationMs/1000).toFixed(3)}秒（課金${vid.billableSeconds}秒）`;
     else if(vid.status==='failed')note=vid.error||'お手本動画を利用できません';
     else if(!$('kdRights').checked)note='権利確認にチェックすると選択できます';
     $('kdVideoNote').textContent=note;
+    renderLength();
     $('kdVideoRetry').style.display=vid.status==='failed'&&vid.retryable&&vid.id&&!busy()?'block':'none';
     $('kdVideoRemove').style.display=vid.status!=='idle'&&!busy()?'block':'none';
     const cost=estimate();const reason=blockReason();
     const btn=$('kdCreate');
-    btn.textContent=cost?`作成する ✦ ${cost}`:'作成する';
-    $('kdCost').textContent=cost?`消費クレジット: ${cost} cr（${access.rate}cr × ${state.video.billableSeconds}秒）`:(access.allowed&&access.rate?`お手本動画を入れると消費クレジットが表示されます（${access.rate}cr/秒）`:'');
+    btn.textContent=cost&&(!access.lengthSelect||state.video.chosen)?`作成する ✦ ${cost}`:'作成する';
+    $('kdCost').textContent=cost&&(!access.lengthSelect||state.video.chosen)?`消費クレジット: ${cost} cr（${access.rate}cr × ${state.video.billableSeconds}秒）`:(access.allowed&&access.rate?`お手本動画を入れると消費クレジットが表示されます（${access.rate}cr/秒）`:'');
     btn.disabled=!!reason||busy();
     btn.title=reason;
     return cost;
@@ -79,6 +119,8 @@
         access.allowed=true;
         access.rate=Number.isInteger(d.klingDance.creditsPerSecond)&&d.klingDance.creditsPerSecond>0?d.klingDance.creditsPerSecond:null;
         access.min=Number(d.klingDance.minSeconds)||4;access.max=Number(d.klingDance.maxSeconds)||10;
+        access.imageMax=Number(d.klingDance.imageOrientationMaxSeconds)||10;access.sourceMax=Number(d.klingDance.sourceMaxSeconds)||30;
+        access.lengthSelect=d.klingDance.lengthSelectEnabled===true&&access.max>access.imageMax;
       }
     }catch(_){}
     render();
@@ -118,21 +160,58 @@
     v.status='checking';v.error='';render();
     try{
       const t=await token();if(!t){location.href='./login.html';return false}
-      const r=await fetch('/api/reference-dance-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({assetId:v.id,allowBoundaryTrim:false})});
+      const r=await fetch('/api/reference-dance-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify(access.lengthSelect?{assetId:v.id,allowBoundaryTrim:false,profile:'motion'}:{assetId:v.id,allowBoundaryTrim:false})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok||d.status!=='ready'){const err=new Error(d.message||d.error||'お手本動画を安全に確認できませんでした');err.retryable=d.retryable===true||d.error==='reference_video_checking';throw err}
       v.status='ready';v.durationMs=Number(d.durationMs||0);v.billableSeconds=Number(d.billableSeconds||0);v.retryable=false;
+      if(access.lengthSelect&&d.motion){
+        v.masterMs=Number(d.motion.masterDurationMs)||v.durationMs;v.sourceMs=Number(d.motion.sourceDurationMs)||v.masterMs;v.useSeconds=Number.isInteger(d.motion.useSeconds)?d.motion.useSeconds:null;
+        // An original longer than the maximum has been capped to its first max seconds: the user must confirm the length.
+        v.chosen=!(v.sourceMs>access.max*1000);
+      }
       render();return true;
     }catch(e){v.status='failed';v.retryable=!!(e&&e.retryable);v.error=e&&e.message||'お手本動画を利用できません';render();return false}
   }
+  // Change the used length (first N seconds, or the whole master). Only the newest choice is applied; a late response
+  // for an older choice or a replaced asset is ignored. A request refused as busy is retried while it is still the newest.
+  async function changeLength(value){
+    const v=state.video;
+    if(!access.lengthSelect||!v.id||!['ready','failed'].includes(v.status)||state.inFlight||value==='')return;
+    const useSeconds=value==='whole'?null:Number(value);
+    const seq=++v.seq,assetId=v.id;
+    v.recutting=true;v.error='';render();
+    try{
+      for(let attempt=0;attempt<6;attempt++){
+        const t=await token();if(!t){location.href='./login.html';return}
+        const r=await fetch('/api/reference-dance-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({assetId,allowBoundaryTrim:false,profile:'motion',useSeconds})});
+        const d=await r.json().catch(()=>({}));
+        if(seq!==state.video.seq||assetId!==state.video.id)return;
+        if(r.status===409&&d.error==='reference_video_checking'){await new Promise(res=>setTimeout(res,1300));if(seq!==state.video.seq)return;continue}
+        if(!r.ok||!d.ok||d.status!=='ready'){const e=new Error(d.message||d.error||'使用する長さを反映できませんでした');e.code=d.error;throw e}
+        v.durationMs=Number(d.durationMs||0);v.billableSeconds=Number(d.billableSeconds||0);v.status='ready';v.retryable=false;v.error='';
+        if(d.motion){v.masterMs=Number(d.motion.masterDurationMs)||v.masterMs;v.useSeconds=Number.isInteger(d.motion.useSeconds)?d.motion.useSeconds:null}
+        v.chosen=true;
+        return;
+      }
+      throw new Error('長さを変更中です。少し待ってからもう一度選んでください。');
+    }catch(e){
+      if(seq!==state.video.seq)return;
+      // The server may have kept either the previous or a retry state: the numbers on screen are no longer trusted, so
+      // sending is blocked until a length is chosen again.
+      v.status='failed';v.retryable=false;v.chosen=false;v.error=(e&&e.message||'使用する長さを反映できませんでした')+'（もう一度、使う長さを選んでください）';
+    }finally{
+      if(seq===state.video.seq){v.recutting=false;render()}
+    }
+  }
+
   async function uploadVideo(file){
     if(!file||busy()||!$('kdRights').checked)return;
     const type=String(file.type||'').toLowerCase();
-    const bad=msg=>{const prevId=state.video.id;if(prevId)deleteAsset(prevId);state.video={status:'failed',id:'',name:file.name||'お手本動画',billableSeconds:0,durationMs:0,error:msg,retryable:false};render()};
+    const bad=msg=>{const prevId=state.video.id;if(prevId)deleteAsset(prevId);state.video={...newVideo(),status:'failed',name:file.name||'お手本動画',error:msg};render()};
     if(!['video/mp4','video/quicktime'].includes(type)&&!/[.](mp4|mov)$/.test(String(file.name||'').toLowerCase()))return bad('MP4またはMOV形式の動画を選択してください');
     if(file.size<=0||file.size>50*1024*1024)return bad('お手本動画は50MB以下にしてください');
     const previousId=state.video.id;
-    state.video={status:'uploading',id:'',name:file.name||'お手本動画',billableSeconds:0,durationMs:0,error:'',retryable:false};render();
+    state.video={...newVideo(),status:'uploading',name:file.name||'お手本動画',seq:state.video.seq+1};render();
     if(previousId)deleteAsset(previousId);
     try{
       const t=await token();if(!t){location.href='./login.html';return}
@@ -147,7 +226,7 @@
       
     }catch(e){const failed=state.video.id;state.video.status='failed';state.video.retryable=false;state.video.error=e&&e.message||'お手本動画を利用できません';if(failed)deleteAsset(failed);render()}
   }
-  function removeVideo(){if(busy())return;const id=state.video.id;state.video={status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false};$('kdVideoFile').value='';$('kdRights').checked=false;render();deleteAsset(id)}
+  function removeVideo(){if(busy())return;const id=state.video.id;state.video={...newVideo(),seq:state.video.seq+1};$('kdVideoFile').value='';$('kdRights').checked=false;render();deleteAsset(id)}
   function removeImage(){if(busy())return;state.image={status:'idle',url:'',name:'',error:'',previewUrl:''};$('kdImageFile').value='';render()}
 
   // ---- 送信(二重送信防止・金額確認・失敗時の表示) ----
@@ -169,7 +248,10 @@
       // reference_url(s) を見て通常タブの追加画像を消すため、それを避ける。
       // プロンプトは送らない(サーバーが固定の指示を構築し、body.promptは無視する)。
       const body={model:CARRIER_MODEL,duration:'5',resolution:'720p',aspect_ratio:'16:9',generate_audio:true,mode:'reference_to_video',estimated_credits:cost,
-        dance_method:METHOD,reference_video_asset_id:state.video.id,reference_video_rights_confirmed:true,input_references:[state.image.url]};
+        dance_method:METHOD,reference_video_asset_id:state.video.id,reference_video_rights_confirmed:true,input_references:[state.image.url],
+        // What the screen showed (billed seconds and the orientation basis) is sent back; the server derives both from the sealed
+        // file and refuses (409, nothing charged) if they differ, so a stale selection can never be billed or generated.
+        ...(access.lengthSelect?{use_billable_seconds:state.video.billableSeconds,orientation_mode:orientationOf(state.video.durationMs)}:{})};
       const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify(body)});
       const data=await res.json().catch(()=>({}));
       if(res.status===401){_ptRemove(tmpId);_activePtId='';location.href='./login.html';return}
@@ -192,7 +274,7 @@
       _ptShowAccepted(realId);_ptStartPoll({id:realId,api_task_id:jobId,polling_url:pollingUrl,ui_mode:'reference_to_video'});
       // 受付済み: 入力を空に戻す(失敗時は保持して再試行できる)。
       state.image={status:'idle',url:'',name:'',error:'',previewUrl:''};
-      state.video={status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false};
+      state.video={...newVideo(),seq:state.video.seq+1};
       $('kdImageFile').value='';$('kdVideoFile').value='';$('kdRights').checked=false;
       loadPendingTasks();
     }catch(_){
@@ -206,6 +288,7 @@
   $('kdImageFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';uploadImage(f)});
   $('kdVideoFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';uploadVideo(f)});
   $('kdVideoRetry').addEventListener('click',()=>{confirmVideo()});
+  $('kdLength').addEventListener('change',e=>{changeLength(e.target.value)});
   $('kdVideoRemove').addEventListener('click',removeVideo);
   $('kdImageRemove').addEventListener('click',removeImage);
   $('kdRights').addEventListener('change',render);

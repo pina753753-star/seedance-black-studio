@@ -102,6 +102,13 @@
       <label class="danceRights" style="display:flex"><input id="kdRights" type="checkbox"><span>自分で作成した動画、または使用許可のある動画です。実在人物へのなりすましには使用しません。</span></label>
     </div>
   </div>
+  <div id="kdLengthBox" class="kdBox" style="display:none;margin-top:12px;background:#101319;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:12px">
+    <label for="kdLength" style="display:block;font-size:13px;font-weight:800">使用する長さ</label>
+    <select id="kdLength" style="margin-top:8px;width:100%;min-height:44px;background:#0b0d13;color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:0 10px;font-size:14px"></select>
+    <div id="kdSourceInfo" style="margin-top:8px;color:#9f96b5;font-size:11px;line-height:1.6"></div>
+    <div id="kdUseSummary" role="status" aria-live="polite" style="margin-top:8px;color:#e5e7eb;font-size:13px;font-weight:700;line-height:1.6"></div>
+    <div id="kdOrientationNote" style="display:none;margin-top:6px;color:#fcd34d;font-size:12px;line-height:1.6">10秒を超える動画は、お手本動画の人物の向きを基準に生成します。</div>
+  </div>
   <div id="kdCost" style="margin-top:12px;color:#c8cad6;font-size:12px;line-height:1.6" aria-live="polite"></div>
   <button class="create" id="kdCreate" type="button" style="margin-top:8px" disabled>作成する</button>
   <div id="kdStatus" role="status" aria-live="polite" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 14px;color:#fca5a5;font-size:13px;line-height:1.8"></div>

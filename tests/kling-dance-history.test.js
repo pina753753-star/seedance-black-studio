@@ -47,3 +47,10 @@ test('kling dance tasks are identifiable; every other task (incl. Seedance dance
   assert.equal(by.k.mode, 'reference_to_video');
   assert.equal('settings' in by.k, false);
 });
+
+test('history lists existing 16-20 s motion videos with their own length and label, independent of any gate', async () => {
+  const body = await history([{ ...task('long', { dance_method: 'kling_v3_motion_control', character_orientation: 'video' }), duration_seconds: 20 }]);
+  assert.equal(body.rows.length, 1);
+  assert.equal(body.rows[0].duration_seconds, 20);
+  assert.equal(body.rows[0].dance_method, 'kling_v3_motion_control');
+});

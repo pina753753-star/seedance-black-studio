@@ -23,7 +23,7 @@ function readyRow(overrides = {}) {
 
 // Load the real handler in an isolated module with all network/DB boundaries
 // mocked. No generation, storage write, or credit transaction leaves this test.
-async function runStart({ moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, bodyOverrides = {} } = {}) {
+async function runStart({ swapAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, bodyOverrides = {} } = {}) {
   const rpcCalls = [], updates = [], providerCalls = [], events = [], accessCalls = [], moderated = [];
   const access = {
     ok: true, allowed: true, plan: subscription ? 'premium' : 'free', accountStatus: 'active',
@@ -40,6 +40,11 @@ async function runStart({ moderationBlock = false, omit = [], rate = 19, provide
           if (table === 'seedance_reference_video_uploads' && update.expires_at) {
             const current = expireBeforeRetention ? { ...row, expires_at: '2000-01-01T00:00:00.000Z' } : row;
             if (!predicates.every(predicate => predicate(current))) return { data: [], error: null };
+            // A length change completes right after this request read the row: the row is 'ready' again, with a different file.
+            if (swapAfterRetention) row = { ...row, sha256: 'b'.repeat(64), duration_ms: 8000, billable_seconds: 8 };
+          }
+          if (table === 'seedance_reference_video_uploads' && update.last_task_id) {
+            if (!predicates.every(predicate => predicate(row))) return { data: [], error: null };
           }
           if (table === 'generation_tasks' && update.settings) {
             const stage = update.settings.reference_dance ? 'dance' : 'policy';
@@ -53,7 +58,7 @@ async function runStart({ moderationBlock = false, omit = [], rate = 19, provide
         throw new Error(`Unexpected read: ${table}`);
       };
       const chain = {
-        select() { return chain; }, eq() { return chain; }, in() { return chain; }, is() { return chain; },
+        select() { return chain; }, eq(key, value) { predicates.push(current => current[key] === value); return chain; }, in() { return chain; }, is() { return chain; },
         gt(key, value) { predicates.push(current => current[key] > value); return chain; },
         update(value) { update = value; updates.push({ table, value }); events.push({ type: 'update', table, value }); return chain; },
         maybeSingle() { return Promise.resolve(result()); },
@@ -82,6 +87,7 @@ async function runStart({ moderationBlock = false, omit = [], rate = 19, provide
   });
   const realDance = danceModule.exports;
   realDance.klingDance.config.creditsPerSecond = rate;
+  realDance.klingDance.config.maxUseSeconds = maxUse;
   const baseFrom = db.from;
   db.from = (table) => {
     if (table !== 'profiles') return baseFrom(table);
@@ -402,4 +408,139 @@ test('other methods still require a prompt (normal generation and Seedance dance
     assert.equal(r.res.body.error, 'prompt is required');
     assert.equal(r.rpcCalls.length, 0);
   }
+});
+
+// ---- length choice enabled (maxUseSeconds 20): 4-20 s, orientation by measured length, stale selections refused ----
+const motionRow = (ms) => readyRow({ duration_ms: ms, billable_seconds: Math.max(4, Math.ceil(ms / 1000)) });
+const motionBody = (ms, extra = {}) => ({ estimated_credits: Math.ceil(ms / 1000) * 19, use_billable_seconds: Math.ceil(ms / 1000), orientation_mode: ms > 10000 ? 'video' : 'image', ...extra });
+const CASES = [
+  [4000, 76, 'image'], [10000, 190, 'image'], [10001, 209, 'video'], [15000, 285, 'video'], [16000, 304, 'video'],
+  [16200, 323, 'video'], [19001, 380, 'video'], [20000, 380, 'video']
+];
+for (const [ms, credits, orientation] of CASES) {
+  test(`length choice on: ${ms} ms -> ${credits} cr, character_orientation ${orientation}`, async () => {
+    const r = await runStart({ maxUse: 20, row: motionRow(ms), bodyOverrides: motionBody(ms) });
+    assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+    assert.equal(r.res.body.creditCost, credits);
+    assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, credits);
+    assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_duration_secs, credits / 19);
+    const deduct = r.rpcCalls.find(c => c.name === 'deduct_generation_credits_atomic').args;
+    assert.equal(Object.entries(deduct).find(([k]) => /cost|amount/.test(k))[1], credits);
+    assert.deepEqual({ ...r.providerCalls[0].payload }, {
+      image: 'https://example.test/identity.png', video: 'https://storage.example.test/source.mp4',
+      prompt: klingDance.KLING_DANCE_PROVIDER_PROMPT, character_orientation: orientation, keep_original_sound: false
+    });
+    assert.equal(r.updates.find(u => u.value.settings?.reference_dance).value.settings.character_orientation, orientation);
+  });
+}
+
+test('length choice on: 20001 ms is refused before any reservation (also never accepted as 20 s)', async () => {
+  const r = await runStart({ maxUse: 20, row: motionRow(20001), bodyOverrides: motionBody(20001, { use_billable_seconds: 21 }) });
+  assert.equal(r.res.code, 400);
+  assert.equal(r.rpcCalls.length, 0);
+  assert.equal(r.providerCalls.length, 0);
+});
+
+test('length choice on: what the screen showed must equal the sealed file - stale seconds / orientation / missing fields => 409, nothing charged', async () => {
+  const row = motionRow(15000);
+  for (const [label, overrides, remove, error] of [
+    ['stale seconds (screen said 14)', { use_billable_seconds: 14 }, [], 'motion_length_changed'],
+    ['seconds missing', {}, ['use_billable_seconds'], 'motion_length_changed'],
+    ['stale orientation (screen said image)', { orientation_mode: 'image' }, [], 'motion_orientation_changed'],
+    ['orientation missing', {}, ['orientation_mode'], 'motion_orientation_changed']
+  ]) {
+    const r = await runStart({ maxUse: 20, row, omit: remove, bodyOverrides: motionBody(15000, overrides) });
+    assert.equal(r.res.code, 409, label);
+    assert.equal(r.res.body.error, error, label);
+    assert.equal(r.rpcCalls.length, 0, label);
+    assert.equal(r.providerCalls.length, 0, label);
+  }
+});
+
+test('length choice on: the confirmed estimate still guards the price (lower => 409, malformed/missing => 400)', async () => {
+  const low = await runStart({ maxUse: 20, row: motionRow(16000), bodyOverrides: motionBody(16000, { estimated_credits: 285 }) });
+  assert.equal(low.res.code, 409);
+  assert.equal(low.res.body.error, 'credit_cost_changed');
+  assert.equal(low.res.body.credits, 304);
+  assert.equal(low.rpcCalls.length, 0);
+  const missing = await runStart({ maxUse: 20, row: motionRow(16000), omit: ['estimated_credits'], bodyOverrides: motionBody(16000) });
+  assert.equal(missing.res.code, 400);
+  assert.equal(missing.res.body.error, 'invalid_estimated_credits');
+});
+
+test('length choice on: admin-BETA, rights, single image and moderation gates are unchanged for 16-20 s', async () => {
+  assert.equal((await runStart({ maxUse: 20, role: 'user', row: motionRow(16000), bodyOverrides: motionBody(16000) })).res.code, 403);
+  assert.equal((await runStart({ maxUse: 20, row: readyRow({ ...motionRow(16000), rights_confirmed_at: null }), bodyOverrides: motionBody(16000) })).res.code, 400);
+  const two = await runStart({ maxUse: 20, row: motionRow(16000), bodyOverrides: motionBody(16000, { input_references: ['https://example.test/a.png', 'https://example.test/b.png'] }) });
+  assert.equal(two.res.body.error, 'kling_dance_single_image_required');
+  const blocked = await runStart({ maxUse: 20, row: motionRow(16000), moderationBlock: true, bodyOverrides: motionBody(16000) });
+  assert.equal(blocked.res.code, 422);
+  assert.equal(blocked.rpcCalls.length, 0);
+});
+
+test('length choice on: a 16-20 s asset can never be used by the Seedance dance (no dance_method), whatever the config', async () => {
+  for (const maxUse of [10, 20]) {
+    for (const ms of [16000, 20000]) {
+      const r = await runStart({ maxUse, row: motionRow(ms), omit: ['dance_method'], bodyOverrides: { estimated_credits: 605, reference_url: 'https://example.test/identity.png', input_references: undefined } });
+      assert.equal(r.res.code, 400, `${maxUse}/${ms}`);
+      assert.equal(r.res.body.error, 'invalid_reference_video_duration');
+      assert.equal(r.rpcCalls.length, 0);
+      assert.equal(r.providerCalls.length, 0);
+    }
+  }
+});
+
+test('gate closed (default 10): behaviour is the 4-10 s release - 11 s rows are refused and legacy bodies are accepted', async () => {
+  const over = await runStart({ row: motionRow(11000), bodyOverrides: { estimated_credits: 209 } });
+  assert.equal(over.res.body.error, 'kling_dance_duration_unsupported');
+  const ok = await runStart({ row: motionRow(10000), bodyOverrides: { estimated_credits: 190 } });
+  assert.equal(ok.res.code, 202);
+  assert.equal(ok.providerCalls[0].payload.character_orientation, 'image');
+});
+
+test('klingDance helpers: orientation by measured length, gate values, payload orientation is closed', () => {
+  const k = require('../api/_lib/reference-dance.js').klingDance;
+  assert.equal(k.klingDanceOrientation(10000), 'image');
+  assert.equal(k.klingDanceOrientation(10001), 'video');
+  assert.equal(k.getKlingDanceMaxSeconds(), 10);
+  assert.equal(k.isKlingDanceLengthSelectEnabled(), false);
+  assert.throws(() => k.buildKlingDancePayload({ prompt: 'p', imageUrl: 'i', videoUrl: 'v', orientation: 'free' }), /invalid_kling_orientation/);
+  assert.equal(k.buildKlingDancePayload({ prompt: 'p', imageUrl: 'i', videoUrl: 'v', orientation: 'video' }).character_orientation, 'video');
+});
+
+test('a length change that lands after the row was read cannot be billed: the bind requires the exact file that was priced', async () => {
+  for (const maxUse of [10, 20]) {
+    const r = await runStart({ maxUse, swapAfterRetention: true, row: motionRow(10000), bodyOverrides: motionBody(10000) });
+    assert.equal(r.res.code, 503, String(maxUse));
+    assert.equal(r.res.body.error, 'reference_video_bind_failed');
+    assert.equal(r.rpcCalls.some(c => c.name === 'deduct_generation_credits_atomic'), false, 'no deduction');
+    assert.equal(r.providerCalls.length, 0, 'nothing sent to the provider');
+    assert.equal(r.updates.some(u => u.table === 'generation_tasks' && u.value.status === 'cancelled'), true);
+  }
+  // control: without the swap the same request starts normally
+  const ok = await runStart({ maxUse: 20, row: motionRow(10000), bodyOverrides: motionBody(10000) });
+  assert.equal(ok.res.code, 202);
+});
+
+// ---- gate closed again (rollback to 10 s) while 16-20 s data already exists: nothing is deleted or misread, only NEW acceptance stops ----
+test('gate closed with an existing 16-20 s asset: a new motion generation is refused with the normal message (not "corrupt"), nothing charged', async () => {
+  for (const ms of [11000, 16000, 20000]) {
+    const r = await runStart({ maxUse: 10, row: motionRow(ms), bodyOverrides: { estimated_credits: Math.ceil(ms / 1000) * 19 } });
+    assert.equal(r.res.code, 400, String(ms));
+    assert.equal(r.res.body.error, 'kling_dance_duration_unsupported', String(ms));
+    assert.match(r.res.body.message, /4〜10秒/);
+    assert.equal(r.rpcCalls.length, 0);
+    assert.equal(r.providerCalls.length, 0);
+    assert.equal(r.updates.some(u => u.table === 'seedance_reference_video_uploads'), false, 'the asset row is not modified or removed');
+  }
+});
+
+test('the feature gate and the stored-data bound are separate constants: gate 10/20, stored data always up to 20 s', () => {
+  const k = require('../api/_lib/reference-dance.js').klingDance;
+  assert.equal(k.KLING_DANCE_STORED_MAX_MS, 20000);
+  assert.equal(k.config.maxUseSeconds, 10, 'shipped default: the 20 s path is closed until all parts are deployed');
+  const lib = require('../api/_lib/reference-dance.js');
+  const row = { id: '270bf01a-bafd-4255-8ad5-e18a4f1c8c47', user_id: USER, status: 'ready', approved_path: `approved/${USER}/270bf01a-bafd-4255-8ad5-e18a4f1c8c47.mp4`, size_bytes: 1024, duration_ms: 17500, billable_seconds: 18, width: 1280, height: 720, video_codec: 'h264', sha256: 'a'.repeat(64), rights_confirmed_at: new Date().toISOString(), expires_at: new Date(Date.now() + 3600e3).toISOString() };
+  assert.throws(() => lib.validateReadyReferenceDance(row, USER), /invalid_reference_video_duration/, 'Seedance bound stays 15 s');
+  assert.equal(lib.validateReadyReferenceDance(row, USER, { maxDurationMs: k.KLING_DANCE_STORED_MAX_MS }).billableSeconds, 18, 'stored data is readable whatever the gate');
 });

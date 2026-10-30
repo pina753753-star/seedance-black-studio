@@ -152,3 +152,18 @@ test('another user\'s task is not found', async () => {
   assert.equal(r.code, 404);
   assert.equal(s.rpcCalls.length, 0);
 });
+
+test('existing 16-20 s motion tasks (character_orientation video) keep working whatever the feature gate: complete at the reserved amount, replay is idempotent, failure refunds once', async () => {
+  const settings = { watermark_required: false, dance_method: 'kling_v3_motion_control', character_orientation: 'video', reference_dance: { asset_id: 'a', billable_seconds: 20, duration_ms: 20000 } };
+  const done = setup({ taskOverrides: { credit_cost: 380, settings }, provider: () => ({ status: 200, body: { data: { status: 'completed', outputs: [OUT] } } }) });
+  const first = await done.poll();
+  assert.equal(first.body.done, true);
+  assert.equal(done.tasks[0].settings.credit_settlement.final_credits, 380);
+  assert.equal(done.tasks[0].settings.character_orientation, 'video');
+  assert.equal((await done.poll()).body.videoUrl, first.body.videoUrl);
+  assert.equal(done.rpcCalls.length, 0);
+  const failed = setup({ taskOverrides: { credit_cost: 380, settings }, provider: () => ({ status: 200, body: { data: { status: 'failed', error: 'x' } } }) });
+  assert.equal((await failed.poll()).body.refunded, true);
+  await failed.poll();
+  assert.equal(failed.rpcCalls.filter(c => c.name === 'refund_generation_task_atomic').length, 1);
+});

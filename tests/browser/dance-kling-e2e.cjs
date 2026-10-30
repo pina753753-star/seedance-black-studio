@@ -29,7 +29,7 @@ const allowed = new Set(['generate-prod.html', 'flowvid-history.js', 'flowvid-op
 async function fixture(browser, o = {}) {
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width, height: 900 } });
   await context.addInitScript(syntheticAuth);
-  const calls = { starts: [], deletes: [], confirms: [], imageUploads: 0, videoUploads: 0, polls: 0, inflight: 0, maxInflight: 0 }, pageErrors = [];
+  const calls = { recuts: 0, starts: [], deletes: [], confirms: [], imageUploads: 0, videoUploads: 0, polls: 0, inflight: 0, maxInflight: 0 }, pageErrors = [];
   // Stateful backend for the start -> processing -> complete -> history flow.
   const flow = { task: null, completed: false, failed: false, pollScript: o.pollScript || ['processing', 'processing', 'done'] };
   // The page polls every 12 s; shorten it so the mock flow finishes quickly.
@@ -43,7 +43,7 @@ async function fixture(browser, o = {}) {
     const json = (d, s = 200) => route.fulfill({ status: s, contentType: 'application/json', body: JSON.stringify(d) });
     const p = url.pathname;
     if (p === '/auth-config.js') return route.fulfill({ contentType: 'application/javascript', body: syntheticAuth });
-    if (p === '/api/reference-dance-access') return json({ ok: true, allowed: o.allowed !== false, ...(o.allowed !== false ? { klingDance: { method: 'kling_v3_motion_control', creditsPerSecond: o.rate === undefined ? 19 : o.rate, minSeconds: 3, maxSeconds: 10 } } : {}) });
+    if (p === '/api/reference-dance-access') return json({ ok: true, allowed: o.allowed !== false, ...(o.allowed !== false ? { klingDance: { method: 'kling_v3_motion_control', creditsPerSecond: o.rate === undefined ? 19 : o.rate, minSeconds: 4, ...(o.lengthSelect ? { maxSeconds: 20, imageOrientationMaxSeconds: 10, sourceMaxSeconds: 30, lengthSelectEnabled: true } : { maxSeconds: 10 }) } } : {}) });
     if (p === '/api/credit-access') return json(caps);
     if (p === '/api/generated-videos') return json({ ok: true, rows: flow.completed ? [{ id: 'task-1', job_id: 'job-1', status: 'completed', prompt: 'dance', provider: 'wavespeed', model: 'bytedance/seedance-2.5', mode: 'reference_to_video', dance_method: 'kling_v3_motion_control', video_url: origin + '/out.mp4', duration_seconds: 8, aspect_ratio: '16:9', created_at: new Date().toISOString() }, { id: 'task-0', job_id: 'job-0', status: 'completed', prompt: 'older reference video', provider: 'wavespeed', model: 'bytedance/seedance-2.5', mode: 'reference_to_video', dance_method: '', video_url: origin + '/old.mp4', duration_seconds: 5, aspect_ratio: '9:16', created_at: new Date().toISOString() }] : [] });
     if (p === '/api/pending-tasks') return json({ ok: true, tasks: flow.task && !flow.completed && !flow.failed ? [flow.task] : [] });
@@ -78,6 +78,19 @@ async function fixture(browser, o = {}) {
     if (p === '/api/reference-dance-confirm-upload') {
       const body = request.postDataJSON(); calls.confirms.push(body);
       if (o.confirmFail) return json({ ok: false, error: 'VIDEO_DURATION_INVALID', message: '動画の長さが対応外です' }, 400);
+      if (o.lengthSelect) {
+        // Server model: the sealed master is min(original, 20 s); a length choice cuts exactly N seconds from it.
+        const source = o.sourceMs || 16000, master = Math.min(source, 20000);
+        if (body.profile !== 'motion') return json({ ok: false, error: 'profile_missing' }, 400);
+        const recut = Object.prototype.hasOwnProperty.call(body, 'useSeconds');
+        if (recut && o.recutDelay) await new Promise(r => setTimeout(r, typeof o.recutDelay === 'function' ? o.recutDelay(body.useSeconds) : o.recutDelay));
+        if (recut && o.recutFail && !calls.recutFailed) { calls.recutFailed = true; return json({ ok: false, error: 'reference_video_check_failed', retryable: true, message: '参考動画の検査に失敗しました' }, 503); }
+        if (recut && body.useSeconds !== null && body.useSeconds * 1000 > master) return json({ ok: false, error: 'motion_length_invalid', message: '元の動画より長い区間は選べません。' }, 400);
+        const ms = recut && body.useSeconds !== null ? body.useSeconds * 1000 : master;
+        calls.lengthState = { ms, useSeconds: recut ? body.useSeconds : null };
+        return json({ ok: true, status: 'ready', durationMs: ms, billableSeconds: Math.max(4, Math.ceil(ms / 1000)),
+          motion: { mode: recut && body.useSeconds !== null ? 'cut' : 'whole', useSeconds: recut ? body.useSeconds : null, capped: source > 20000, sourceDurationMs: source, masterDurationMs: master } });
+      }
       const sec = o.seconds || 8;
       return json({ ok: true, status: 'ready', durationMs: o.durationMs || sec * 1000 - 200, billableSeconds: sec });
     }
@@ -529,6 +542,134 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
           assert.equal(/消費されていません/.test(t), expectNot, t);
         } finally { await f.context.close(); }
       }
+    });
+    // ---- length choice enabled (maxSeconds 20) ----
+    const summary = (p) => p.locator('#kdUseSummary').textContent();
+    await run(`[${width}] length choice: 16 s whole -> 304 cr; first 15 s -> 285 cr; start sends the shown seconds and orientation (video)`, async () => {
+      const f = await fixture(browser, { lengthSelect: true, sourceMs: 16000 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        assert.equal(f.calls.confirms[0].profile, 'motion');
+        assert.equal('useSeconds' in f.calls.confirms[0], false, 'first inspection uses the whole video');
+        assert.equal(await p.locator('#kdLength').inputValue(), 'whole');
+        assert.match(await summary(p), /お手本全体 16秒を使用・16秒分・304cr/);
+        assert.match(await p.locator('#kdCreate').textContent(), /304$/);
+        assert.equal(await p.locator('#kdOrientationNote').isVisible(), true);
+        assert.match(await p.locator('#kdOrientationNote').textContent(), /10秒を超える動画は、お手本動画の人物の向きを基準に生成します/);
+        await p.locator('#kdLength').selectOption('15');
+        await p.waitForFunction(() => /先頭15秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭15秒を使用・15秒分・285cr/);
+        assert.match(await p.locator('#kdCreate').textContent(), /285$/);
+        assert.deepEqual(f.calls.confirms.at(-1), { assetId: 'asset-1', allowBoundaryTrim: false, profile: 'motion', useSeconds: 15 });
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
+        const b = f.calls.starts[0].body;
+        assert.equal(b.estimated_credits, 285);
+        assert.equal(b.use_billable_seconds, 15);
+        assert.equal(b.orientation_mode, 'video');
+        assert.equal('prompt' in b, false);
+        assert.equal(noHScroll ? await noHScroll(p) : true, true);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] length choice: from a 16 s original the first 10 s keep the image setting (no notice); 10.001 s-class lengths show it`, async () => {
+      const f = await fixture(browser, { lengthSelect: true, sourceMs: 16000 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdLength').selectOption('10');
+        await p.waitForFunction(() => /先頭10秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.equal(await p.locator('#kdOrientationNote').isVisible(), false);
+        assert.match(await summary(p), /190cr/);
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
+        assert.equal(f.calls.starts[0].body.orientation_mode, 'image');
+        assert.equal(f.calls.starts[0].body.use_billable_seconds, 10);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] length choice: fractional whole use is billed up (16.2 s -> 17 s = 323 cr) and is not confused with the first 16 s (304 cr)`, async () => {
+      const f = await fixture(browser, { lengthSelect: true, sourceMs: 16200 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        assert.match(await summary(p), /お手本全体 16\.2秒（課金は端数を切り上げて17秒分）を使用・17秒分・323cr/);
+        assert.match(await p.locator('#kdLength option[value="whole"]').textContent(), /お手本全体（16\.2秒）/);
+        await p.locator('#kdLength').selectOption('16');
+        await p.waitForFunction(() => /先頭16秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭16秒を使用・16秒分・304cr/);
+        assert.equal(await p.locator('#kdLength option[value="17"]').count(), 0, 'no choice longer than the original');
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] length choice: an original over 20 s must have a length chosen explicitly before it can be sent (380 cr for 20 s)`, async () => {
+      const f = await fixture(browser, { lengthSelect: true, sourceMs: 25300 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        assert.equal(await p.locator('#kdCreate').isDisabled(), true);
+        assert.equal(await p.locator('#kdLength').inputValue(), '');
+        assert.match(await p.locator('#kdCreate').getAttribute('title'), /使用する長さを選んでください/);
+        assert.match(await p.locator('#kdSourceInfo').textContent(), /元動画は25\.3秒です。使えるのは先頭20秒まで/);
+        assert.equal(await p.locator('#kdLength option[value="21"]').count(), 0);
+        await p.locator('#kdLength').selectOption('whole');
+        await p.waitForFunction(() => /先頭20秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭20秒を使用（元動画は25\.3秒）|先頭20秒を使用・20秒分・380cr/);
+        assert.match(await p.locator('#kdCreate').textContent(), /380$/);
+        assert.equal(await p.locator('#kdCreate').isDisabled(), false);
+        assert.equal(f.calls.starts.length, 0, 'nothing is generated before the explicit start');
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] length choice: while a change is being applied the choice and the send button are locked; the final state is the last choice`, async () => {
+      const f = await fixture(browser, { lengthSelect: true, sourceMs: 16000, recutDelay: (n) => (n === 12 ? 900 : 0) });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdLength').selectOption('12');
+        await p.waitForFunction(() => window.flowvidDanceKling.state.video.recutting === true);
+        assert.equal(await p.locator('#kdLength').isDisabled(), true, 'no second change can be started meanwhile');
+        assert.equal(await p.locator('#kdCreate').isDisabled(), true, 'cannot send a half-applied selection');
+        assert.match(await summary(p), /使用する長さを反映中/);
+        assert.equal(await p.locator('#kdVideoRemove').isVisible(), false);
+        await p.waitForFunction(() => window.flowvidDanceKling.state.video.recutting === false);
+        await p.locator('#kdLength').selectOption('8');
+        await p.waitForFunction(() => /先頭8秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭8秒を使用・8秒分・152cr/);
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
+        assert.equal(f.calls.starts[0].body.use_billable_seconds, 8);
+        assert.equal(f.calls.starts[0].body.estimated_credits, 152);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] length choice: a failed change blocks sending until a length is chosen again; then it recovers`, async () => {
+      const f = await fixture(browser, { lengthSelect: true, sourceMs: 16000, recutFail: true });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        await p.locator('#kdLength').selectOption('12');
+        await p.waitForFunction(() => window.flowvidDanceKling.state.video.status === 'failed');
+        assert.equal(await p.locator('#kdCreate').isDisabled(), true);
+        assert.match(await p.locator('#kdVideoNote').textContent(), /もう一度、使う長さを選んでください/);
+        await p.locator('#kdLength').selectOption('12');
+        await p.waitForFunction(() => /先頭12秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.equal(await p.locator('#kdCreate').isDisabled(), false);
+        assert.match(await summary(p), /228cr/);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] length choice: stale selection refused by the server (409) is shown and nothing is generated`, async () => {
+      const f = await fixture(browser, { lengthSelect: true, sourceMs: 16000, start409: false, start400: false });
+      try {
+        const p = f.page;
+        await p.route('**/api/seedance-start', async route => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'motion_length_changed', message: '使用する長さが変わりました。画面を確認してから、もう一度お試しください。生成は開始していません。' }) }));
+        await openDance(p); await fill(p);
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => /使用する長さが変わりました/.test(document.querySelector('[data-ptask-id]')?.textContent || document.getElementById('kdStatus').textContent));
+        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'ready', 'inputs are kept for a retry');
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] length choice off (gate closed): behaves as the 4-10 s release - no length box, no profile in the request`, async () => {
+      const f = await fixture(browser, { seconds: 8 });
+      try {
+        const p = f.page; await openDance(p); await fill(p);
+        assert.equal(await p.locator('#kdLengthBox').isVisible(), false);
+        assert.equal('profile' in f.calls.confirms[0], false);
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
+        assert.equal('use_billable_seconds' in f.calls.starts[0].body, false);
+        assert.equal('orientation_mode' in f.calls.starts[0].body, false);
+      } finally { await f.context.close(); }
     });
     await run(`[${width}] dance form is hidden when switching to the video-edit tab`, async () => {
       const f = await fixture(browser);
