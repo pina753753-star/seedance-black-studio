@@ -1,4 +1,4 @@
-/* ダンス (Kling v3.0 Pro Motion Control・運営専用BETA)
+/* モーション (Kling v3.0 Pro Motion Control・運営専用BETA。内部名はdance)
  * generate-prod.html の専用セクション(#kdSection)を制御する。mainCard/絵コンテの入力・下書き・
  * assets には触れない。料金(1秒あたりのクレジット)はサーバーの /api/reference-dance-access が
  * 返す値だけを使い、未決定(null)の間は見積もりを出さず送信を無効にする。 */
@@ -6,7 +6,6 @@
   'use strict';
   const METHOD='kling_v3_motion_control';
   const CARRIER_MODEL='bytedance/seedance-2.5';
-  const PROMPT_KEY='flowvidDanceKlingPrompt';
   const $=id=>document.getElementById(id);
   if(!$('kdSection')||!$('danceTab'))return;
 
@@ -17,8 +16,6 @@
     inFlight:false
   };
 
-  function safeGet(){try{return localStorage.getItem(PROMPT_KEY)||''}catch(_){return''}}
-  function safeSet(v){try{if(v)localStorage.setItem(PROMPT_KEY,v);else localStorage.removeItem(PROMPT_KEY)}catch(_){}}
   const token=()=>window.FlowVidAuthGuard.getVerifiedToken(window.flowvidSupabaseClient?window.flowvidSupabaseClient():undefined);
   const busy=()=>state.inFlight||['uploading','checking'].includes(state.video.status)||state.image.status==='uploading';
 
@@ -35,11 +32,10 @@
 
   function blockReason(){
     if(!access.allowed)return '運営専用BETAです';
-    if(!access.rate)return 'ダンスは現在準備中です。料金確定後にご利用いただけます。';
+    if(!access.rate)return 'モーションは現在準備中です。料金確定後にご利用いただけます。';
     if(state.image.status!=='completed')return 'キャラクター画像を1枚追加してください';
-    if(state.video.status==='ready'&&!inRange(state.video))return `参考動画は${access.min}〜${access.max}秒のものを選んでください。自動では短くしません。`;
-    if(state.video.status!=='ready')return '参考動画を追加してください';
-    if(!$('kdPrompt').value.trim())return '補足プロンプトを入力してください';
+    if(state.video.status==='ready'&&!inRange(state.video))return `お手本動画は${access.min}〜${access.max}秒のものを選んでください。自動では短くしません。`;
+    if(state.video.status!=='ready')return 'お手本動画を追加してください';
     return '';
   }
 
@@ -52,12 +48,12 @@
     $('kdImageFile').disabled=busy();
     $('kdRights').disabled=busy()||vid.status!=='idle';
     $('kdVideoFile').disabled=busy()||!access.allowed||!access.rate||!$('kdRights').checked;
-    $('kdVideoName').textContent=vid.name||`MP4／MOV・4〜${access.max}秒・最大50MB`;
+    $('kdVideoName').textContent=vid.name||`お手本動画: MP4／MOV・${access.min}〜${access.max}秒・最大50MB`;
     let note=`${access.max}秒を超える動画は使えません。自動では短くしません。`;
     if(vid.status==='uploading')note='非公開領域へアップロード中…';
     else if(vid.status==='checking')note='形式・長さ・安全性を検査中…';
     else if(vid.status==='ready')note=`検査完了・${(vid.durationMs/1000).toFixed(3)}秒（課金${vid.billableSeconds}秒）`;
-    else if(vid.status==='failed')note=vid.error||'参考動画を利用できません';
+    else if(vid.status==='failed')note=vid.error||'お手本動画を利用できません';
     else if(!$('kdRights').checked)note='権利確認にチェックすると選択できます';
     $('kdVideoNote').textContent=note;
     $('kdVideoRetry').style.display=vid.status==='failed'&&vid.retryable&&vid.id&&!busy()?'block':'none';
@@ -65,6 +61,7 @@
     const cost=estimate();const reason=blockReason();
     const btn=$('kdCreate');
     btn.textContent=cost?`作成する ✦ ${cost}`:'作成する';
+    $('kdCost').textContent=cost?`消費クレジット: ${cost} cr（${access.rate}cr × ${state.video.billableSeconds}秒）`:(access.allowed&&access.rate?`お手本動画を入れると消費クレジットが表示されます（${access.rate}cr/秒）`:'');
     btn.disabled=!!reason||busy();
     btn.title=reason;
     return cost;
@@ -114,7 +111,7 @@
     render();
   }
 
-  // ---- 参考動画(既存の reference-dance-* と同じ経路。トリムは常に無効) ----
+  // ---- お手本動画(既存の reference-dance-* と同じ経路。トリムは常に無効) ----
   async function deleteAsset(id){if(!id)return;try{const t=await token();if(!t)return;await fetch('/api/reference-dance-delete',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({assetId:id})})}catch(_){}}
   async function confirmVideo(){
     const v=state.video;if(!v.id||v.status==='checking'||state.inFlight)return false;
@@ -123,32 +120,32 @@
       const t=await token();if(!t){location.href='./login.html';return false}
       const r=await fetch('/api/reference-dance-confirm-upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({assetId:v.id,allowBoundaryTrim:false})});
       const d=await r.json().catch(()=>({}));
-      if(!r.ok||!d.ok||d.status!=='ready'){const err=new Error(d.message||d.error||'参考動画を安全に確認できませんでした');err.retryable=d.retryable===true||d.error==='reference_video_checking';throw err}
+      if(!r.ok||!d.ok||d.status!=='ready'){const err=new Error(d.message||d.error||'お手本動画を安全に確認できませんでした');err.retryable=d.retryable===true||d.error==='reference_video_checking';throw err}
       v.status='ready';v.durationMs=Number(d.durationMs||0);v.billableSeconds=Number(d.billableSeconds||0);v.retryable=false;
       render();return true;
-    }catch(e){v.status='failed';v.retryable=!!(e&&e.retryable);v.error=e&&e.message||'参考動画を利用できません';render();return false}
+    }catch(e){v.status='failed';v.retryable=!!(e&&e.retryable);v.error=e&&e.message||'お手本動画を利用できません';render();return false}
   }
   async function uploadVideo(file){
     if(!file||busy()||!$('kdRights').checked)return;
     const type=String(file.type||'').toLowerCase();
-    const bad=msg=>{const prevId=state.video.id;if(prevId)deleteAsset(prevId);state.video={status:'failed',id:'',name:file.name||'参考動画',billableSeconds:0,durationMs:0,error:msg,retryable:false};render()};
+    const bad=msg=>{const prevId=state.video.id;if(prevId)deleteAsset(prevId);state.video={status:'failed',id:'',name:file.name||'お手本動画',billableSeconds:0,durationMs:0,error:msg,retryable:false};render()};
     if(!['video/mp4','video/quicktime'].includes(type)&&!/[.](mp4|mov)$/.test(String(file.name||'').toLowerCase()))return bad('MP4またはMOV形式の動画を選択してください');
-    if(file.size<=0||file.size>50*1024*1024)return bad('参考動画は50MB以下にしてください');
+    if(file.size<=0||file.size>50*1024*1024)return bad('お手本動画は50MB以下にしてください');
     const previousId=state.video.id;
-    state.video={status:'uploading',id:'',name:file.name||'参考動画',billableSeconds:0,durationMs:0,error:'',retryable:false};render();
+    state.video={status:'uploading',id:'',name:file.name||'お手本動画',billableSeconds:0,durationMs:0,error:'',retryable:false};render();
     if(previousId)deleteAsset(previousId);
     try{
       const t=await token();if(!t){location.href='./login.html';return}
       const ur=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({filename:file.name,contentType:type||'video/mp4',byteSize:file.size,rightsConfirmed:true})});
       const ud=await ur.json().catch(()=>({}));
-      if(!ur.ok||!ud.ok||!ud.assetId||!ud.path||!ud.token)throw new Error(ud.message||ud.error||'参考動画のアップロードを開始できませんでした');
+      if(!ur.ok||!ud.ok||!ud.assetId||!ud.path||!ud.token)throw new Error(ud.message||ud.error||'お手本動画のアップロードを開始できませんでした');
       state.video.id=ud.assetId;
       const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;if(!client)throw new Error('Supabase接続情報が未設定です');
       const up=await client.storage.from(ud.bucket).uploadToSignedUrl(ud.path,ud.token,file,{contentType:'video/mp4'});
       if(up.error)throw up.error;
       await confirmVideo();
       
-    }catch(e){const failed=state.video.id;state.video.status='failed';state.video.retryable=false;state.video.error=e&&e.message||'参考動画を利用できません';if(failed)deleteAsset(failed);render()}
+    }catch(e){const failed=state.video.id;state.video.status='failed';state.video.retryable=false;state.video.error=e&&e.message||'お手本動画を利用できません';if(failed)deleteAsset(failed);render()}
   }
   function removeVideo(){if(busy())return;const id=state.video.id;state.video={status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false};$('kdVideoFile').value='';$('kdRights').checked=false;render();deleteAsset(id)}
   function removeImage(){if(busy())return;state.image={status:'idle',url:'',name:'',error:'',previewUrl:''};$('kdImageFile').value='';render()}
@@ -157,7 +154,6 @@
   async function submit(){
     if(state.inFlight||(typeof generationRequestInFlight!=='undefined'&&generationRequestInFlight))return;
     if(blockReason())return;
-    const prompt=$('kdPrompt').value.trim();
     const cost=estimate();if(!cost)return;
     state.inFlight=true;render();
     showStatus('');
@@ -168,10 +164,11 @@
       if(balance!==null&&balance<cost){showStatus(`クレジットが足りません。必要: ${cost} cr／現在: ${balance} cr`);return}
       generationRequestInFlight=true;
       tmpId='tmp_'+Date.now();_activePtId=tmpId;
-      _ptInsertCard({id:tmpId,prompt,mode:'reference_to_video',ui_mode:'reference_to_video',aspect_ratio:'16:9',duration_seconds:String(state.video.billableSeconds),resolution:'720p',created_at:new Date().toISOString(),_sending:true});
+      _ptInsertCard({id:tmpId,prompt:'モーション（画像とお手本動画）',mode:'reference_to_video',ui_mode:'reference_to_video',aspect_ratio:'16:9',duration_seconds:String(state.video.billableSeconds),resolution:'720p',created_at:new Date().toISOString(),_sending:true});
       // 画像は input_references で渡す。flowvid-open-inline.js の送信後処理は
       // reference_url(s) を見て通常タブの追加画像を消すため、それを避ける。
-      const body={model:CARRIER_MODEL,prompt,duration:'5',resolution:'720p',aspect_ratio:'16:9',generate_audio:true,mode:'reference_to_video',estimated_credits:cost,
+      // プロンプトは送らない(サーバーが固定の指示を構築し、body.promptは無視する)。
+      const body={model:CARRIER_MODEL,duration:'5',resolution:'720p',aspect_ratio:'16:9',generate_audio:true,mode:'reference_to_video',estimated_credits:cost,
         dance_method:METHOD,reference_video_asset_id:state.video.id,reference_video_rights_confirmed:true,input_references:[state.image.url]};
       const res=await fetch('/api/seedance-start',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify(body)});
       const data=await res.json().catch(()=>({}));
@@ -196,7 +193,7 @@
       // 受付済み: 入力を空に戻す(失敗時は保持して再試行できる)。
       state.image={status:'idle',url:'',name:'',error:'',previewUrl:''};
       state.video={status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false};
-      $('kdImageFile').value='';$('kdVideoFile').value='';$('kdRights').checked=false;$('kdPrompt').value='';safeSet('');
+      $('kdImageFile').value='';$('kdVideoFile').value='';$('kdRights').checked=false;
       loadPendingTasks();
     }catch(_){
       if(tmpId){_ptFail(_activePtId||tmpId,'通信エラーが発生しました。もう一度お試しください。',undefined);_activePtId=''}
@@ -212,9 +209,7 @@
   $('kdVideoRemove').addEventListener('click',removeVideo);
   $('kdImageRemove').addEventListener('click',removeImage);
   $('kdRights').addEventListener('change',render);
-  $('kdPrompt').addEventListener('input',()=>{safeSet($('kdPrompt').value);render()});
   $('kdCreate').addEventListener('click',submit);
-  $('kdPrompt').value=safeGet();
 
   window.flowvidDanceKling={state,access,estimate,render};
   render();

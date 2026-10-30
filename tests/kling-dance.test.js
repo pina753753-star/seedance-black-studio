@@ -23,8 +23,8 @@ function readyRow(overrides = {}) {
 
 // Load the real handler in an isolated module with all network/DB boundaries
 // mocked. No generation, storage write, or credit transaction leaves this test.
-async function runStart({ omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, bodyOverrides = {} } = {}) {
-  const rpcCalls = [], updates = [], providerCalls = [], events = [], accessCalls = [];
+async function runStart({ moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, bodyOverrides = {} } = {}) {
+  const rpcCalls = [], updates = [], providerCalls = [], events = [], accessCalls = [], moderated = [];
   const access = {
     ok: true, allowed: true, plan: subscription ? 'premium' : 'free', accountStatus: 'active',
     hasActiveSubscription: subscription, hasPurchasedAccess: !subscription,
@@ -91,8 +91,8 @@ async function runStart({ omit = [], rate = 19, providerFailure = false, resolut
   const stubs = {
     '@supabase/supabase-js': { createClient() { throw new Error('Unexpected live client'); } },
     './confirmed-auth.js': { requireConfirmedAuth: async () => ({ ok: true, user: { id: USER, email: adminEmail }, supabase: db }) },
-    './openai-moderation.js': { moderateContent: async () => ({ ok: true }) },
-    './moderation-decision.js': { resolveModerationDecision: async () => ({ ok: true, allow: true }) },
+    './openai-moderation.js': { moderateContent: async (text, images) => { moderated.push({ text, images }); return { ok: true }; } },
+    './moderation-decision.js': { resolveModerationDecision: async () => (moderationBlock ? { ok: true, allow: false, status: 400, body: { ok: false, error: 'moderation_blocked' } } : { ok: true, allow: true }) },
     './generation-control.js': { checkGenerationControl: async () => ({ ok: true }) },
     './credit-access': { readSubscriptionAccess: async () => ({ ...access }) },
     './video-plan-entitlements.js': {
@@ -122,10 +122,11 @@ async function runStart({ omit = [], rate = 19, providerFailure = false, resolut
   };
   for (const key of omit) delete requestBody[key];
   await module.exports({ method: 'POST', body: requestBody }, res);
-  return { res, rpcCalls, updates, providerCalls, events, accessCalls };
+  return { res, rpcCalls, updates, providerCalls, events, accessCalls, moderated };
 }
 
 
+const klingDance = require('../api/_lib/reference-dance.js').klingDance;
 const KLING = /kwaivgi\/kling-v3\.0-pro\/motion-control$/;
 
 test('price undecided: refuses before reservation, charge or provider call', async () => {
@@ -144,7 +145,7 @@ test('mocked price: payload has server-owned orientation/sound, one image, signe
   assert.deepEqual(r.providerCalls[0].payload, {
     image: 'https://example.test/identity.png',
     video: 'https://storage.example.test/source.mp4',
-    prompt: 'Dance naturally',
+    prompt: klingDance.KLING_DANCE_PROVIDER_PROMPT,
     character_orientation: 'image',
     keep_original_sound: false
   });
@@ -352,4 +353,53 @@ test('reservation, deduction and response amounts are identical (19 x billed sec
     Object.entries(r.rpcCalls.find(c => c.name === 'deduct_generation_credits_atomic').args).find(([k]) => /cost|amount/.test(k))[1]
   ];
   assert.deepEqual(amounts, [152, 152, 152]);
+});
+
+test('motion needs no prompt: empty/missing body.prompt works, the server builds the fixed image-based instruction', async () => {
+  for (const omit of [['prompt'], []]) {
+    const r = await runStart({ omit, bodyOverrides: omit.length ? {} : { prompt: '' } });
+    assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+    assert.equal(r.providerCalls[0].payload.prompt, klingDance.KLING_DANCE_PROVIDER_PROMPT);
+    assert.match(r.providerCalls[0].payload.prompt, /input image/);
+    assert.match(r.providerCalls[0].payload.prompt, /face, hairstyle, body shape, clothing and background/);
+    const reserve = r.rpcCalls.find(c => c.name === 'reserve_generation_task').args;
+    assert.equal(reserve.p_prompt, klingDance.KLING_DANCE_TASK_PROMPT);
+  }
+});
+
+test('text typed elsewhere (body.prompt) never reaches the motion task, moderation text or provider; images are still moderated', async () => {
+  const r = await runStart({ bodyOverrides: { prompt: 'TEXT FROM ANOTHER TAB' } });
+  assert.equal(r.res.code, 202);
+  assert.equal(JSON.stringify(r.providerCalls[0].payload).includes('ANOTHER TAB'), false);
+  assert.equal(JSON.stringify(r.rpcCalls).includes('ANOTHER TAB'), false);
+  assert.equal(r.moderated.length, 1);
+  assert.equal(r.moderated[0].text, klingDance.KLING_DANCE_TASK_PROMPT);
+  assert.deepEqual([...r.moderated[0].images], ['https://example.test/identity.png']);
+});
+
+test('moderation rejection still stops a prompt-less motion request before reservation/charge/provider', async () => {
+  // moderation outcome comes from resolveModerationDecision; reject it for this case only
+  const r = await runStart({ omit: ['prompt'], moderationBlock: true });
+  assert.equal(r.res.code, 422);
+  assert.equal(r.res.body.error, 'content_policy_violation');
+  assert.equal(r.rpcCalls.length, 0);
+  assert.equal(r.providerCalls.length, 0);
+});
+
+test('shared reference-video messages use the motion wording for Kling only', async () => {
+  const k = await runStart({ row: readyRow({ status: 'pending' }) });
+  assert.equal(k.res.code, 400);
+  assert.match(k.res.body.message, /^お手本動画/);
+  const s = await runStart({ row: readyRow({ status: 'pending' }), omit: ['dance_method'], bodyOverrides: { input_references: undefined, reference_url: 'https://example.test/identity.png', estimated_credits: 95 } });
+  assert.equal(s.res.code, 400);
+  assert.match(s.res.body.message, /^参考動画/);
+});
+
+test('other methods still require a prompt (normal generation and Seedance dance)', async () => {
+  for (const o of [{ dance: false, omit: ['prompt'] }, { omit: ['prompt', 'dance_method'], bodyOverrides: { reference_url: 'https://example.test/identity.png' } }]) {
+    const r = await runStart(o);
+    assert.equal(r.res.code, 400);
+    assert.equal(r.res.body.error, 'prompt is required');
+    assert.equal(r.rpcCalls.length, 0);
+  }
 });

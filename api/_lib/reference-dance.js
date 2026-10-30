@@ -187,6 +187,12 @@ const KLING_DANCE_MIN_SECONDS = 4;
 const KLING_DANCE_MAX_SECONDS = 10;
 const KLING_DANCE_CHARACTER_ORIENTATION = 'image';
 
+// The motion tab takes no user prompt. The server owns both texts, so nothing typed on
+// another tab can leak in. TASK_PROMPT is what is stored (history) and moderated; the
+// provider prompt keeps the character image as the basis. It does not guarantee results.
+const KLING_DANCE_TASK_PROMPT = 'モーション（画像とお手本動画）';
+const KLING_DANCE_PROVIDER_PROMPT = 'Keep the character from the input image as pictured: face, hairstyle, body shape, clothing and background. Reproduce only the dance and body motion of the reference video. Do not copy the reference video person, clothing or background.';
+
 // Kling-only credits per second (owner decision: 19 cr/s, i.e. 5 s = 95, 10 s = 190).
 // Never derived from Seedance pricing and never read from the request. If it is
 // ever null/invalid, the server refuses to start (kling_dance_price_undecided)
@@ -255,6 +261,8 @@ const klingDance = Object.freeze({
   KLING_DANCE_PROVIDER_MODEL,
   KLING_DANCE_MIN_SECONDS,
   KLING_DANCE_MAX_SECONDS,
+  KLING_DANCE_TASK_PROMPT,
+  KLING_DANCE_PROVIDER_PROMPT,
   config,
   getKlingDanceCreditsPerSecond,
   isKlingDanceRequested,

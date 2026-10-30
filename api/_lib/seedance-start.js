@@ -427,7 +427,10 @@ return async function handler(req, res) {
 
   try {
     const body = jsonBody(req);
-    const prompt = String(body.prompt || '').trim();
+    // The motion (Kling) method takes no user prompt: the server uses its own fixed texts and
+    // ignores body.prompt entirely. Every other method still requires a prompt.
+    const klingRequested = String(body.dance_method || '').trim() === klingDance.KLING_DANCE_METHOD;
+    const prompt = klingRequested ? klingDance.KLING_DANCE_TASK_PROMPT : String(body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ ok: false, error: 'prompt is required' });
 
     // Model capabilities are validated before moderation, DB writes, credit
@@ -464,11 +467,13 @@ return async function handler(req, res) {
     try {
       danceMethod = klingDance.parseKlingDanceMethod(body);
     } catch (_) {
-      return res.status(400).json({ ok: false, error: 'invalid_dance_method', message: 'ダンスの生成方式を確認できませんでした。ページを再読み込みして、もう一度お試しください。' });
+      return res.status(400).json({ ok: false, error: 'invalid_dance_method', message: 'モーションの生成方式を確認できませんでした。ページを再読み込みして、もう一度お試しください。' });
     }
     const isKlingDance = danceMethod === klingDance.KLING_DANCE_METHOD;
+    // Shared reference-video messages use the motion tab's own wording for Kling requests.
+    const refVideoWord = isKlingDance ? 'お手本動画' : '参考動画';
     if (isKlingDance && !referenceDanceAssetId) {
-      return res.status(400).json({ ok: false, error: 'reference_video_required', message: 'ダンスには参考動画の添付が必要です。' });
+      return res.status(400).json({ ok: false, error: 'reference_video_required', message: 'モーションにはお手本動画の添付が必要です。' });
     }
     let klingDanceSeconds = 0;
     let generationPlan = 'free';
@@ -507,7 +512,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     }
     if (referenceDanceAssetId) {
       if (!isReferenceDanceUuid(referenceDanceAssetId)) {
-        return res.status(400).json({ ok: false, error: 'invalid_reference_video_id', message: '参考動画を確認できませんでした。もう一度添付してください。' });
+        return res.status(400).json({ ok: false, error: 'invalid_reference_video_id', message: `${refVideoWord}を確認できませんでした。もう一度添付してください。` });
       }
       try {
         validateReferenceDanceVariant({ model, mode, resolution });
@@ -516,7 +521,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       }
       const adminAccess = await authorizeReferenceDanceAdmin(auth);
       if (!adminAccess.ok) {
-        return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden', message: '参考ダンス動画は現在、運営テスト専用です。' });
+        return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden', message: isKlingDance ? 'モーションは現在、運営テスト専用です。' : '参考ダンス動画は現在、運営テスト専用です。' });
       }
       const { data: referenceDanceRow, error: referenceDanceError } = await db
         .from(REFERENCE_DANCE_TABLE)
@@ -525,12 +530,12 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         .eq('user_id', user.id)
         .maybeSingle();
       if (referenceDanceError || !referenceDanceRow) {
-        return res.status(400).json({ ok: false, error: 'reference_video_not_found', message: '参考動画を確認できませんでした。もう一度添付してください。' });
+        return res.status(400).json({ ok: false, error: 'reference_video_not_found', message: `${refVideoWord}を確認できませんでした。もう一度添付してください。` });
       }
       try {
         referenceDance = validateReadyReferenceDance(referenceDanceRow, user.id);
       } catch (error) {
-        return res.status(400).json({ ok: false, error: error.code || 'reference_video_not_ready', message: '参考動画の安全確認が完了していません。もう一度添付してください。' });
+        return res.status(400).json({ ok: false, error: error.code || 'reference_video_not_ready', message: `${refVideoWord}の安全確認が完了していません。もう一度添付してください。` });
       }
       if (collectModerationImageUrls(body).length < 1) {
         return res.status(400).json({ ok: false, error: 'identity_reference_image_required', message: '人物を維持するための参考画像を1枚以上追加してください。' });
@@ -538,15 +543,15 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       if (isKlingDance) {
         // Never trim or switch method: an unsupported length is refused as-is.
         if (collectModerationImageUrls(body).length !== 1) {
-          return res.status(400).json({ ok: false, error: 'kling_dance_single_image_required', message: 'ダンスではキャラクター画像を1枚だけ指定してください。' });
+          return res.status(400).json({ ok: false, error: 'kling_dance_single_image_required', message: 'モーションではキャラクター画像を1枚だけ指定してください。' });
         }
         try {
           klingDanceSeconds = klingDance.validateKlingDanceDuration({ durationMs: referenceDance.durationMs, billableSeconds: referenceDance.billableSeconds });
         } catch (_) {
-          return res.status(400).json({ ok: false, error: 'kling_dance_duration_unsupported', message: `ダンスで使える参考動画は${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.KLING_DANCE_MAX_SECONDS}秒です。自動では短くしません。動画を差し替えてください。` });
+          return res.status(400).json({ ok: false, error: 'kling_dance_duration_unsupported', message: `モーションで使えるお手本動画は${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.KLING_DANCE_MAX_SECONDS}秒です。自動では短くしません。動画を差し替えてください。` });
         }
         if (klingDance.getKlingDanceCreditsPerSecond() === null) {
-          return res.status(503).json({ ok: false, error: 'kling_dance_price_undecided', message: 'ダンスは現在準備中です。料金確定後にご利用いただけます。' });
+          return res.status(503).json({ ok: false, error: 'kling_dance_price_undecided', message: 'モーションは現在準備中です。料金確定後にご利用いただけます。' });
         }
         if (confirmedCredits === null) {
           return res.status(400).json({ ok: false, error: 'invalid_estimated_credits', message: '表示金額を確認できませんでした。ページを再読み込みして、もう一度お試しください。' });
@@ -555,7 +560,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       const createdMs = Date.parse(String(referenceDanceRow.created_at || ''));
       const maxRetentionMs = createdMs + REFERENCE_DANCE_MAX_RETENTION_FROM_CREATION_MS;
       if (!Number.isFinite(createdMs) || maxRetentionMs - Date.now() < REFERENCE_DANCE_START_MARGIN_MS) {
-        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: '参考動画の安全な保持期間を確認できないため、生成を開始できません。' });
+        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: `${refVideoWord}の安全な保持期間を確認できないため、生成を開始できません。` });
       }
       const extendedExpiry = new Date(Math.min(
         Date.now() + REFERENCE_DANCE_RETENTION_MS,
@@ -569,13 +574,13 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         .gt('expires_at', new Date().toISOString())
         .select('id');
       if (retentionError || !retainedRows || retainedRows.length !== 1) {
-        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: '参考動画の安全な保持期間を確認できないため、生成を開始できません。' });
+        return res.status(503).json({ ok: false, error: 'reference_video_retention_failed', message: `${refVideoWord}の安全な保持期間を確認できないため、生成を開始できません。` });
       }
       const { data: signedVideo, error: signedVideoError } = await db.storage
         .from(REFERENCE_DANCE_BUCKET)
         .createSignedUrl(referenceDance.approvedPath, REFERENCE_DANCE_SIGNED_URL_TTL_SECONDS);
       if (signedVideoError || !signedVideo?.signedUrl) {
-        return res.status(503).json({ ok: false, error: 'reference_video_unavailable', message: '参考動画を読み込めませんでした。もう一度添付してください。' });
+        return res.status(503).json({ ok: false, error: 'reference_video_unavailable', message: `${refVideoWord}を読み込めませんでした。もう一度添付してください。` });
       }
       referenceDanceSignedUrl = signedVideo.signedUrl;
     }
@@ -837,7 +842,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         return res.status(500).json({
           ok: false,
           error: 'reference_video_settings_save_failed',
-          message: '参考動画の生成設定を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+          message: `${refVideoWord}の生成設定を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。`
         });
       }
       const { data: boundRows, error: bindError } = await db.from(REFERENCE_DANCE_TABLE)
@@ -851,7 +856,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         return res.status(503).json({
           ok: false,
           error: 'reference_video_bind_failed',
-          message: '参考動画を生成へ関連付けられなかったため、生成を開始しませんでした。クレジットは消費されていません。'
+          message: `${refVideoWord}を生成へ関連付けられなかったため、生成を開始しませんでした。クレジットは消費されていません。`
         });
       }
     }
@@ -923,7 +928,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     // audio does not invent music that may trigger output copyright checks.
     const providerPrompt = buildProviderPrompt({
       model,
-      prompt: isKlingDance ? prompt : referenceDance ? buildReferenceDanceProviderPrompt(prompt) : prompt,
+      prompt: isKlingDance ? klingDance.KLING_DANCE_PROVIDER_PROMPT : referenceDance ? buildReferenceDanceProviderPrompt(prompt) : prompt,
       generateAudio: !referenceDance,
       hasReferenceAudio: signedAudio.urls.length > 0,
       referenceAudioSyncMode

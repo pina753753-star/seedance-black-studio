@@ -138,7 +138,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(await p.locator('#kdCreate').isDisabled(), true);
         await fill(p, { seconds: 8 });
         assert.match(await p.locator('#kdCreate').textContent(), /152$/);
-        await p.locator('#kdPrompt').fill('dance');
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
         assert.equal(await noHScroll(p), true);
         await p.locator('#kdCreate').click();
@@ -160,7 +159,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       try {
         const p = f.page; await openDance(p);
         await p.locator('#kdImageFile').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
-        await p.locator('#kdPrompt').fill('dance');
         assert.equal(await p.locator('#kdCreate').isDisabled(), true);
         assert.equal(await p.locator('#kdVideoFile').isDisabled(), true);
         assert.equal(await p.locator('#kdCreate').textContent(), '作成する');
@@ -171,7 +169,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { seconds: 12 });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         assert.equal(await p.locator('#kdCreate').isDisabled(), true);
         assert.match(await p.locator('#kdCreate').getAttribute('title'), /10秒/);
         assert.equal(f.calls.confirms[0].allowBoundaryTrim, false);
@@ -183,7 +180,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const f = await fixture(browser, { seconds: sec, durationMs: ms });
         try {
           const p = f.page; await openDance(p); await fill(p);
-          await p.locator('#kdPrompt').fill('dance');
           if (credits === null) {
             assert.equal(await p.locator('#kdCreate').isDisabled(), true);
             assert.equal(await p.evaluate(() => window.flowvidDanceKling.estimate()), null);
@@ -210,7 +206,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { startDelay: 400 });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').dblclick();
         await p.locator('#kdCreate').click({ force: true }).catch(() => {});
         await p.waitForTimeout(900);
@@ -221,7 +216,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { start409: true });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.locator('#kdStatus').waitFor({ state: 'visible' });
         assert.match(await p.locator('#kdStatus').textContent(), /変わりました/);
@@ -234,7 +228,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const f = await fixture(browser, o);
         try {
           const p = f.page; await openDance(p); await fill(p);
-          await p.locator('#kdPrompt').fill('dance');
           await p.locator('#kdCreate').click();
           await p.waitForFunction(() => document.querySelector('[data-ptask-id]')?.textContent.match(/rejected|失敗/));
           assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'ready');
@@ -242,13 +235,12 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         } finally { await f.context.close(); }
       }
     });
-    await run(`[${width}] tab switch keeps dance draft and main-card draft independently`, async () => {
+    await run(`[${width}] tab switch keeps the motion inputs; main-card prompt is neither mixed in nor overwritten`, async () => {
       const f = await fixture(browser);
       try {
         const p = f.page;
         await p.locator('#prompt').fill('main draft');
         await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance draft');
         for (const m of ['text_to_video', 'image_to_video', 'reference_to_video']) {
           await p.locator(`.tabs button[data-mode="${m}"]`).click();
           assert.equal(await p.locator('#kdSection').isVisible(), false);
@@ -257,43 +249,96 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         await p.locator('.tabs button[data-mode="text_to_video"]').click();
         assert.equal(await p.locator('#prompt').inputValue(), 'main draft');
         await openDance(p);
-        assert.equal(await p.locator('#kdPrompt').inputValue(), 'dance draft');
+        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'ready');
+        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.image.status), 'completed');
+        assert.equal(await p.locator('#kdRights').isChecked(), true);
         await p.evaluate(() => { updateCreditUi(); persistDraft(); });
         assert.notEqual(await p.evaluate(() => JSON.parse(localStorage.getItem('flowvidGenerateDraft') || '{}').mode), 'dance');
         assert.equal(await p.evaluate(() => 'prompt_dance' in JSON.parse(localStorage.getItem('flowvidGenerateDraft') || '{}')), false);
-        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'ready');
-        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.image.status), 'completed');
+        assert.equal(await p.evaluate(() => JSON.parse(localStorage.getItem('flowvidGenerateDraft') || '{}').prompt_text_to_video), 'main draft');
         assert.deepEqual(f.pageErrors, []);
       } finally { await f.context.close(); }
     });
-    await run(`[${width}] full flow: start -> processing -> complete -> video shown -> history labelled ダンス -> survives reload`, async () => {
+    await run(`[${width}] motion UI: names/labels, no prompt field, no prompt-related wording; admin gating unchanged`, async () => {
+      const f = await fixture(browser);
+      try {
+        const p = f.page;
+        assert.equal((await p.locator('#danceTab').textContent()).trim(), 'モーション');
+        await openDance(p);
+        assert.equal(await p.locator('#kdSection').getAttribute('aria-label'), 'モーション');
+        assert.equal((await p.locator('#kdHeading').textContent()).trim(), 'モーション');
+        const text = await p.locator('#kdSection').innerText();
+        assert.match(text, /ダンスやしぐさを、好きなキャラで再現/);
+        assert.match(text, /画像とお手本動画を入れるだけ。プロンプト不要/);
+        assert.equal(await p.locator('#kdPrompt').count(), 0);
+        assert.equal(await p.locator('#kdSection textarea').count(), 0);
+        assert.doesNotMatch(text, /完全|必ず|保証します/);
+        assert.equal(await p.locator('#kdVideoRemove').getAttribute('aria-label'), 'お手本動画を削除');
+        assert.equal(await noHScroll(p), true);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] first state without any prompt: image + video -> estimate -> start -> complete -> history, nothing else typed anywhere`, async () => {
+      const f = await fixture(browser, { pollScript: ['processing', 'done'] });
+      try {
+        const p = f.page; await openDance(p);
+        assert.equal(await p.locator('#mainCard textarea#prompt').inputValue(), '');
+        await fill(p);
+        assert.equal(await p.locator('#kdCreate').isDisabled(), false);
+        assert.match(await p.locator('#kdCost').textContent(), /消費クレジット: 152 cr（19cr × 8秒）/);
+        assert.match(await p.locator('#kdCreate').textContent(), /152$/);
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
+        const b = f.calls.starts[0].body;
+        assert.equal('prompt' in b, false);
+        assert.equal(b.estimated_credits, 152);
+        assert.equal(b.dance_method, 'kling_v3_motion_control');
+        await p.locator('.tabs button[data-mode="text_to_video"]').click();
+        await openDance(p);
+        await p.waitForFunction(() => document.querySelector('#history article .fv-chip-mode'));
+        assert.deepEqual(await p.locator('#history article .fv-chip-mode').allTextContents(), ['モーション']);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] text in another tab is never sent with a motion request`, async () => {
+      const f = await fixture(browser);
+      try {
+        const p = f.page;
+        await p.locator('.tabs button[data-mode="text_to_video"]').click();
+        await p.locator('#prompt').fill('MAIN TAB TEXT');
+        await openDance(p); await fill(p);
+        await p.locator('#kdCreate').click();
+        await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
+        assert.equal(JSON.stringify(f.calls.starts[0].body).includes('MAIN TAB TEXT'), false);
+        await p.locator('.tabs button[data-mode="text_to_video"]').click();
+        assert.equal(await p.locator('#prompt').inputValue(), 'MAIN TAB TEXT');
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] full flow: start -> processing -> complete -> video shown -> history labelled モーション -> survives reload`, async () => {
       const f = await fixture(browser, { pollScript: ['processing', 'processing', 'done'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
         assert.equal(f.calls.starts.length, 1);
         assert.ok(f.calls.polls >= 3, 'polled until completion: ' + f.calls.polls);
         assert.equal(await p.locator('[data-ptask-id] video').first().getAttribute('src'), origin + '/out.mp4#t=0.2');
-        // history (dance tab) shows only the dance video, labelled ダンス
+        // history (dance tab) shows only the dance video, labelled モーション
         await p.locator('.tabs button[data-mode="text_to_video"]').click();
         await openDance(p);
         await p.waitForFunction(() => document.querySelector('#history article'));
         const chips = await p.locator('#history article').first().locator('.fv-chip-mode').allTextContents();
-        assert.deepEqual(chips, ['ダンス']);
+        assert.deepEqual(chips, ['モーション']);
         assert.equal(await p.locator('#history article').count(), 1, 'dance tab history excludes non-dance videos');
-        // reference tab still lists both, the dance one labelled ダンス
+        // reference tab still lists both, the dance one labelled モーション
         await p.locator('.tabs button[data-mode="reference_to_video"]').click();
         await p.waitForFunction(() => document.querySelectorAll('#history article').length === 2);
         const labels = await p.locator('#history article .fv-chip-mode').allTextContents();
-        assert.deepEqual(labels.sort(), ['ダンス', 'リファレンス']);
+        assert.deepEqual(labels.sort(), ['モーション', 'リファレンス']);
         // reload: completed task is in history, nothing is resubmitted
         await p.reload({ waitUntil: 'networkidle' });
         await p.waitForFunction(() => typeof generationAccessLoaded !== 'undefined' && generationAccessLoaded === true);
         await openDance(p);
         await p.waitForFunction(() => document.querySelector('#history article .fv-chip-mode'));
-        assert.deepEqual(await p.locator('#history article .fv-chip-mode').allTextContents(), ['ダンス']);
+        assert.deepEqual(await p.locator('#history article .fv-chip-mode').allTextContents(), ['モーション']);
         assert.equal(f.calls.starts.length, 1);
         assert.deepEqual(f.pageErrors, []);
       } finally { await f.context.close(); }
@@ -302,7 +347,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['processing', 'processing', 'processing', 'processing', 'done'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
         await p.reload({ waitUntil: 'networkidle' });
@@ -318,7 +362,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['http502', 'processing', 'done'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
         assert.equal(f.calls.starts.length, 1);
@@ -331,7 +374,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['http503', 'network', 'http429', 'html502', 'http502', 'processing', 'done'], pollDelay: 260 });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => /状態を確認中/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 8000 });
         assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
@@ -347,7 +389,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const f = await fixture(browser, { pollScript: [bad, 'processing', 'done'] });
         try {
           const p = f.page; await openDance(p); await fill(p);
-          await p.locator('#kdPrompt').fill('dance');
           await p.locator('#kdCreate').click();
           await p.waitForFunction(() => /生成が失敗したとは限りません/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 8000 });
           assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
@@ -379,7 +420,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['processing'], pollDelay: 260 });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
         await p.reload({ waitUntil: 'networkidle' });
@@ -397,7 +437,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['http404'], tick: 25 });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => /タスクIDを添えて/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 10000 });
         const polls = f.calls.polls; await p.waitForTimeout(700);
@@ -411,7 +450,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['processing', 'wmfail'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => /生成に失敗/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 8000 });
         assert.match(await p.locator('[data-ptask-id]').first().textContent(), /自動返金/);
@@ -424,7 +462,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const f = await fixture(browser, { pollScript: ['processing', step] });
         try {
           const p = f.page; await openDance(p); await fill(p);
-          await p.locator('#kdPrompt').fill('dance');
           await p.locator('#kdCreate').click();
           await p.waitForFunction(() => /生成に失敗/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 8000 });
           const text = await p.locator('[data-ptask-id]').first().textContent();
@@ -441,7 +478,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['http502_timeout', 'http408', 'processing', 'done'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => /状態を確認中/.test(document.querySelector('[data-ptask-id] [data-pt-net]')?.textContent || ''), null, { timeout: 8000 });
         assert.equal(await p.locator('[data-ptask-id]').filter({ hasText: '生成に失敗' }).count(), 0);
@@ -453,7 +489,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['timeout_other', 'done'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
         assert.equal(f.calls.starts.length, 1);
@@ -463,7 +498,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { pollScript: ['processing', 'failed'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => /生成に失敗/.test(document.querySelector('[data-ptask-id]')?.textContent || '') && /返金|返還/.test(document.querySelector('[data-ptask-id]')?.textContent || ''), null, { timeout: 8000 });
         assert.equal(f.calls.starts.length, 1);
@@ -476,7 +510,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { startProviderStarted: true, pollScript: ['processing', 'done'] });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.locator('#kdStatus').waitFor({ state: 'visible' });
         assert.doesNotMatch(await p.locator('#kdStatus').textContent(), /消費されていません/);
@@ -490,7 +523,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const f = await fixture(browser, o);
         try {
           const p = f.page; await openDance(p); await fill(p);
-          await p.locator('#kdPrompt').fill('dance');
           await p.locator('#kdCreate').click();
           await p.locator('#kdStatus').waitFor({ state: 'visible' });
           const t = await p.locator('#kdStatus').textContent();
@@ -516,7 +548,6 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const before = await p.evaluate(() => assets.length);
         assert.ok(await p.locator('#assets .thumb img').count() >= 1, 'main-card thumbnail must exist for this check to discriminate');
         await openDance(p); await fill(p);
-        await p.locator('#kdPrompt').fill('dance');
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
         await p.waitForTimeout(600);

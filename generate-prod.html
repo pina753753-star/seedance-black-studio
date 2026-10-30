@@ -47,7 +47,7 @@
   <button class="on" data-mode="text_to_video">テキストから動画</button>
   <button data-mode="storyboard" hidden>絵コンテ</button>
   <button data-mode="video_edit" id="videoEditTab" hidden>動画編集</button>
-  <button data-mode="dance" id="danceTab" hidden>ダンス</button>
+  <button data-mode="dance" id="danceTab" hidden>モーション</button>
 </div>
 
 <!-- 動画編集: 有料プラン案内モーダル -->
@@ -79,10 +79,13 @@
 <pre class="log" id="log"></pre>
 </section>
 
-<!-- ダンス(Kling v3.0 Pro Motion Control・運営専用BETA): mainCard/sbSectionとは独立した専用セクション。
+<!-- モーション(Kling v3.0 Pro Motion Control・運営専用BETA。内部名はdance): mainCard/sbSectionとは独立した専用セクション。
      状態・下書きはdance-kling.jsが保持し、タブ切替ではDOMを隠すだけで破棄しない -->
-<section class="card" id="kdSection" style="display:none">
-  <div style="margin-bottom:12px;color:#c8cad6;font-size:12px;line-height:1.8">キャラクター画像1枚に、参考動画のダンスを写します。画像の顔・体型・服・背景を保つ保証はなく、カメラの動きは変わることがあります。参考動画の音声は使わず、結果は無音です。</div>
+<section class="card" id="kdSection" aria-label="モーション" style="display:none">
+  <h2 id="kdHeading" style="margin:0 0 4px;font-size:18px;font-weight:800">モーション</h2>
+  <p style="margin:0;color:#e5e7eb;font-size:13px;font-weight:700;line-height:1.6">ダンスやしぐさを、好きなキャラで再現</p>
+  <p style="margin:2px 0 10px;color:#c8cad6;font-size:12px;line-height:1.7">画像とお手本動画を入れるだけ。プロンプト不要</p>
+  <div style="margin-bottom:12px;color:#9ca3af;font-size:11px;line-height:1.7">運営専用BETAです。画像の顔・体型・服・背景がどこまで保たれるかは保証できず、カメラの動きは変わることがあります。お手本動画の音声は使わず、結果は無音です。</div>
   <div class="kdRow" style="display:grid;gap:12px">
     <div class="kdBox" style="background:#101319;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:12px">
       <label style="position:relative;display:inline-flex;min-width:138px;justify-content:center;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800">＋ キャラクター画像<input id="kdImageFile" type="file" accept="image/png,image/jpeg,image/webp" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></label>
@@ -91,16 +94,16 @@
       <button id="kdImageRemove" type="button" style="display:none;margin-top:8px" class="danceRemove" aria-label="画像を削除">×</button>
     </div>
     <div class="kdBox" style="background:#101319;border:1px solid rgba(196,181,253,.3);border-radius:15px;padding:12px">
-      <label style="position:relative;display:inline-flex;min-width:138px;justify-content:center;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800">♬ ダンス動画<input id="kdVideoFile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></label>
+      <label style="position:relative;display:inline-flex;min-width:138px;justify-content:center;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800">♬ お手本動画<input id="kdVideoFile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></label>
       <div id="kdVideoName" style="margin-top:8px;font-size:13px;font-weight:800;word-break:break-all">MP4／MOV・4〜10秒・最大50MB</div>
       <div id="kdVideoNote" style="margin-top:3px;color:#9f96b5;font-size:11px;line-height:1.6">10秒を超える動画は使えません。自動では短くしません。</div>
       <button id="kdVideoRetry" type="button" style="display:none;margin-top:8px" class="danceRetry">再検査</button>
-      <button id="kdVideoRemove" type="button" style="display:none;margin-top:8px" class="danceRemove" aria-label="参考動画を削除">×</button>
+      <button id="kdVideoRemove" type="button" style="display:none;margin-top:8px" class="danceRemove" aria-label="お手本動画を削除">×</button>
       <label class="danceRights" style="display:flex"><input id="kdRights" type="checkbox"><span>自分で作成した動画、または使用許可のある動画です。実在人物へのなりすましには使用しません。</span></label>
     </div>
   </div>
-  <div class="prompt" style="margin-top:12px"><textarea id="kdPrompt" placeholder="動きや雰囲気の補足を入力してください。"></textarea></div>
-  <button class="create" id="kdCreate" type="button" disabled>作成する</button>
+  <div id="kdCost" style="margin-top:12px;color:#c8cad6;font-size:12px;line-height:1.6" aria-live="polite"></div>
+  <button class="create" id="kdCreate" type="button" style="margin-top:8px" disabled>作成する</button>
   <div id="kdStatus" role="status" aria-live="polite" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 14px;color:#fca5a5;font-size:13px;line-height:1.8"></div>
 </section>
 
