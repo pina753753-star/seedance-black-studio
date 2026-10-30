@@ -23,6 +23,7 @@
 
 #history{display:grid;gap:14px}#history .old{padding:12px;border-radius:20px;display:grid;gap:10px;background:#13161e;border:1px solid rgba(255,255,255,.09)}#history .fv-prompt-wrap{min-width:0}#history .fv-prompt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:#c8cad6;font-weight:700;line-height:1.4;font-size:14px;cursor:pointer;-webkit-user-select:none;user-select:none}#history .fv-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;color:#6b7280;font-size:11px;font-weight:700}#history .fv-chip{border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:2px 7px;background:rgba(255,255,255,.04)}#history .fv-chip-mode{background:rgba(139,92,246,.18);border-color:rgba(139,92,246,.4);color:#c4b5fd}#history .fv-video-frame{width:100%;height:168px!important;max-height:168px!important;background:#050506;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}#history .fv-video-frame video{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;background:#000;border-radius:0;display:block;pointer-events:none}#history .fv-expand-btn{position:absolute;bottom:8px;right:8px;width:30px;height:30px;border:0;border-radius:8px;background:rgba(0,0,0,.62);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);color:rgba(255,255,255,.9);font-size:14px;display:grid;place-items:center;cursor:pointer;z-index:1;-webkit-tap-highlight-color:transparent}#history .fv-actions-row{display:flex;gap:7px}#history .fv-action{flex:1;height:36px;min-width:0;border:0;border-radius:10px;background:#1e2230;color:#b8bcc8;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:700;padding:0 10px;cursor:pointer;white-space:nowrap}#history .fv-action svg{flex-shrink:0;opacity:.8}#history .fv-fav-btn.on{background:rgba(251,191,36,.14);color:#fde68a;border:1px solid rgba(251,191,36,.22)}#history .fv-delete-one{background:transparent;color:#fca5a5;border:1px solid rgba(251,113,133,.3)}#history .fv-save[disabled]{opacity:.5}@media(max-width:520px){#history .fv-video-frame{height:168px!important}#history .old{padding:10px}#history .fv-actions-row{gap:5px}#history .fv-action{font-size:11px;padding:0 8px;gap:4px}}
 
+.tabBeta{display:inline-flex;align-items:center;margin-left:4px;padding:1px 6px;border:1px solid rgba(245,158,11,.65);border-radius:999px;color:#f59e0b;font-size:9px;font-weight:700;line-height:1.35;letter-spacing:.08em;vertical-align:middle}
 /* ---- Storyboard styles ---- */
 .sbUpload{background:#1b1e25;border:2px dashed rgba(255,255,255,.18);border-radius:22px;padding:32px 14px;text-align:center;cursor:pointer;position:relative;transition:border-color .2s}.sbUpload:hover{border-color:rgba(142,216,255,.5)}
 /* ---- Pseudo-progress bar (generation card) ---- */
@@ -47,7 +48,7 @@
   <button class="on" data-mode="text_to_video">テキストから動画</button>
   <button data-mode="storyboard" hidden>絵コンテ</button>
   <button data-mode="video_edit" id="videoEditTab" hidden>動画編集</button>
-  <button data-mode="dance" id="danceTab" hidden>モーション</button>
+  <button data-mode="dance" id="danceTab" hidden>モーション <span class="tabBeta">BETA</span></button>
 </div>
 
 <!-- 動画編集: 有料プラン案内モーダル -->
@@ -85,7 +86,7 @@
   <h2 id="kdHeading" style="margin:0 0 4px;font-size:18px;font-weight:800">モーション</h2>
   <p style="margin:0;color:#e5e7eb;font-size:13px;font-weight:700;line-height:1.6">ダンスやしぐさを、好きなキャラで再現</p>
   <p style="margin:2px 0 10px;color:#c8cad6;font-size:12px;line-height:1.7">画像とお手本動画を入れるだけ。プロンプト不要</p>
-  <div style="margin-bottom:12px;color:#9ca3af;font-size:11px;line-height:1.7">運営専用BETAです。画像の顔・体型・服・背景がどこまで保たれるかは保証できず、カメラの動きは変わることがあります。お手本動画の音声は使わず、結果は無音です。</div>
+  <div style="margin-bottom:12px;color:#9ca3af;font-size:11px;line-height:1.7">画像の顔・体型・服・背景がどこまで保たれるかは保証できず、カメラの動きは変わることがあります。お手本動画の音声は使わず、結果は無音です。</div>
   <div class="kdRow" style="display:grid;gap:12px">
     <div class="kdBox" style="background:#101319;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:12px">
       <label style="position:relative;display:inline-flex;min-width:138px;justify-content:center;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800">＋ キャラクター画像<input id="kdImageFile" type="file" accept="image/png,image/jpeg,image/webp" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></label>
@@ -104,6 +105,7 @@
   </div>
   <div id="kdCost" style="margin-top:12px;color:#c8cad6;font-size:12px;line-height:1.6" aria-live="polite"></div>
   <button class="create" id="kdCreate" type="button" style="margin-top:8px" disabled>作成する</button>
+  <div id="kdReason" role="status" aria-live="polite" style="display:none;margin-top:8px;color:#fcd34d;font-size:12px;line-height:1.7"></div>
   <div id="kdStatus" role="status" aria-live="polite" style="display:none;margin-top:12px;background:rgba(251,113,133,.07);border:1px solid rgba(251,113,133,.28);border-radius:14px;padding:12px 14px;color:#fca5a5;font-size:13px;line-height:1.8"></div>
 </section>
 
@@ -899,20 +901,20 @@ async function confirmReferenceDanceAsset(){
 }
 async function uploadReferenceDance(file){
   if(!file||generationRequestInFlight||['uploading','checking'].includes(referenceDanceAsset?.status))return;
-  const type=String(file.type||'').toLowerCase();
-  if(!['video/mp4','video/quicktime'].includes(type)&&!/[.](mp4|mov)$/.test(String(file.name||'').toLowerCase())){referenceDanceAsset={status:'failed',name:file.name||'参考動画',error:'MP4またはMOV形式の動画を選択してください'};syncReferenceDanceUi();updateCreditUi();return}
+  const prepared=window.flowvidReferenceVideoUpload?window.flowvidReferenceVideoUpload.prepare(file):null;
+  if(!prepared){referenceDanceAsset={status:'failed',name:file.name||'参考動画',error:'MP4またはMOV形式の動画を選択してください'};syncReferenceDanceUi();updateCreditUi();return}
   if(file.size<=0||file.size>50*1024*1024){referenceDanceAsset={status:'failed',name:file.name||'参考動画',error:'参考動画は50MB以下にしてください'};syncReferenceDanceUi();updateCreditUi();return}
   if(!canUseReferenceDance()){syncReferenceDanceUi();updateCreditUi();return}
   const previous=referenceDanceAsset?.status==='ready'?{...referenceDanceAsset}:null;
   referenceDanceAsset={id:'',status:'uploading',name:file.name||'参考動画',billableSeconds:0,error:''};syncReferenceDanceUi();updateCreditUi();
   try{
     const token=await getToken();if(!token){location.href='./login.html';return}
-    const urlResponse=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({filename:file.name,contentType:type||'video/mp4',byteSize:file.size,rightsConfirmed:true})});
+    const urlResponse=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({filename:file.name,contentType:prepared.contentType,byteSize:file.size,rightsConfirmed:true})});
     const urlData=await urlResponse.json().catch(()=>({}));
     if(!urlResponse.ok||!urlData.ok||!urlData.assetId||!urlData.path||!urlData.token)throw new Error(urlData.message||urlData.error||'参考動画のアップロードを開始できませんでした');
     referenceDanceAsset.id=urlData.assetId;
     const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;if(!client)throw new Error('Supabase接続情報が未設定です');
-    const{error}=await client.storage.from(urlData.bucket).uploadToSignedUrl(urlData.path,urlData.token,file,{contentType:'video/mp4'});if(error)throw error;
+    const{error}=await client.storage.from(urlData.bucket).uploadToSignedUrl(urlData.path,urlData.token,prepared.body,{contentType:prepared.contentType});if(error)throw error;
     const confirmed=await confirmReferenceDanceAsset();if(!confirmed){if(previous&&!referenceDanceAsset?.retryable){const failedId=referenceDanceAsset?.id||'';referenceDanceAsset=previous;syncReferenceDanceUi();updateCreditUi();if(failedId&&failedId!==previous.id)deleteReferenceDanceAsset(failedId)}return}
     if(previous?.id&&previous.id!==referenceDanceAsset.id)deleteReferenceDanceAsset(previous.id);
   }catch(error){const failedId=referenceDanceAsset?.id||'';if(previous)referenceDanceAsset=previous;else{referenceDanceAsset.status='failed';referenceDanceAsset.retryable=false;referenceDanceAsset.error=error?.message||'参考動画を利用できません'}if(failedId&&failedId!==previous?.id)deleteReferenceDanceAsset(failedId)}
@@ -1775,6 +1777,7 @@ function resetStoryboardInputs(){
 $('sbRedoBtn').onclick=resetStoryboardInputs;
 // ========== END STORYBOARD ==========
 </script>
-<script src="./dance-kling.js?v=1"></script>
+<script src="./reference-video-upload.js?v=1"></script>
+<script src="./dance-kling.js?v=2"></script>
 </body>
 </html>

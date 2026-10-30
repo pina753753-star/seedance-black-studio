@@ -19,16 +19,17 @@ const syntheticAuth = `(function(){
  const balance={free_credits:1000,subscription_credits:0,purchased_credits:1000,subscription_expires_at:'2999-01-01T00:00:00Z'};
  window.__uploads=[];
  const client={auth:{getSession:async()=>({data:{session}}),getUser:async(token)=>({data:{user:token===session.access_token||!token?user:null}}),signOut:async()=>{},onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}})},
-  storage:{from:()=>({uploadToSignedUrl:async(p)=>{window.__uploads.push(p);return {error:null}}})},
+  storage:{from:()=>({uploadToSignedUrl:async(p,tk,body,opt)=>{window.__uploads.push(p);(window.__uploadsFull=window.__uploadsFull||[]).push({type:body&&body.type,name:body&&body.name,opt:opt&&opt.contentType});if(window.__uploadError&&/[.](mov|mp4)$/i.test(String(body&&body.name)))return {error:{message:window.__uploadError}};return {error:null}}})},
   from(table){const chain={select(){return chain},eq(){return chain},maybeSingle:async()=>({data:table==='profiles'?{plan:'free',role:'user'}:balance,error:null})};return chain}};
  window.FLOWVID_AUTH={supabaseUrl:'https://synthetic.invalid',supabaseAnonKey:'synthetic-only'};
  window.supabase={createClient:()=>client};window.flowvidSupabaseClient=()=>client;
 })();`;
 const caps = { ok: true, seedance25: true, resolution1080: true, referenceAudio: false, storyboard25: false, watermarkRequired: false };
-const allowed = new Set(['generate-prod.html', 'flowvid-history.js', 'flowvid-open-inline.js', 'auth-guard.js', 'dance-kling.js']);
+const allowed = new Set(['generate-prod.html', 'flowvid-history.js', 'flowvid-open-inline.js', 'auth-guard.js', 'dance-kling.js', 'reference-video-upload.js']);
 async function fixture(browser, o = {}) {
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width, height: 900 } });
   await context.addInitScript(syntheticAuth);
+  if (o.uploadError) await context.addInitScript(`window.__uploadError=${JSON.stringify(o.uploadError)};`);
   const calls = { starts: [], deletes: [], confirms: [], imageUploads: 0, videoUploads: 0, polls: 0, inflight: 0, maxInflight: 0 }, pageErrors = [];
   // Stateful backend for the start -> processing -> complete -> history flow.
   const flow = { task: null, completed: false, failed: false, pollScript: o.pollScript || ['processing', 'processing', 'done'] };
@@ -43,7 +44,7 @@ async function fixture(browser, o = {}) {
     const json = (d, s = 200) => route.fulfill({ status: s, contentType: 'application/json', body: JSON.stringify(d) });
     const p = url.pathname;
     if (p === '/auth-config.js') return route.fulfill({ contentType: 'application/javascript', body: syntheticAuth });
-    if (p === '/api/reference-dance-access') return json({ ok: true, allowed: o.allowed !== false, ...(o.allowed !== false ? { klingDance: { method: 'kling_v3_motion_control', creditsPerSecond: o.rate === undefined ? 19 : o.rate, minSeconds: 3, maxSeconds: 10 } } : {}) });
+    if (p === '/api/reference-dance-access') return json({ ok: true, allowed: o.allowed !== false, ...(o.allowed !== false ? { klingDance: { method: 'kling_v3_motion_control', creditsPerSecond: o.rate === undefined ? 19 : o.rate, minSeconds: 4, maxSeconds: 10 } } : {}) });
     if (p === '/api/credit-access') return json(caps);
     if (p === '/api/generated-videos') return json({ ok: true, rows: flow.completed ? [{ id: 'task-1', job_id: 'job-1', status: 'completed', prompt: 'dance', provider: 'wavespeed', model: 'bytedance/seedance-2.5', mode: 'reference_to_video', dance_method: 'kling_v3_motion_control', video_url: origin + '/out.mp4', duration_seconds: 8, aspect_ratio: '16:9', created_at: new Date().toISOString() }, { id: 'task-0', job_id: 'job-0', status: 'completed', prompt: 'older reference video', provider: 'wavespeed', model: 'bytedance/seedance-2.5', mode: 'reference_to_video', dance_method: '', video_url: origin + '/old.mp4', duration_seconds: 5, aspect_ratio: '9:16', created_at: new Date().toISOString() }] : [] });
     if (p === '/api/pending-tasks') return json({ ok: true, tasks: flow.task && !flow.completed && !flow.failed ? [flow.task] : [] });
@@ -126,6 +127,62 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(await f.page.locator('#mainCard').isVisible(), true);
         assert.deepEqual(f.pageErrors, []);
       } finally { await f.context.close(); }
+    });
+    await run(`[${width}] MOV (video/quicktime) goes to storage as video/quicktime; BETA badge on the tab; no 運営専用BETA text; nothing overflows`, async () => {
+      const f = await fixture(browser);
+      try {
+        const p = f.page;
+        await openDance(p);
+        await p.locator('#kdImageFile').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
+        await p.waitForFunction(() => window.flowvidDanceKling.state.image.status === 'completed');
+        await p.locator('#kdRights').check();
+        await p.locator('#kdVideoFile').setInputFiles({ name: 'RPReplay.MOV', mimeType: 'video/quicktime', buffer: Buffer.from('00') });
+        await p.waitForFunction(() => ['ready', 'failed'].includes(window.flowvidDanceKling.state.video.status));
+        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'ready');
+        const sent = (await p.evaluate(() => window.__uploadsFull)).filter(x => /[.]mov$/i.test(x.name || ''));
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].type, 'video/quicktime', 'the file keeps its real type');
+        assert.equal(sent[0].opt, 'video/quicktime');
+        // BETA badge: same orange as the H3 badge, inside the tab, inside the viewport
+        const badge = p.locator('#danceTab .tabBeta');
+        assert.equal((await badge.textContent()).trim(), 'BETA');
+        assert.equal(await badge.evaluate(e => getComputedStyle(e).color), 'rgb(245, 158, 11)');
+        const box = await p.locator('#danceTab').boundingBox();
+        assert.ok(box.x >= 0 && box.x + box.width <= width + 1, 'tab inside the viewport');
+        assert.equal(await p.locator('#kdSection').evaluate(e => e.textContent.includes('運営専用BETA')), false);
+        assert.equal(await noHScroll(p), true);
+        assert.deepEqual(f.pageErrors, []);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] upload/inspection failures are explained in visible text (not only the button title), with the 4-10 s rule`, async () => {
+      for (const o of [{ confirmFail: true }, { uploadError: 'mime type video/quicktime is not supported' }]) {
+        const f = await fixture(browser, o);
+        try {
+          const p = f.page;
+          await openDance(p);
+          await p.locator('#kdImageFile').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
+          await p.waitForFunction(() => window.flowvidDanceKling.state.image.status === 'completed');
+          await p.locator('#kdRights').check();
+          await p.locator('#kdVideoFile').setInputFiles({ name: 'rec.mov', mimeType: 'video/quicktime', buffer: Buffer.from('00') });
+          await p.waitForFunction(() => window.flowvidDanceKling.state.video.status === 'failed');
+          const reason = p.locator('#kdReason');
+          assert.equal(await reason.isVisible(), true, 'reason is visible body text');
+          const text = (await reason.textContent()).trim();
+          assert.match(text, /お手本動画を使えません/);
+          assert.match(text, /4〜10秒/);
+          assert.match(text, /50MB/);
+          if (o.uploadError) {
+            assert.doesNotMatch(text, /mime type/i, 'no raw English storage error');
+            assert.match(text, /MP4またはMOV/);
+          } else {
+            assert.match(text, /動画の長さが対応外です/);
+          }
+          assert.equal(await p.locator('#kdCreate').isDisabled(), true);
+          const r = await reason.boundingBox();
+          assert.ok(r && r.x >= 0 && r.x + r.width <= width + 1, 'reason inside the viewport');
+          assert.equal(await noHScroll(p), true);
+        } finally { await f.context.close(); }
+      }
     });
     await run(`[${width}] admin: tab visible independent of model select; no overflow; estimate parity display/sent`, async () => {
       const f = await fixture(browser);
@@ -263,7 +320,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser);
       try {
         const p = f.page;
-        assert.equal((await p.locator('#danceTab').textContent()).trim(), 'モーション');
+        assert.equal((await p.locator('#danceTab').textContent()).replace(/\s+/g, ' ').trim(), 'モーション BETA');
         await openDance(p);
         assert.equal(await p.locator('#kdSection').getAttribute('aria-label'), 'モーション');
         assert.equal((await p.locator('#kdHeading').textContent()).trim(), 'モーション');

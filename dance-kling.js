@@ -35,6 +35,7 @@
     if(!access.rate)return 'モーションは現在準備中です。料金確定後にご利用いただけます。';
     if(state.image.status!=='completed')return 'キャラクター画像を1枚追加してください';
     if(state.video.status==='ready'&&!inRange(state.video))return `お手本動画は${access.min}〜${access.max}秒のものを選んでください。自動では短くしません。`;
+    if(state.video.status==='failed')return `お手本動画を使えません: ${state.video.error||'確認に失敗しました'}（MP4／MOV・${access.min}〜${access.max}秒・最大50MB）`;
     if(state.video.status!=='ready')return 'お手本動画を追加してください';
     return '';
   }
@@ -64,6 +65,8 @@
     $('kdCost').textContent=cost?`消費クレジット: ${cost} cr（${access.rate}cr × ${state.video.billableSeconds}秒）`:(access.allowed&&access.rate?`お手本動画を入れると消費クレジットが表示されます（${access.rate}cr/秒）`:'');
     btn.disabled=!!reason||busy();
     btn.title=reason;
+    // 理由はボタンのtitle(スマホでは見えない)だけにせず、本文にも出す。
+    const why=$('kdReason');if(why){const show=!!reason&&!busy()&&access.allowed&&(img.status!=='idle'||vid.status!=='idle');why.textContent=show?reason:'';why.style.display=show?'block':'none'}
     return cost;
   }
 
@@ -125,27 +128,36 @@
       render();return true;
     }catch(e){v.status='failed';v.retryable=!!(e&&e.retryable);v.error=e&&e.message||'お手本動画を利用できません';render();return false}
   }
+  // 保存先の生のエラー文(英語)をそのまま見せない。理由と、次に何をすればよいかを本文で伝える。
+  function uploadErrorMessage(e){
+    const raw=String(e&&e.message||'');
+    if(/mime type/i.test(raw))return 'この動画はアップロードできませんでした。MP4またはMOV形式の動画で、もう一度お試しください。';
+    if(/exceeded the maximum allowed size|payload too large|too large/i.test(raw))return 'お手本動画は50MB以下にしてください。';
+    return raw||'お手本動画を利用できません';
+  }
   async function uploadVideo(file){
     if(!file||busy()||!$('kdRights').checked)return;
-    const type=String(file.type||'').toLowerCase();
     const bad=msg=>{const prevId=state.video.id;if(prevId)deleteAsset(prevId);state.video={status:'failed',id:'',name:file.name||'お手本動画',billableSeconds:0,durationMs:0,error:msg,retryable:false};render()};
-    if(!['video/mp4','video/quicktime'].includes(type)&&!/[.](mp4|mov)$/.test(String(file.name||'').toLowerCase()))return bad('MP4またはMOV形式の動画を選択してください');
+    // 送るファイルの種類は実際の種類のまま(MOVはvideo/quicktime)。MP4と偽らない。
+    const helper=window.flowvidReferenceVideoUpload;
+    const prepared=helper?helper.prepare(file):null;
+    if(!prepared)return bad('MP4またはMOV形式の動画を選択してください');
     if(file.size<=0||file.size>50*1024*1024)return bad('お手本動画は50MB以下にしてください');
     const previousId=state.video.id;
     state.video={status:'uploading',id:'',name:file.name||'お手本動画',billableSeconds:0,durationMs:0,error:'',retryable:false};render();
     if(previousId)deleteAsset(previousId);
     try{
       const t=await token();if(!t){location.href='./login.html';return}
-      const ur=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({filename:file.name,contentType:type||'video/mp4',byteSize:file.size,rightsConfirmed:true})});
+      const ur=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({filename:file.name,contentType:prepared.contentType,byteSize:file.size,rightsConfirmed:true})});
       const ud=await ur.json().catch(()=>({}));
       if(!ur.ok||!ud.ok||!ud.assetId||!ud.path||!ud.token)throw new Error(ud.message||ud.error||'お手本動画のアップロードを開始できませんでした');
       state.video.id=ud.assetId;
       const client=window.flowvidSupabaseClient?window.flowvidSupabaseClient():null;if(!client)throw new Error('Supabase接続情報が未設定です');
-      const up=await client.storage.from(ud.bucket).uploadToSignedUrl(ud.path,ud.token,file,{contentType:'video/mp4'});
+      const up=await client.storage.from(ud.bucket).uploadToSignedUrl(ud.path,ud.token,prepared.body,{contentType:prepared.contentType});
       if(up.error)throw up.error;
       await confirmVideo();
       
-    }catch(e){const failed=state.video.id;state.video.status='failed';state.video.retryable=false;state.video.error=e&&e.message||'お手本動画を利用できません';if(failed)deleteAsset(failed);render()}
+    }catch(e){const failed=state.video.id;state.video.status='failed';state.video.retryable=false;state.video.error=uploadErrorMessage(e);if(failed)deleteAsset(failed);render()}
   }
   function removeVideo(){if(busy())return;const id=state.video.id;state.video={status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false};$('kdVideoFile').value='';$('kdRights').checked=false;render();deleteAsset(id)}
   function removeImage(){if(busy())return;state.image={status:'idle',url:'',name:'',error:'',previewUrl:''};$('kdImageFile').value='';render()}

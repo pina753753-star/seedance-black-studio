@@ -89,7 +89,9 @@ function browser() {
     confirmReferenceDanceAsset: async () => { confirmations.push(ASSET); return true; },
     deleteReferenceDanceAsset() { throw new Error('Unexpected deletion'); }
   };
+  ctx.File = File; ctx.Blob = Blob;
   vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, 'reference-video-upload.js'), 'utf8'), ctx);
   vm.runInContext(html.slice(html.indexOf('async function uploadReferenceDance(file){'), html.indexOf('function removeReferenceDance(){')), ctx);
   return { ctx, requests, uploaded, confirmations };
 }
@@ -98,8 +100,12 @@ test('browser accepts MOV metadata, uploads original bytes and requires inspecti
     const b = browser(); const file = { name: input.filename, type: input.contentType, size: 1024 };
     await b.ctx.uploadReferenceDance(file);
     assert.equal(b.requests.length, 1); assert.equal(b.confirmations.length, 1);
-    assert.equal(b.uploaded[0][2], file);
-    assert.equal(b.uploaded[0][3].contentType, 'video/mp4');
+    // The type on the wire is the file's real one: MOV is video/quicktime, never relabelled as MP4.
+    const wire = /[.]mov$/i.test(input.filename) || input.contentType === 'video/quicktime' ? 'video/quicktime' : 'video/mp4';
+    assert.equal(b.uploaded[0][2].type || file.type, wire);
+    if (file.type === wire) assert.equal(b.uploaded[0][2], file, 'the original File goes through untouched');
+    assert.equal(b.uploaded[0][3].contentType, wire);
+    assert.equal(b.requests[0].body.contentType, wire);
     assert.equal(b.ctx.referenceDanceAsset.status, 'uploading');
     assert.equal(b.requests[0].body.rightsConfirmed, true);
   }
