@@ -8,7 +8,7 @@ const {
   validateOwnedPath,
   approvedPath,
   reviewFramePath,
-  authorizeReferenceDanceAdmin
+  authorizeReferenceMotion
 } = require('./_lib/reference-dance.js');
 
 function ownedObjectPaths(row, userId) {
@@ -31,8 +31,8 @@ module.exports = async function handler(req, res) {
   const auth = await requireConfirmedAuth(req);
   if (!auth.ok) return res.status(auth.status).json(auth.body);
   try {
-    const access = await authorizeReferenceDanceAdmin(auth);
-    if (!access.ok) return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden' });
+    const access = await authorizeReferenceMotion(auth, { existingOnly: true });
+    if (!access.ok) return res.status(403).json({ ok: false, error: 'reference_motion_access_required' });
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const assetId = String(body.assetId || '').trim();
     if (!isUuid(assetId)) return res.status(400).json({ ok: false, error: 'invalid_reference_video_id' });
