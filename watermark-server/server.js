@@ -1068,12 +1068,12 @@ async function runReferenceDanceInspection({ userId, assetId, stagingPath, stora
 }
 
 // Motion (Kling) profile. Differences from the Seedance inspection above:
-//  - the source may be up to 30 s; at most the first 20 s are ever used;
+//  - the source may be up to 60 s; at most the first 30 s are ever used;
 //  - the output is always transcoded to constant 30 fps with an exact frame count, so the sealed
 //    file's measured duration is the planned one (no keyframe-dependent overshoot) and the billed
 //    second count (ceil of that measured duration) can never silently exceed what was chosen;
 //  - with useSeconds the first useSeconds seconds are cut; without it the whole source is used
-//    (the first 20 s if longer). Nothing is extended, looped or padded;
+//    (the first 30 s if longer). Nothing is extended, looped or padded;
 //  - the original staging object is retained until its existing TTL; processed cuts use a separate
 //    approved path and are inspected again on every length change.
 async function runMotionReferenceInspection({ userId, assetId, stagingPath, storageCapabilities, useSeconds = null }) {
@@ -1165,7 +1165,7 @@ async function runMotionReferenceInspection({ userId, assetId, stagingPath, stor
         useSeconds: plan.useSeconds,
         capped: plan.capped,
         sourceDurationMs: inputMetadata.durationMs,
-        masterDurationMs: Math.min(inputMetadata.durationMs, 20000)
+        masterDurationMs: Math.min(inputMetadata.durationMs, 30000)
       }
     };
   } catch (error) {

@@ -43,7 +43,7 @@ async function fixture(browser, o = {}) {
     const json = (d, s = 200) => route.fulfill({ status: s, contentType: 'application/json', body: JSON.stringify(d) });
     const p = url.pathname;
     if (p === '/auth-config.js') return route.fulfill({ contentType: 'application/javascript', body: syntheticAuth });
-    if (p === '/api/reference-dance-access') return json({ ok: true, allowed: o.allowed !== false, ...(o.allowed !== false ? { klingDance: { method: 'kling_v3_motion_control', creditsPerSecond: o.rate === undefined ? 19 : o.rate, minSeconds: 4, ...(o.lengthSelect ? { maxSeconds: 20, imageOrientationMaxSeconds: 10, sourceMaxSeconds: 30, lengthSelectEnabled: true } : { maxSeconds: 10 }) } } : {}) });
+    if (p === '/api/reference-dance-access') return json({ ok: true, allowed: o.allowed !== false, ...(o.allowed !== false ? { klingDance: { method: 'kling_v3_motion_control', creditsPerSecond: o.rate === undefined ? 19 : o.rate, minSeconds: 4, ...(o.lengthSelect ? { maxSeconds: 30, imageOrientationMaxSeconds: 10, sourceMaxSeconds: 60, lengthSelectEnabled: true } : { maxSeconds: 10 }) } } : {}) });
     if (p === '/api/credit-access') return json(caps);
     if (p === '/api/generated-videos') return json({ ok: true, rows: flow.completed ? [{ id: 'task-1', job_id: 'job-1', status: 'completed', prompt: 'dance', provider: 'wavespeed', model: 'bytedance/seedance-2.5', mode: 'reference_to_video', dance_method: 'kling_v3_motion_control', video_url: origin + '/out.mp4', duration_seconds: 8, aspect_ratio: '16:9', created_at: new Date().toISOString() }, { id: 'task-0', job_id: 'job-0', status: 'completed', prompt: 'older reference video', provider: 'wavespeed', model: 'bytedance/seedance-2.5', mode: 'reference_to_video', dance_method: '', video_url: origin + '/old.mp4', duration_seconds: 5, aspect_ratio: '9:16', created_at: new Date().toISOString() }] : [] });
     if (p === '/api/pending-tasks') return json({ ok: true, tasks: flow.task && !flow.completed && !flow.failed ? [flow.task] : [] });
@@ -71,7 +71,7 @@ async function fixture(browser, o = {}) {
       if (step === 'done') { flow.completed = true; return json({ ok: true, status: 200, jobStatus: 'completed', done: true, videoUrl: origin + '/out.mp4' }); }
       return json({ ok: true, status: 200, jobStatus: 'processing', done: false });
     }
-    if (p === '/api/reference-dance-latest') return json({ok:true,asset:o.restored?{id:'stored',status:'ready',name:'stored.mp4',durationMs:20000,billableSeconds:20}:null});
+    if (p === '/api/reference-dance-latest') return json({ok:true,asset:o.restored?{id:'stored',status:'ready',name:'stored.mp4',durationMs:30000,billableSeconds:30}:null});
     if (p === '/api/reference-image-upload-url') { calls.imageUploads++; return json({ ok: true, signedUrl: 'x', token: 't', path: 'q/img.png', bucket: 'reference-image-quarantine' }); }
     if (p === '/api/reference-image-confirm-upload') return json({ ok: true, publicUrl: origin + '/identity.png' });
     if (p === '/api/reference-dance-upload-url') { calls.videoUploads++; return json({ ok: true, assetId: 'asset-' + calls.videoUploads, path: 'v.mp4', token: 't', bucket: 'seedance-reference-video' }); }
@@ -80,7 +80,7 @@ async function fixture(browser, o = {}) {
       if (o.confirmFail) return json({ ok: false, error: 'VIDEO_DURATION_INVALID', message: '動画の長さが対応外です' }, 400);
       if (o.lengthSelect) {
         // Server model: the sealed master is min(original, 20 s); a length choice cuts exactly N seconds from it.
-        const source = o.sourceMs || 16000, master = Math.min(source, 20000);
+        const source = o.sourceMs || 16000, master = Math.min(source, 30000);
         if (body.profile !== 'motion') return json({ ok: false, error: 'profile_missing' }, 400);
         const recut = Object.prototype.hasOwnProperty.call(body, 'useSeconds');
         if (recut && o.recutDelay) await new Promise(r => setTimeout(r, typeof o.recutDelay === 'function' ? o.recutDelay(body.useSeconds) : o.recutDelay));
@@ -89,7 +89,7 @@ async function fixture(browser, o = {}) {
         const ms = recut && body.useSeconds !== null ? body.useSeconds * 1000 : master;
         calls.lengthState = { ms, useSeconds: recut ? body.useSeconds : null };
         return json({ ok: true, status: 'ready', durationMs: ms, billableSeconds: Math.max(4, Math.ceil(ms / 1000)),
-          motion: { mode: recut && body.useSeconds !== null ? 'cut' : 'whole', useSeconds: recut ? body.useSeconds : null, capped: source > 20000, sourceDurationMs: source, masterDurationMs: master } });
+          motion: { mode: recut && body.useSeconds !== null ? 'cut' : 'whole', useSeconds: recut ? body.useSeconds : null, capped: source > 30000, sourceDurationMs: source, masterDurationMs: master } });
       }
       const sec = o.seconds || 8;
       return json({ ok: true, status: 'ready', durationMs: o.durationMs || sec * 1000 - 200, billableSeconds: sec });
@@ -130,7 +130,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
 (async()=>{
 const browser=await chromium.launch({executablePath:chromePath,headless:true,args:['--no-sandbox','--host-resolver-rules=MAP * ~NOTFOUND']});
 try{
-for(const [ms,cr] of [[11507,228],[16000,304],[16200,323],[17000,323],[20000,380]])await run(`purchase-only ${ms}ms => ${cr}cr, no generation click`,async()=>{
+for(const [ms,cr] of [[11507,228],[16000,304],[16200,323],[17000,323],[20000,380],[30000,570]])await run(`purchase-only ${ms}ms => ${cr}cr, no generation click`,async()=>{
  const f=await fixture(browser,{lengthSelect:true,sourceMs:ms});try{const p=f.page;await openDance(p);
  await p.locator('#kdRights').check();await p.locator('#kdVideoFile').setInputFiles({name:'dance.mp4',mimeType:'video/mp4',buffer:Buffer.from('00')});await p.waitForFunction(()=>window.flowvidDanceKling.state.video.status==='ready');
  assert.equal(await p.locator('#kdCreate').isDisabled(),true);assert.match(await p.locator('#kdReason').textContent(),/キャラクター画像/);
@@ -138,12 +138,12 @@ for(const [ms,cr] of [[11507,228],[16000,304],[16200,323],[17000,323],[20000,380
  assert.equal(await p.locator('#kdCreate').isDisabled(),false);assert.match(await p.locator('#kdCreate').textContent(),new RegExp(String(cr)));assert.equal(await p.locator('#kdOrientationNote').isVisible(),true);assert.equal(f.calls.starts.length,0);assert.deepEqual(f.pageErrors,[]);
  }finally{await f.context.close()}
 });
-await run('source over 20 seconds automatically uses 20; shorter selection and auto restore',async()=>{
- const f=await fixture(browser,{lengthSelect:true,sourceMs:25300});try{await openDance(f.page);await fill(f.page);assert.equal(await f.page.locator('#kdCreate').isDisabled(),false);assert.equal(await f.page.locator('#kdLength').inputValue(),'whole');assert.match(await f.page.locator('#kdSourceInfo').textContent(),/自動で先頭20秒/);assert.equal(f.calls.confirms.length,1);await f.page.locator('#kdLength').selectOption('8');await f.page.waitForFunction(()=>window.flowvidDanceKling.state.video.durationMs===8000);assert.match(await f.page.locator('#kdCreate').textContent(),/152/);await f.page.locator('#kdLength').selectOption('whole');await f.page.waitForFunction(()=>window.flowvidDanceKling.state.video.durationMs===20000);await f.page.waitForFunction(()=>window.flowvidDanceKling.state.video.chosen);assert.equal(await f.page.locator('#kdCreate').isDisabled(),false);assert.match(await f.page.locator('#kdCreate').textContent(),/380/);assert.equal(f.calls.starts.length,0)}finally{await f.context.close()}
+await run('source over 30 seconds automatically uses 30; shorter selection and auto restore',async()=>{
+ const f=await fixture(browser,{lengthSelect:true,sourceMs:45300});try{await openDance(f.page);await fill(f.page);assert.equal(await f.page.locator('#kdCreate').isDisabled(),false);assert.equal(await f.page.locator('#kdLength').inputValue(),'whole');assert.match(await f.page.locator('#kdSourceInfo').textContent(),/自動の場合は先頭30秒/);assert.match(await f.page.locator('#kdUseSummary').textContent(),/先頭から実測30秒を使用.*570cr/);assert.match(await f.page.locator('#kdFramingHint').textContent(),/全身どうし・半身どうし/);assert.match(await f.page.locator('#kdDurationHint').textContent(),/短くなることがあります/);assert.equal(f.calls.confirms.length,1);await f.page.locator('#kdLength').selectOption('8');await f.page.waitForFunction(()=>window.flowvidDanceKling.state.video.durationMs===8000);assert.match(await f.page.locator('#kdCreate').textContent(),/152/);await f.page.locator('#kdLength').selectOption('whole');await f.page.waitForFunction(()=>window.flowvidDanceKling.state.video.durationMs===30000);await f.page.waitForFunction(()=>window.flowvidDanceKling.state.video.chosen);assert.equal(await f.page.locator('#kdCreate').isDisabled(),false);assert.match(await f.page.locator('#kdCreate').textContent(),/570/);assert.equal(f.calls.starts.length,0)}finally{await f.context.close()}
 });
-await run('reload restores owned sealed 20-second clip; no reinspection, image required, no extra length acknowledgement',async()=>{
+await run('reload restores owned sealed 30-second clip; no reinspection, image required, no extra length acknowledgement',async()=>{
  const f=await fixture(browser,{lengthSelect:true,restored:true});try{const p=f.page;await openDance(p);await p.waitForFunction(()=>window.flowvidDanceKling.state.video.id==='stored');assert.equal(await p.locator('#kdCreate').isDisabled(),true);assert.match(await p.locator('#kdReason').textContent(),/キャラクター画像/);
- await p.locator('#kdImageFile').setInputFiles({name:'me.png',mimeType:'image/png',buffer:PNG});await p.waitForFunction(()=>window.flowvidDanceKling.state.image.status==='completed');assert.equal(await p.locator('#kdCreate').isDisabled(),false);assert.match(await p.locator('#kdCreate').textContent(),/380/);assert.equal(f.calls.confirms.length,0);assert.equal(f.calls.deletes.length,0);assert.equal(f.calls.starts.length,0);
+ await p.locator('#kdImageFile').setInputFiles({name:'me.png',mimeType:'image/png',buffer:PNG});await p.waitForFunction(()=>window.flowvidDanceKling.state.image.status==='completed');assert.equal(await p.locator('#kdCreate').isDisabled(),false);assert.match(await p.locator('#kdCreate').textContent(),/570/);assert.equal(f.calls.confirms.length,0);assert.equal(f.calls.deletes.length,0);assert.equal(f.calls.starts.length,0);
  await p.reload({waitUntil:'networkidle'});await openDance(p);await p.waitForFunction(()=>window.flowvidDanceKling.state.video.id==='stored');assert.equal(await p.locator('#kdCreate').isDisabled(),true);assert.equal(f.calls.confirms.length,0);assert.equal(await noHScroll(p),true);assert.deepEqual(f.pageErrors,[]);
  }finally{await f.context.close()}
 });

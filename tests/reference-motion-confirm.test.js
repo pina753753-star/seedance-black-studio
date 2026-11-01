@@ -22,8 +22,8 @@ function inspected(overrides = {}, motion = {}) {
   };
 }
 
-function setup({ row = {}, upstream = inspected(), upstreamStatus = 200, flagged = false, claimRows = 1, enabled = true, master = 'yes' } = {}) {
-  klingDance.config.maxUseSeconds = enabled ? 20 : 10;
+function setup({ row = {}, upstream = inspected(), upstreamStatus = 200, flagged = false, claimRows = 1, enabled = true, master = 'yes', maxUse = 20 } = {}) {
+  klingDance.config.maxUseSeconds = enabled ? maxUse : 10;
   const table = {
     id: ASSET, user_id: USER, status: 'uploading', staging_path: lib.stagingPath(USER, ASSET),
     used_at: null, expires_at: new Date(Date.now() + 3600e3).toISOString(), updated_at: new Date(Date.now() - 60e3).toISOString(),
@@ -298,7 +298,7 @@ test('access endpoint: shipped default reports the 10 s gate; the length choice 
   const open = await access();
   assert.equal(open.maxSeconds, 20);
   assert.equal(open.lengthSelectEnabled, true);
-  assert.equal(open.sourceMaxSeconds, 30);
+  assert.equal(open.sourceMaxSeconds, 60);
 });
 
 test('a failed length change never deletes the asset it started from, even for a permanent-looking inspection code', async () => {
@@ -440,3 +440,5 @@ test('a ready asset WITHOUT the motion marker is refused untouched even if an ob
   assert.equal(h.updates.length, 0);
   assert.equal(h.workerRequests.length, 0);
 });
+
+test('30 second confirm accepts measured30 and refuses over30 with no ready write',async()=>{for(const ms of [30000,30001]){const h=setup({maxUse:30,upstream:inspected({durationMs:ms},{sourceDurationMs:45000,masterDurationMs:30000})});const r=await h.call({assetId:ASSET,profile:'motion'});if(ms===30000){assert.equal(r.code,200);assert.equal(r.body.billableSeconds,30);assert.equal(r.body.durationMs,30000);}else{assert.notEqual(r.code,200);assert.equal(h.updates.some(u=>u.status==='ready'),false);}}});

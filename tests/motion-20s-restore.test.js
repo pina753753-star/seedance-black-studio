@@ -7,10 +7,10 @@ async function read(profile,rows){
  const m={exports:{}};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../api/reference-dance-latest.js'),'utf8'),{module:m,Date,console,require(n){if(n.includes('confirmed-auth'))return {requireConfirmedAuth:async()=>({ok:true,user:{id:'owner'},supabase:{from:()=>query}})};if(n.includes('reference-dance'))return lib;throw Error(n)}});
  const res={setHeader(){},status(n){this.code=n;return this},json(b){this.body=b;return this}};await m.exports({method:'GET',query:profile===undefined?{}:{profile}},res);return res;
 }
-const row=(x={})=>({id:'stored',user_id:'owner',status:'ready',last_task_id:null,duration_ms:20000,billable_seconds:20,inspection_error:'MOTION_MASTER',expires_at:'2999-01-01T00:00:00Z',...x});
-test('20s motion asset restores only in motion profile, with existing ownership and expiry gates',async()=>{
- const a=await read('motion',[row()]);assert.equal(a.code,200);assert.equal(a.body.asset.durationMs,20000);assert.equal(a.body.asset.billableSeconds,20);
+const row=(x={})=>({id:'stored',user_id:'owner',status:'ready',last_task_id:null,duration_ms:30000,billable_seconds:30,inspection_error:'MOTION_MASTER',expires_at:'2999-01-01T00:00:00Z',...x});
+test('30s motion asset restores only in motion profile, with existing ownership and expiry gates',async()=>{
+ const a=await read('motion',[row()]);assert.equal(a.code,200);assert.equal(a.body.asset.durationMs,30000);assert.equal(a.body.asset.billableSeconds,30);
  assert.equal((await read(undefined,[row()])).body.asset,null);
- for(const change of [{user_id:'other'},{expires_at:'2000-01-01T00:00:00Z'},{duration_ms:20001},{inspection_error:null},{status:'blocked'},{last_task_id:'used'}])assert.equal((await read('motion',[row(change)])).body.asset,null,JSON.stringify(change));
+ for(const change of [{user_id:'other'},{expires_at:'2000-01-01T00:00:00Z'},{duration_ms:30001},{inspection_error:null},{status:'blocked'},{last_task_id:'used'}])assert.equal((await read('motion',[row(change)])).body.asset,null,JSON.stringify(change));
  assert.equal((await read('unknown',[row()])).code,400);
 });

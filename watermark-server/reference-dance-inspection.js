@@ -3,11 +3,11 @@
 const MIN_SECONDS = 4;
 const MAX_SECONDS = 15;
 const MAX_TRIMMABLE_INPUT_SECONDS = 60;
-// Motion (Kling) profile: the source may be up to 30 s (well inside the existing 60 s
-// trimmable-input precedent), but at most the first 20 s are ever transcoded or used.
+// Motion (Kling) profile: the source may be up to 60 s (well inside the existing 60 s
+// trimmable-input precedent), but at most the first 30 s are ever transcoded or used.
 const MOTION_MIN_USE_SECONDS = 4;
-const MOTION_MAX_USE_SECONDS = 20;
-const MOTION_MAX_SOURCE_SECONDS = 30;
+const MOTION_MAX_USE_SECONDS = 30;
+const MOTION_MAX_SOURCE_SECONDS = 60;
 const MOTION_FPS = 30;
 
 function inspectionError(code) {
@@ -149,8 +149,8 @@ function videoStreamSeconds(probe, fallbackSeconds) {
 
 // Plans the exact frame count of the motion output. Frames are counted at a constant
 // 30 fps so the sealed file's duration is frames / 30 and never exceeds the plan:
-//  - useSeconds (integer 4..20, at most the measured source): exactly useSeconds * 30 frames;
-//  - otherwise the whole source, floored to a whole frame, capped at the first 20 s.
+//  - useSeconds (integer 4..30, at most the measured source): exactly useSeconds * 30 frames;
+//  - otherwise the whole source, floored to a whole frame, capped at the first 30 s.
 // Nothing is extended, looped or padded.
 function planMotionOutput({ sourceDurationSeconds, useSeconds = null } = {}) {
   const source = Number(sourceDurationSeconds);

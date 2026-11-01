@@ -192,7 +192,7 @@ Preserve normal anatomy, stable hands and feet, continuous movement, and the req
 // and never falls back to another method.
 const KLING_DANCE_METHOD = 'kling_v3_motion_control';
 const KLING_DANCE_PROVIDER_MODEL = 'kwaivgi/kling-v3.0-pro/motion-control';
-// WaveSpeed bills a 3 s minimum, but PinaStudio accepts 4-20 s: the existing
+// WaveSpeed bills a 3 s minimum, but PinaStudio accepts 4-30 s: the existing
 // inspector already rejects anything under 4 s, and that rule is kept as-is.
 const KLING_DANCE_MIN_SECONDS = 4;
 // KLING_DANCE_MAX_SECONDS is the longest clip the proven `character_orientation:"image"` setting
@@ -200,13 +200,13 @@ const KLING_DANCE_MIN_SECONDS = 4;
 // the server from the measured length, shown to the user, never silently). Which maximum is
 // accepted duration is config.maxUseSeconds; this release requires the DB and inspector updates.
 const KLING_DANCE_MAX_SECONDS = 10;
-const KLING_DANCE_SELECTABLE_MAX_SECONDS = 20;
-const KLING_DANCE_SOURCE_MAX_SECONDS = 30;
+const KLING_DANCE_SELECTABLE_MAX_SECONDS = 30;
+const KLING_DANCE_SOURCE_MAX_SECONDS = 60;
 // Two different limits, never to be confused:
-//  - config.maxUseSeconds is the FEATURE GATE: how long a motion generation may be right now (10 or 20).
-//    Closing it (back to 10) stops NEW 11-20 s acceptance only.
+//  - config.maxUseSeconds is the FEATURE GATE: how long a motion generation may be right now (10 or 30).
+//    Closing it (back to 10) stops NEW 11-30 s acceptance only.
 //  - KLING_DANCE_STORED_MAX_MS is the longest asset the stored-data validation will still read (the DB
-//    constraint's 20 s). Assets of 16-20 s that already exist stay readable, restorable and deletable by
+//    constraint's 30 s). Assets of 16-30 s that already exist stay readable, restorable and deletable by
 //    the normal expiry whatever the gate says; the gate alone decides whether they may start a generation.
 const KLING_DANCE_STORED_MAX_MS = KLING_DANCE_SELECTABLE_MAX_SECONDS * 1000;
 const KLING_DANCE_IMAGE_ORIENTATION = 'image';
@@ -223,7 +223,7 @@ const KLING_DANCE_PROVIDER_PROMPT = 'Keep the character from the input image as 
 // ever null/invalid, the server refuses to start (kling_dance_price_undecided)
 // and the access endpoint reports no rate, so the UI disables sending.
 // Tests override it via config.
-// 20-second release candidate. Deploy only after the DB constraint and motion inspector.
+// 30-second local candidate. Deploy only after the DB constraint and motion inspector.
 // Setting 10 is an emergency acceptance rollback, not this release default.
 const config = { creditsPerSecond: 19, maxUseSeconds: KLING_DANCE_SELECTABLE_MAX_SECONDS };
 

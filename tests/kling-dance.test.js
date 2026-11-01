@@ -287,7 +287,7 @@ test('regression: normal generation is untouched and kling module never loads a 
   assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, 95);
 });
 
-test('kling-dance module: owner price 19 cr/s, 4-20 s range, strict helpers', () => {
+test('kling-dance module: owner price 19 cr/s, 4-30 s range, strict helpers', () => {
   const k = require('../api/_lib/reference-dance.js').klingDance;
   assert.equal(k.config.creditsPerSecond, 19);
   assert.equal(k.getKlingDanceCreditsPerSecond(), 19);
@@ -296,7 +296,7 @@ test('kling-dance module: owner price 19 cr/s, 4-20 s range, strict helpers', ()
   assert.equal(k.klingDanceCredits(4), 76);
   assert.throws(() => k.klingDanceCredits(5, null), /kling_dance_price_undecided/);
   assert.throws(() => k.validateKlingDanceSeconds(3), /kling_dance_duration_unsupported/);
-  assert.throws(() => k.validateKlingDanceSeconds(21), /kling_dance_duration_unsupported/);
+  assert.throws(() => k.validateKlingDanceSeconds(31), /kling_dance_duration_unsupported/);
   assert.equal(k.validateKlingDanceSeconds(4), 4);
   assert.equal(k.KLING_DANCE_MIN_SECONDS, 4);
   assert.equal(k.KLING_DANCE_MAX_SECONDS, 10);
@@ -504,7 +504,7 @@ test('length choice on: admin-BETA, rights, single image and moderation gates ar
 });
 
 test('length choice on: a 16-20 s asset can never be used by the Seedance dance (no dance_method), whatever the config', async () => {
-  for (const maxUse of [10, 20]) {
+  for (const maxUse of [10, 20, 30]) {
     for (const ms of [16000, 20000]) {
       const r = await runStart({ maxUse, row: motionRow(ms), omit: ['dance_method'], bodyOverrides: { estimated_credits: 605, reference_url: 'https://example.test/identity.png', input_references: undefined } });
       assert.equal(r.res.code, 400, `${maxUse}/${ms}`);
@@ -527,14 +527,14 @@ test('klingDance helpers: orientation by measured length, gate values, payload o
   const k = require('../api/_lib/reference-dance.js').klingDance;
   assert.equal(k.klingDanceOrientation(10000), 'image');
   assert.equal(k.klingDanceOrientation(10001), 'video');
-  assert.equal(k.getKlingDanceMaxSeconds(), 20);
+  assert.equal(k.getKlingDanceMaxSeconds(), 30);
   assert.equal(k.isKlingDanceLengthSelectEnabled(), true);
   assert.throws(() => k.buildKlingDancePayload({ prompt: 'p', imageUrl: 'i', videoUrl: 'v', orientation: 'free' }), /invalid_kling_orientation/);
   assert.equal(k.buildKlingDancePayload({ prompt: 'p', imageUrl: 'i', videoUrl: 'v', orientation: 'video' }).character_orientation, 'video');
 });
 
 test('a length change that lands after the row was read cannot be billed: the bind requires the exact file that was priced', async () => {
-  for (const maxUse of [10, 20]) {
+  for (const maxUse of [10, 20, 30]) {
     const r = await runStart({ maxUse, swapAfterRetention: true, row: motionRow(10000), bodyOverrides: motionBody(10000) });
     assert.equal(r.res.code, 503, String(maxUse));
     assert.equal(r.res.body.error, 'reference_video_bind_failed');
@@ -562,10 +562,13 @@ test('gate closed with an existing 16-20 s asset: a new motion generation is ref
 
 test('the feature gate and the stored-data bound are separate constants: gate 10/20, stored data always up to 20 s', () => {
   const k = require('../api/_lib/reference-dance.js').klingDance;
-  assert.equal(k.KLING_DANCE_STORED_MAX_MS, 20000);
-  assert.equal(k.config.maxUseSeconds, 20, '20 s candidate: DB and worker must deploy before this API');
+  assert.equal(k.KLING_DANCE_STORED_MAX_MS, 30000);
+  assert.equal(k.config.maxUseSeconds, 30, '30 s candidate: DB and worker must deploy before this API');
   const lib = require('../api/_lib/reference-dance.js');
   const row = { id: '270bf01a-bafd-4255-8ad5-e18a4f1c8c47', user_id: USER, status: 'ready', approved_path: `approved/${USER}/270bf01a-bafd-4255-8ad5-e18a4f1c8c47.mp4`, size_bytes: 1024, duration_ms: 17500, billable_seconds: 18, width: 1280, height: 720, video_codec: 'h264', sha256: 'a'.repeat(64), rights_confirmed_at: new Date().toISOString(), expires_at: new Date(Date.now() + 3600e3).toISOString() };
   assert.throws(() => lib.validateReadyReferenceDance(row, USER), /invalid_reference_video_duration/, 'Seedance bound stays 15 s');
   assert.equal(lib.validateReadyReferenceDance(row, USER, { maxDurationMs: k.KLING_DANCE_STORED_MAX_MS }).billableSeconds, 18, 'stored data is readable whatever the gate');
 });
+
+for(const ms of [20001,25000,29901,30000])test(`30s candidate start ${ms}: server measurement and ceil19 agree`,async()=>{const r=await runStart({maxUse:30,row:motionRow(ms),bodyOverrides:motionBody(ms)});assert.equal(r.res.code,202,JSON.stringify(r.res.body));assert.equal(r.res.body.creditCost,Math.ceil(ms/1000)*19);assert.equal(r.providerCalls[0].payload.character_orientation,'video');});
+test('30s candidate refuses over30 and stale estimate before charge',async()=>{for(const [ms,extra] of [[30001,{}],[30000,{estimated_credits:380}],[30000,{use_billable_seconds:20}]]){const r=await runStart({maxUse:30,row:motionRow(ms),bodyOverrides:motionBody(ms,extra)});assert.notEqual(r.res.code,202);assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);}});

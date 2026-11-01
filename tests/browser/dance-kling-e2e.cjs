@@ -552,13 +552,13 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(f.calls.confirms[0].profile, 'motion');
         assert.equal('useSeconds' in f.calls.confirms[0], false, 'first inspection uses the whole video');
         assert.equal(await p.locator('#kdLength').inputValue(), 'whole');
-        assert.match(await summary(p), /お手本全体 16秒を使用・16秒分・304cr/);
+        assert.match(await summary(p), /先頭から実測16秒を使用・16秒分・見積もり304cr/);
         assert.match(await p.locator('#kdCreate').textContent(), /304$/);
         assert.equal(await p.locator('#kdOrientationNote').isVisible(), true);
         assert.match(await p.locator('#kdOrientationNote').textContent(), /10秒を超える動画は、お手本動画の人物の向きを基準に生成します/);
         await p.locator('#kdLength').selectOption('15');
-        await p.waitForFunction(() => /先頭15秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭15秒を使用・15秒分・285cr/);
+        await p.waitForFunction(() => /先頭から実測15秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭から実測15秒を使用・15秒分・見積もり285cr/);
         assert.match(await p.locator('#kdCreate').textContent(), /285$/);
         assert.deepEqual(f.calls.confirms.at(-1), { assetId: 'asset-1', allowBoundaryTrim: false, profile: 'motion', useSeconds: 15 });
         await p.locator('#kdCreate').click();
@@ -576,7 +576,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       try {
         const p = f.page; await openDance(p); await fill(p);
         await p.locator('#kdLength').selectOption('10');
-        await p.waitForFunction(() => /先頭10秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        await p.waitForFunction(() => /先頭から実測10秒を使用/.test(document.getElementById('kdUseSummary').textContent));
         assert.equal(await p.locator('#kdOrientationNote').isVisible(), false);
         assert.match(await summary(p), /190cr/);
         await p.locator('#kdCreate').click();
@@ -589,11 +589,11 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { lengthSelect: true, sourceMs: 16200 });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        assert.match(await summary(p), /お手本全体 16\.2秒（課金は端数を切り上げて17秒分）を使用・17秒分・323cr/);
+        assert.match(await summary(p), /先頭から実測16\.2秒を使用・17秒分・見積もり323cr/);
         assert.match(await p.locator('#kdLength option[value="whole"]').textContent(), /お手本全体（16\.2秒）/);
         await p.locator('#kdLength').selectOption('16');
-        await p.waitForFunction(() => /先頭16秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭16秒を使用・16秒分・304cr/);
+        await p.waitForFunction(() => /先頭から実測16秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭から実測16秒を使用・16秒分・見積もり304cr/);
         assert.equal(await p.locator('#kdLength option[value="17"]').count(), 0, 'no choice longer than the original');
       } finally { await f.context.close(); }
     });
@@ -603,11 +603,11 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         const p = f.page; await openDance(p); await fill(p);
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
         assert.equal(await p.locator('#kdLength').inputValue(), 'whole');
-        assert.match(await p.locator('#kdSourceInfo').textContent(), /元動画は25\.3秒です。自動で先頭20秒/);
+        assert.match(await p.locator('#kdSourceInfo').textContent(), /元動画は25\.3秒です。自動の場合は先頭20秒/);
         assert.equal(await p.locator('#kdLength option[value="21"]').count(), 0);
         await p.locator('#kdLength').selectOption('whole');
-        await p.waitForFunction(() => /先頭20秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭20秒を使用（元動画は25\.3秒）|先頭20秒を使用・20秒分・380cr/);
+        await p.waitForFunction(() => /先頭から実測20秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭から実測20秒を使用（元動画は25\.3秒）|先頭から実測20秒を使用・20秒分・見積もり380cr/);
         assert.match(await p.locator('#kdCreate').textContent(), /380$/);
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
         assert.equal(f.calls.starts.length, 0, 'nothing is generated before the explicit start');
@@ -625,8 +625,8 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(await p.locator('#kdVideoRemove').isVisible(), false);
         await p.waitForFunction(() => window.flowvidDanceKling.state.video.recutting === false);
         await p.locator('#kdLength').selectOption('8');
-        await p.waitForFunction(() => /先頭8秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭8秒を使用・8秒分・152cr/);
+        await p.waitForFunction(() => /先頭から実測8秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        assert.match(await summary(p), /先頭から実測8秒を使用・8秒分・見積もり152cr/);
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
         assert.equal(f.calls.starts[0].body.use_billable_seconds, 8);
@@ -642,7 +642,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(await p.locator('#kdCreate').isDisabled(), true);
         assert.match(await p.locator('#kdVideoNote').textContent(), /もう一度、使う長さを選んでください/);
         await p.locator('#kdLength').selectOption('12');
-        await p.waitForFunction(() => /先頭12秒を使用/.test(document.getElementById('kdUseSummary').textContent));
+        await p.waitForFunction(() => /先頭から実測12秒を使用/.test(document.getElementById('kdUseSummary').textContent));
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
         assert.match(await summary(p), /228cr/);
       } finally { await f.context.close(); }

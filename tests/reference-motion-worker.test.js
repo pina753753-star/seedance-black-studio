@@ -84,26 +84,26 @@ test('every integer choice 4..16 from a 16.2 s source is exactly that long (fram
   }
 });
 
-test('25 s 60 fps 1080p source: whole use is capped at the first 20 s; cutting 10 and 20 is exact; downscaled to 720p', { skip }, () => {
+test('25 s 60 fps 1080p source: whole use retains 25 s; cutting 10 and 20 is exact; downscaled to 720p', { skip }, () => {
   const src = synth('s25.mp4', { seconds: 25, size: '1920x1080', rate: 60, audio: true });
   const whole = inspect(src);
-  assert.equal(whole.plan.capped, true);
-  assert.equal(whole.approved.durationMs, 20000);
-  assert.equal(whole.billable * 19, 380);
+  assert.equal(whole.plan.capped, false);
+  assert.equal(whole.approved.durationMs, 25000);
+  assert.equal(whole.billable * 19, 475);
   assert.equal(whole.approved.height, 720);
   assert.equal(inspect(src, 10).approved.durationMs, 10000);
   assert.equal(inspect(src, 20).approved.durationMs, 20000);
 });
 
-test('boundaries around 10 s and 20 s of the original: 10.0 s whole = 10 (image setting), 20.0 s whole not capped, 20.02 s capped', { skip }, () => {
+test('boundaries around 10 s and 20 s of the original: 10.0 s whole = 10 (image setting), 20.0 s whole not capped, 20.04 s remains under 30s cap', { skip }, () => {
   const ten = inspect(synth('s10.mp4', { seconds: 10, rate: 30 }));
   assert.equal(ten.approved.durationMs, 10000);
   const twenty = inspect(synth('s20.mp4', { seconds: 20, rate: 30 }));
   assert.equal(twenty.plan.capped, false);
   assert.equal(twenty.approved.durationMs, 20000);
   const over = inspect(synth('s20_02.mp4', { seconds: 20.04, rate: 30 }));
-  assert.equal(over.plan.capped, true);
-  assert.equal(over.approved.durationMs, 20000);
+  assert.equal(over.plan.capped, false);
+  assert.ok(over.approved.durationMs > 20000 && over.approved.durationMs <= 20067);
 });
 
 test('HEVC source is accepted and sealed as H.264', { skip: skip || (have('ffmpeg') ? false : skip) }, () => {
@@ -119,10 +119,10 @@ test('rejections: a longer choice than the source, out-of-range choices, too sho
   assert.throws(() => inspect(s4, 5), code('MOTION_USE_EXCEEDS_SOURCE'));
   const s16 = synth('s16.mp4', { seconds: 16, rate: 30 });
   assert.throws(() => inspect(s16, 3), code('MOTION_USE_SECONDS_INVALID'));
-  assert.throws(() => inspect(s16, 21), code('MOTION_USE_SECONDS_INVALID'));
+  assert.throws(() => inspect(s16, 31), code('MOTION_USE_SECONDS_INVALID'));
   assert.throws(() => inspect(s16, 12.5), code('MOTION_USE_SECONDS_INVALID'));
   assert.throws(() => inspect(synth('s3_5.mp4', { seconds: 3.5, rate: 30 })), code('VIDEO_DURATION_INVALID'));
-  assert.throws(() => inspect(synth('s31.mp4', { seconds: 31, rate: 30 })), code('VIDEO_DURATION_INVALID'));
+  assert.throws(() => inspect(synth('s61.mp4', { seconds: 61, rate: 30, size: '640x360' })), code('VIDEO_DURATION_INVALID'));
 });
 
 test('an audio tail longer than the video never asks for frames that do not exist: the whole-use plan follows the video stream', { skip }, () => {
@@ -135,12 +135,12 @@ test('an audio tail longer than the video never asks for frames that do not exis
 test('plan and output validation (no FFmpeg): never extends, never exceeds the plan, at most one second short', () => {
   assert.deepEqual({ ...planMotionOutput({ sourceDurationSeconds: 16.2 }) }, { mode: 'whole', frames: 486, useSeconds: null, capped: false });
   assert.deepEqual({ ...planMotionOutput({ sourceDurationSeconds: 16.2, useSeconds: 15 }) }, { mode: 'cut', frames: 450, useSeconds: 15, capped: false });
-  assert.equal(planMotionOutput({ sourceDurationSeconds: 30 }).frames, 600);
+  assert.equal(planMotionOutput({ sourceDurationSeconds: 30 }).frames, 900);
   assert.throws(() => planMotionOutput({ sourceDurationSeconds: 16, useSeconds: 17 }), code('MOTION_USE_EXCEEDS_SOURCE'));
   const plan = { frames: 450 };
   assert.ok(validateMotionOutput(plan, { durationMs: 15000 }));
   assert.ok(validateMotionOutput(plan, { durationMs: 14034 }));
   assert.throws(() => validateMotionOutput(plan, { durationMs: 15001 }), code('VIDEO_DURATION_MISMATCH'));
   assert.throws(() => validateMotionOutput(plan, { durationMs: 14000 }), code('VIDEO_DURATION_MISMATCH'));
-  assert.throws(() => validateMotionOutput({ frames: 700 }, { durationMs: 23333 }), code('VIDEO_DURATION_MISMATCH'));
+  assert.throws(() => validateMotionOutput({ frames: 1000 }, { durationMs: 33333 }), code('VIDEO_DURATION_MISMATCH'));
 });

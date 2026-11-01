@@ -18,8 +18,8 @@ module.exports = async function handler(req, res) {
       .eq('user_id', auth.user.id)
       .in('status', ['uploading', 'checking', 'ready'])
       .is('last_task_id', null)
-      // Motion assets of 16-20 s exist only for the motion tab; they must not be restored into the Seedance panel.
-      .or(motion ? 'duration_ms.is.null,duration_ms.lte.20000' : 'duration_ms.is.null,duration_ms.lte.15000')
+      // Motion assets of 16-30 s exist only for the motion tab; they must not be restored into the Seedance panel.
+      .or(motion ? 'duration_ms.is.null,duration_ms.lte.30000' : 'duration_ms.is.null,duration_ms.lte.15000')
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1);

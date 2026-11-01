@@ -9,14 +9,14 @@
   const $=id=>document.getElementById(id);
   if(!$('kdSection')||!$('danceTab'))return;
 
-  const access={allowed:false,rate:null,min:4,max:10,sourceMax:30,imageMax:10,lengthSelect:false};
+  const access={allowed:false,rate:null,min:4,max:10,sourceMax:60,imageMax:10,lengthSelect:false};
   const state={
     image:{status:'idle',url:'',name:'',error:'',previewUrl:''},
     video:newVideo(),
     inFlight:false
   };
   // seq invalidates late responses (replaced asset, newer length choice); masterMs = longest usable length of
-  // the inspected file (<= 20 s), sourceMs = the original's length as reported at inspection, useSeconds = chosen
+  // the inspected file (<= 30 s), sourceMs = the original's length as reported at inspection, useSeconds = chosen
   // cut (null = the whole master), chosen = the current length has a successful server inspection.
   function newVideo(){return {status:'idle',id:'',name:'',billableSeconds:0,durationMs:0,error:'',retryable:false,masterMs:0,sourceMs:0,useSeconds:null,chosen:true,recutting:false,seq:0}}
 
@@ -60,8 +60,8 @@
     if(v.restored){
       if(sel.dataset.key!=='restored'){sel.innerHTML='<option value="saved"></option>';sel.options[0].textContent=`保存済みの${fmtSec(v.durationMs)}秒を使用`;sel.dataset.key='restored';}
       sel.value=v.chosen?'saved':'';sel.disabled=state.inFlight;
-      $('kdSourceInfo').textContent='前回検査した動画を復元しました。別の長さにする場合は元動画をもう一度追加してください。';
-      $('kdUseSummary').textContent=v.chosen?`保存済みの${fmtSec(v.durationMs)}秒を使用・${v.billableSeconds}秒分・${v.billableSeconds*access.rate}cr`:'';
+      $('kdSourceInfo').textContent='前回検査した使用区間を復元しました。元動画の長さは復元できないため、別の長さにする場合は元動画をもう一度追加してください。';
+      $('kdUseSummary').textContent=v.chosen?`保存済み区間の実測${fmtSec(v.durationMs)}秒を使用・${v.billableSeconds}秒分・見積もり${v.billableSeconds*access.rate}cr`:'';
       $('kdOrientationNote').style.display=orientationOf(v.durationMs)==='video'?'block':'none';return;
     }
     const capped=v.sourceMs>access.max*1000;
@@ -73,13 +73,11 @@
     if(sel.dataset.key!==key){sel.innerHTML='';opts.forEach(([val,label])=>{const o=document.createElement('option');o.value=val;o.textContent=label;sel.appendChild(o)});sel.dataset.key=key}
     sel.value=!v.chosen?'':(v.useSeconds===null?'whole':String(v.useSeconds));
     sel.disabled=state.inFlight||v.recutting||v.status==='uploading';
-    $('kdSourceInfo').textContent=capped?`元動画は${fmtSec(v.sourceMs)}秒です。自動で先頭${access.max}秒を使用します。短い長さも選べます。`:`元動画は${fmtSec(v.sourceMs||v.masterMs)}秒です。初期状態ではお手本全体を使います。`;
+    $('kdSourceInfo').textContent=capped?`元動画は${fmtSec(v.sourceMs)}秒です。自動の場合は先頭${access.max}秒を使用します。短い長さも選べます。`:`元動画は${fmtSec(v.sourceMs||v.masterMs)}秒です。初期状態ではお手本全体を使います。`;
     let summary='';
     if(v.recutting)summary='使用する長さを反映中…';
     else if(v.status==='ready'&&v.chosen&&inRange(v)){
-      const cut=v.useSeconds!==null;
-      const whole=Number.isInteger(v.durationMs/1000)?`${fmtSec(v.durationMs)}秒`:`${fmtSec(v.durationMs)}秒（課金は端数を切り上げて${v.billableSeconds}秒分）`;
-      summary=(cut?`先頭${v.useSeconds}秒を使用`:(capped?`先頭${access.max}秒を使用`:`お手本全体 ${whole}を使用`))+`・${v.billableSeconds}秒分・${v.billableSeconds*access.rate}cr`;
+      summary=`先頭から実測${fmtSec(v.durationMs)}秒を使用・${v.billableSeconds}秒分・見積もり${v.billableSeconds*access.rate}cr`;
     }
     $('kdUseSummary').textContent=summary;
     $('kdOrientationNote').style.display=v.status==='ready'&&inRange(v)&&orientationOf(v.durationMs)==='video'?'block':'none';
@@ -95,7 +93,7 @@
     $('kdRights').disabled=busy()||vid.status!=='idle';
     $('kdVideoFile').disabled=busy()||!access.allowed||!access.rate||!$('kdRights').checked;
     $('kdVideoName').textContent=vid.name||(access.lengthSelect?`お手本動画: MP4／MOV・${access.min}〜${access.sourceMax}秒・最大50MB`:`お手本動画: MP4／MOV・${access.min}〜${access.max}秒・最大50MB`);
-    let note=access.lengthSelect?`入力は${access.min}〜${access.sourceMax}秒・最大50MB。未選択なら元動画の長さに合わせ、20秒超は先頭${access.max}秒へ自動カットします。長さも選べます。延長・ループはしません。`:`${access.max}秒を超える動画は使えません。自動では短くしません。`;
+    let note=access.lengthSelect?`入力は${access.min}〜${access.sourceMax}秒・最大50MB。未選択なら元動画の長さに合わせ、${access.max}秒超は先頭${access.max}秒へ自動カットします。長さも選べます。延長・ループはしません。`:`${access.max}秒を超える動画は使えません。自動では短くしません。`;
     if(vid.status==='uploading')note='非公開領域へアップロード中…';
     else if(vid.status==='checking')note='形式・長さ・安全性を検査中…';
     else if(vid.status==='ready')note=inRange(vid)?`検査完了・${(vid.durationMs/1000).toFixed(3)}秒（課金${vid.billableSeconds}秒）`:`検査完了・${(vid.durationMs/1000).toFixed(3)}秒。ただしモーションは${access.min}〜${access.max}秒の動画が必要です。この動画では生成できません。`;
@@ -129,7 +127,7 @@
         access.allowed=true;
         access.rate=Number.isInteger(d.klingDance.creditsPerSecond)&&d.klingDance.creditsPerSecond>0?d.klingDance.creditsPerSecond:null;
         access.min=Number(d.klingDance.minSeconds)||4;access.max=Number(d.klingDance.maxSeconds)||10;
-        access.imageMax=Number(d.klingDance.imageOrientationMaxSeconds)||10;access.sourceMax=Number(d.klingDance.sourceMaxSeconds)||30;
+        access.imageMax=Number(d.klingDance.imageOrientationMaxSeconds)||10;access.sourceMax=Number(d.klingDance.sourceMaxSeconds)||60;
         access.lengthSelect=d.klingDance.lengthSelectEnabled===true&&access.max>access.imageMax;
       }
     }catch(_){}
@@ -192,7 +190,7 @@
       v.status='ready';v.durationMs=Number(d.durationMs||0);v.billableSeconds=Number(d.billableSeconds||0);v.retryable=false;
       if(access.lengthSelect&&d.motion){
         v.masterMs=Number(d.motion.masterDurationMs)||v.durationMs;v.sourceMs=Number(d.motion.sourceDurationMs)||v.masterMs;v.useSeconds=Number.isInteger(d.motion.useSeconds)?d.motion.useSeconds:null;
-        // Automatic use follows the measured source, capped at the first 20 seconds.
+        // Automatic use follows the measured source, capped at the first 30 seconds.
         v.chosen=true;
       }
       render();return true;
