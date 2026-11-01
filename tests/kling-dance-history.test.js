@@ -54,3 +54,33 @@ test('history lists existing 16-20 s motion videos with their own length and lab
   assert.equal(body.rows[0].duration_seconds, 20);
   assert.equal(body.rows[0].dance_method, 'kling_v3_motion_control');
 });
+
+test('saved provider model is allowlisted only for a consistent WaveSpeed Kling tuple; model and private settings stay unchanged', async()=>{
+ const settings={dance_method:'kling_v3_motion_control',provider_model:'kwaivgi/kling-v3.0-pro/motion-control',secret:'never expose'};
+ const rows=[task('e4416b39',settings),task('a9175e08',settings),task('missing',{dance_method:settings.dance_method}),task('wrong',{...settings,provider_model:'unknown'}),{...task('wrong-provider',settings),api_provider:'openrouter'},task('wrong-method',{...settings,dance_method:'other'}),task('normal',{})];
+ const body=await history(rows);
+ for(const r of body.rows){assert.equal(r.model,'bytedance/seedance-2.5');assert.equal(r.provider_model,['e4416b39','a9175e08'].includes(r.id)?settings.provider_model:'');assert.equal('settings' in r,false);assert.equal(JSON.stringify(r).includes('never expose'),false);}
+});
+
+test('pending API exposes the same safe identity fields and no full settings',async()=>{
+ const rows=[task('k',{dance_method:'kling_v3_motion_control',provider_model:'kwaivgi/kling-v3.0-pro/motion-control',secret:'never expose'}),task('normal',{}),task('unknown',{dance_method:'kling_v3_motion_control',provider_model:'unknown'})];
+ const chain={select(){return this},update(){return this},eq(){return this},in(){return this},lt(){return this},gte(){return this},order(){return this},limit:async()=>({data:rows,error:null})};
+ const client={from:()=>chain,auth:{getUser:async()=>({data:{user:{id:'u1'}}})}};
+ const filename=path.resolve(__dirname,'../api/pending-tasks.js'),mod={exports:{}};
+ vm.runInNewContext(fs.readFileSync(filename,'utf8'),{module:mod,require:()=>({createClient:()=>client}),process:{env:{SUPABASE_SERVICE_ROLE_KEY:'mock'}},console},{filename});
+ const res={status(c){this.code=c;return this},json(b){this.body=b;return this}};
+ await mod.exports({method:'GET',headers:{authorization:'Bearer mock'}},res);
+ assert.equal(res.code,200);assert.equal(res.body.tasks[0].provider_model,'kwaivgi/kling-v3.0-pro/motion-control');
+ assert.equal(res.body.tasks[1].provider_model,'');assert.equal(res.body.tasks[2].provider_model,'');
+ for(const r of res.body.tasks){assert.equal('settings' in r,false);assert.equal(r.model,'bytedance/seedance-2.5');assert.equal(JSON.stringify(r).includes('never expose'),false);}
+});
+
+test('shared display helper rejects conflicting identity and preserves every normal model label',()=>{
+ const src=fs.readFileSync(path.resolve(__dirname,'../flowvid-history.js'),'utf8');
+ const code=src.split('\n').filter(l=>l.includes('window.flowvidMotionModelLabel=')||l.includes('function modelLabel(')).join('\n');
+ const ctx={window:{}};vm.runInNewContext(code,ctx);
+ const pair={provider:'wavespeed',dance_method:'kling_v3_motion_control',provider_model:'kwaivgi/kling-v3.0-pro/motion-control'};
+ assert.equal(ctx.modelLabel('bytedance/seedance-2.5','wavespeed',pair),'Kling v3 Pro Motion Control');
+ for(const row of [{...pair,provider_model:undefined},{...pair,dance_method:'other'},{...pair,api_provider:'openrouter'}])assert.equal(ctx.window.flowvidMotionModelLabel(row),'');
+ for(const [model,provider,label] of [['bytedance/seedance-2.5','wavespeed','Seedance 2.5 Turbo'],['bytedance/seedance-2.5','openrouter','Seedance 2.5'],['bytedance/seedance-2.5','','Seedance 2.5（旧履歴）'],['bytedance/seedance-2.5-standard','wavespeed','Seedance 2.5'],['bytedance/seedance-2.0','openrouter','Seedance 2.0'],['bytedance/seedance-2.0-fast','openrouter','Seedance 2.0 Fast'],['bytedance/seedance-2.0-lite','openrouter','Seedance 2.0 Lite'],['unknown','unknown','unknown']])assert.equal(ctx.modelLabel(model,provider,{}),label);
+});
