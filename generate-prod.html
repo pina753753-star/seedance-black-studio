@@ -85,11 +85,17 @@
 <!-- モーション(Kling v3.0 Pro Motion Control・一般向けBETA。内部名はdance): mainCard/sbSectionとは独立した専用セクション。
      状態・下書きはdance-kling.jsが保持し、タブ切替ではDOMを隠すだけで破棄しない -->
 <section class="card" id="kdSection" aria-label="モーション" style="display:none">
-  <h2 id="kdHeading" style="margin:0 0 4px;font-size:18px;font-weight:800">モーション</h2>
+  <style>
+  #kdSection .kdHelpButton{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:1px solid #858096;border-radius:50%;background:#24202f;color:#fff;font-size:16px;cursor:pointer;flex-shrink:0}
+  #kdSection .kdHelpButton:focus-visible{outline:2px solid #c4b5fd;outline-offset:3px}
+  #kdSection .kdHelpPanel{margin:8px 0 12px;padding:12px;border:1px solid #655577;border-radius:12px;background:#1b1724;color:#c8cad6;font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+  #kdSection .kdHelpPanel[hidden]{display:none}
+  </style>
+  <h2 id="kdHeading" style="display:flex;align-items:center;gap:8px;margin:0 0 4px;font-size:18px;font-weight:800">モーション <span class="featureBeta">BETA</span><button type="button" class="kdHelpButton" aria-label="モーションの使い方" aria-controls="kdHelp" aria-expanded="false">?</button></h2>
   <p style="margin:0;color:#e5e7eb;font-size:13px;font-weight:700;line-height:1.6">ダンスやしぐさを、好きなキャラで再現</p>
   <p style="margin:2px 0 10px;color:#c8cad6;font-size:12px;line-height:1.7">画像とお手本動画を入れるだけ。プロンプト不要</p>
-  <div style="margin-bottom:12px;color:#9ca3af;font-size:11px;line-height:1.7">BETA公開中。有効な購入クレジットがあれば、サブスクなしでも利用できます。画像の顔・体型・服・背景がどこまで保たれるかは保証できず、カメラの動きは変わることがあります。お手本動画の音声は使わず、結果は無音です。</div>
-  <p id="kdFramingHint" style="margin:0 0 10px;color:#c8cad6;font-size:12px;line-height:1.7">画像とお手本動画は、全身どうし・半身どうしなど、人物の写る範囲をそろえてください。</p>
+  <div id="kdHelp" class="kdHelpPanel" hidden><div>BETA公開中。有効な購入クレジットがあれば、サブスクなしでも利用できます。画像の顔・体型・服・背景がどこまで保たれるかは保証できず、カメラの動きは変わることがあります。お手本動画の音声は使わず、結果は無音です。</div>
+  <p id="kdFramingHint" style="margin:0 0 10px;color:#c8cad6;font-size:12px;line-height:1.7">画像とお手本動画は、全身どうし・半身どうしなど、人物の写る範囲をそろえてください。</p></div>
   <div class="kdRow" style="display:grid;gap:12px">
     <div class="kdBox" style="background:#101319;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:12px">
       <label style="position:relative;display:inline-flex;min-width:138px;justify-content:center;border-radius:12px;background:#29243a;padding:11px 13px;font-size:13px;font-weight:800">＋ キャラクター画像<input id="kdImageFile" type="file" accept="image/png,image/jpeg,image/webp" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></label>
@@ -111,9 +117,12 @@
     <select id="kdLength" style="margin-top:8px;width:100%;min-height:44px;background:#0b0d13;color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:0 10px;font-size:14px"></select>
     <div id="kdSourceInfo" style="margin-top:8px;color:#9f96b5;font-size:11px;line-height:1.6"></div>
     <div id="kdUseSummary" role="status" aria-live="polite" style="margin-top:8px;color:#e5e7eb;font-size:13px;font-weight:700;line-height:1.6"></div>
+
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-top:10px"><p id="kdDurationHint" style="margin:0;color:#9ca3af;font-size:11px;line-height:1.7">使用する動画の秒数で計算（端数切り上げ）</p><button type="button" class="kdHelpButton" aria-label="料金と使用する長さの説明" aria-controls="kdPriceHelp" aria-expanded="false">?</button></div>
+  <div id="kdPriceHelp" class="kdHelpPanel" hidden>生成結果は使用する動画より短くなることがあります。料金は生成結果の長さではなく、実際に使用する動画の長さ（端数切り上げ）を基準にします。自動の場合はお手本全体、30秒を超える場合は先頭30秒を使います。短い長さも選べます。延長・ループはしません。
     <div id="kdOrientationNote" style="display:none;margin-top:6px;color:#fcd34d;font-size:12px;line-height:1.6">10秒を超える動画は、お手本動画の人物の向き・視点を基準に生成します。キャラクターの容姿は画像を参照しますが、構図やカメラの完全な再現は保証されません。</div>
   </div>
-  <p id="kdDurationHint" style="margin:10px 0 0;color:#9ca3af;font-size:11px;line-height:1.7">生成結果は使用する動画より短くなることがあります。見積もりは生成結果の長さではなく、実際に使用する動画の長さ（端数切り上げ）を基準にします。</p>
   <div id="kdCost" style="margin-top:12px;color:#c8cad6;font-size:12px;line-height:1.6" aria-live="polite"></div>
   <div id="kdReason" role="status" aria-live="polite" hidden style="margin-top:8px;color:#fca5a5;font-size:12px;line-height:1.7"></div>
   <button class="create" id="kdCreate" type="button" style="margin-top:8px" disabled>作成する</button>
