@@ -89,10 +89,31 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
       if (!match) return NaN;
       return Number(match[1]) / (match[2] === undefined ? 1 : Number(match[2]));
     });
-    if (parsedRates.some(rate => !Number.isFinite(rate) || rate < 1 || rate > 60)) {
-      throw inspectionError('VIDEO_FRAMERATE_INVALID');
+    if (motion && !requireNoAudio) {
+      // r_frame_rate is FFprobe's nominal/guessed base rate, not the decoded
+      // average of a VFR screen recording. Its value can exceed 60 even when
+      // the actual average is 59.94. Never use that value to size the output.
+      const average = String(video.avg_frame_rate || '').match(/^(\d+)(?:\/(\d+))?$/);
+      const averageFps = average ? Number(average[1]) / (average[2] === undefined ? 1 : Number(average[2])) : NaN;
+      if (!Number.isFinite(averageFps) || averageFps < 1 || averageFps > 120
+        || codedWidth * codedHeight * averageFps > 3840 * 2160 * 60) {
+        throw inspectionError('VIDEO_FRAMERATE_INVALID');
+      }
+      // Check a declared sample count too, when present. Keep the original
+      // 4K60 decoded-pixel budget, 60 s/50 MiB input and 90 s job deadline.
+      if (video.nb_frames !== undefined && video.nb_frames !== 'N/A') {
+        const count = Number(video.nb_frames);
+        if (!Number.isSafeInteger(count) || count < 1 || count > 7200
+          || count > videoDuration * 120 + 1) throw inspectionError('VIDEO_FRAMERATE_INVALID');
+      }
+      fps = averageFps;
+    } else {
+      if (parsedRates.some(rate => !Number.isFinite(rate) || rate < 1 || rate > 60)
+        || (motion && parsedRates.some(rate => rate !== MOTION_FPS))) {
+        throw inspectionError('VIDEO_FRAMERATE_INVALID');
+      }
+      fps = parsedRates[0];
     }
-    fps = parsedRates[0];
     const transfer = String(video.color_transfer || '').toLowerCase();
     const primaries = String(video.color_primaries || '').toLowerCase();
     const colorSpace = String(video.color_space || '').toLowerCase();
