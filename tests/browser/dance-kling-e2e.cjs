@@ -117,7 +117,7 @@ async function fixture(browser, o = {}) {
   await page.waitForFunction(() => typeof generationAccessLoaded !== 'undefined' && generationAccessLoaded === true);
   return { context, page, calls, pageErrors, flow };
 }
-async function run(name, fn) { try { await fn(); passed.push(name); console.log('PASS ' + name); } catch (e) { failures.push({ name, error: String(e.stack || e) }); console.log('FAIL ' + name + ': ' + e.message); } }
+async function run(name, fn) { if(process.env.DANCE_E2E_FILTER&&!new RegExp(process.env.DANCE_E2E_FILTER).test(name))return; try { await fn(); passed.push(name); console.log('PASS ' + name); } catch (e) { failures.push({ name, error: String(e.stack || e) }); console.log('FAIL ' + name + ': ' + e.message); } }
 async function openDance(p) { await p.locator('#danceTab').waitFor({ state: 'visible' }); await p.locator('#danceTab').click(); await p.locator('#kdSection').waitFor({ state: 'visible' }); }
 async function fill(p, { seconds } = {}) {
   await p.locator('#kdImageFile').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
@@ -150,7 +150,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(await p.locator('#mainCard').isVisible(), false);
         assert.equal(await p.locator('#kdCreate').isDisabled(), true);
         await fill(p, { seconds: 8 });
-        assert.match(await p.locator('#kdCreate').textContent(), /152$/);
+        assert.match(await p.locator('#kdCost').textContent(), /152 cr/);
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
         assert.equal(await noHScroll(p), true);
         await p.locator('#kdCreate').click();
@@ -198,7 +198,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
             assert.equal(await p.evaluate(() => window.flowvidDanceKling.estimate()), null);
           } else {
             assert.equal(await p.evaluate(() => window.flowvidDanceKling.estimate()), credits);
-            assert.match(await p.locator('#kdCreate').textContent(), new RegExp(credits + '$'));
+            assert.match(await p.locator('#kdCost').textContent(), new RegExp(credits + ' cr'));
             await p.locator('#kdCreate').click();
             await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
             assert.equal(f.calls.starts[0].body.estimated_credits, credits);
@@ -298,7 +298,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         await fill(p);
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
         assert.match(await p.locator('#kdCost').textContent(), /消費クレジット: 152 cr（19cr × 8秒）/);
-        assert.match(await p.locator('#kdCreate').textContent(), /152$/);
+        assert.match(await p.locator('#kdCost').textContent(), /152 cr/);
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id] video'), null, { timeout: 8000 });
         const b = f.calls.starts[0].body;
@@ -544,7 +544,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       }
     });
     // ---- length choice enabled (maxSeconds 20) ----
-    const summary = (p) => p.locator('#kdUseSummary').textContent();
+    const summary = async (p) => (await p.locator('#kdUseSummary').textContent()) + ' ' + (await p.locator('#kdCost').textContent());
     await run(`[${width}] length choice: 16 s whole -> 304 cr; first 15 s -> 285 cr; start sends the shown seconds and orientation (video)`, async () => {
       const f = await fixture(browser, { lengthSelect: true, sourceMs: 16000 });
       try {
@@ -552,14 +552,15 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(f.calls.confirms[0].profile, 'motion');
         assert.equal('useSeconds' in f.calls.confirms[0], false, 'first inspection uses the whole video');
         assert.equal(await p.locator('#kdLength').inputValue(), 'whole');
-        assert.match(await summary(p), /先頭から実測16秒を使用・16秒分・見積もり304cr/);
-        assert.match(await p.locator('#kdCreate').textContent(), /304$/);
+        assert.match(await summary(p), /先頭から実測16秒を使用.*304 cr/);
+        assert.match(await p.locator('#kdCost').textContent(), /304 cr/);
+        await p.locator('[aria-controls="kdPriceHelp"]').click();
         assert.equal(await p.locator('#kdOrientationNote').isVisible(), true);
-        assert.match(await p.locator('#kdOrientationNote').textContent(), /10秒を超える動画は、お手本動画の人物の向きを基準に生成します/);
+        assert.match(await p.locator('#kdOrientationNote').textContent(), /10秒を超える動画は、お手本動画の人物の向き・視点を基準に生成します/);
         await p.locator('#kdLength').selectOption('15');
         await p.waitForFunction(() => /先頭から実測15秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭から実測15秒を使用・15秒分・見積もり285cr/);
-        assert.match(await p.locator('#kdCreate').textContent(), /285$/);
+        assert.match(await summary(p), /先頭から実測15秒を使用.*285 cr/);
+        assert.match(await p.locator('#kdCost').textContent(), /285 cr/);
         assert.deepEqual(f.calls.confirms.at(-1), { assetId: 'asset-1', allowBoundaryTrim: false, profile: 'motion', useSeconds: 15 });
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
@@ -578,7 +579,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         await p.locator('#kdLength').selectOption('10');
         await p.waitForFunction(() => /先頭から実測10秒を使用/.test(document.getElementById('kdUseSummary').textContent));
         assert.equal(await p.locator('#kdOrientationNote').isVisible(), false);
-        assert.match(await summary(p), /190cr/);
+        assert.match(await summary(p), /190 cr/);
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
         assert.equal(f.calls.starts[0].body.orientation_mode, 'image');
@@ -589,11 +590,11 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       const f = await fixture(browser, { lengthSelect: true, sourceMs: 16200 });
       try {
         const p = f.page; await openDance(p); await fill(p);
-        assert.match(await summary(p), /先頭から実測16\.2秒を使用・17秒分・見積もり323cr/);
+        assert.match(await summary(p), /先頭から実測16\.2秒を使用.*323 cr/);
         assert.match(await p.locator('#kdLength option[value="whole"]').textContent(), /お手本全体（16\.2秒）/);
         await p.locator('#kdLength').selectOption('16');
         await p.waitForFunction(() => /先頭から実測16秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭から実測16秒を使用・16秒分・見積もり304cr/);
+        assert.match(await summary(p), /先頭から実測16秒を使用.*304 cr/);
         assert.equal(await p.locator('#kdLength option[value="17"]').count(), 0, 'no choice longer than the original');
       } finally { await f.context.close(); }
     });
@@ -607,8 +608,8 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(await p.locator('#kdLength option[value="21"]').count(), 0);
         await p.locator('#kdLength').selectOption('whole');
         await p.waitForFunction(() => /先頭から実測20秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭から実測20秒を使用（元動画は25\.3秒）|先頭から実測20秒を使用・20秒分・見積もり380cr/);
-        assert.match(await p.locator('#kdCreate').textContent(), /380$/);
+        assert.match(await summary(p), /先頭から実測20秒を使用（元動画は25\.3秒）|先頭から実測20秒を使用.*380 cr/);
+        assert.match(await p.locator('#kdCost').textContent(), /380 cr/);
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
         assert.equal(f.calls.starts.length, 0, 'nothing is generated before the explicit start');
       } finally { await f.context.close(); }
@@ -626,7 +627,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         await p.waitForFunction(() => window.flowvidDanceKling.state.video.recutting === false);
         await p.locator('#kdLength').selectOption('8');
         await p.waitForFunction(() => /先頭から実測8秒を使用/.test(document.getElementById('kdUseSummary').textContent));
-        assert.match(await summary(p), /先頭から実測8秒を使用・8秒分・見積もり152cr/);
+        assert.match(await summary(p), /先頭から実測8秒を使用.*152 cr/);
         await p.locator('#kdCreate').click();
         await p.waitForFunction(() => document.querySelector('[data-ptask-id]'));
         assert.equal(f.calls.starts[0].body.use_billable_seconds, 8);
@@ -644,7 +645,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         await p.locator('#kdLength').selectOption('12');
         await p.waitForFunction(() => /先頭から実測12秒を使用/.test(document.getElementById('kdUseSummary').textContent));
         assert.equal(await p.locator('#kdCreate').isDisabled(), false);
-        assert.match(await summary(p), /228cr/);
+        assert.match(await summary(p), /228 cr/);
       } finally { await f.context.close(); }
     });
     await run(`[${width}] length choice: stale selection refused by the server (409) is shown and nothing is generated`, async () => {

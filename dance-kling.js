@@ -61,7 +61,7 @@
       if(sel.dataset.key!=='restored'){sel.innerHTML='<option value="saved"></option>';sel.options[0].textContent=`保存済みの${fmtSec(v.durationMs)}秒を使用`;sel.dataset.key='restored';}
       sel.value=v.chosen?'saved':'';sel.disabled=state.inFlight;
       $('kdSourceInfo').textContent='前回検査した使用区間を復元しました。元動画の長さは復元できないため、別の長さにする場合は元動画をもう一度追加してください。';
-      $('kdUseSummary').textContent=v.chosen?`保存済み区間の実測${fmtSec(v.durationMs)}秒を使用・${v.billableSeconds}秒分・見積もり${v.billableSeconds*access.rate}cr`:'';
+      $('kdUseSummary').textContent=v.chosen?`保存済み区間の実測${fmtSec(v.durationMs)}秒を使用`:'';
       $('kdOrientationNote').style.display=orientationOf(v.durationMs)==='video'?'block':'none';return;
     }
     const capped=v.sourceMs>access.max*1000;
@@ -73,11 +73,11 @@
     if(sel.dataset.key!==key){sel.innerHTML='';opts.forEach(([val,label])=>{const o=document.createElement('option');o.value=val;o.textContent=label;sel.appendChild(o)});sel.dataset.key=key}
     sel.value=!v.chosen?'':(v.useSeconds===null?'whole':String(v.useSeconds));
     sel.disabled=state.inFlight||v.recutting||v.status==='uploading';
-    $('kdSourceInfo').textContent=capped?`元動画は${fmtSec(v.sourceMs)}秒です。自動の場合は先頭${access.max}秒を使用します。短い長さも選べます。`:`元動画は${fmtSec(v.sourceMs||v.masterMs)}秒です。初期状態ではお手本全体を使います。`;
+    $('kdSourceInfo').textContent=capped?`元動画は${fmtSec(v.sourceMs)}秒です。先頭${access.max}秒まで使えます。`:`元動画は${fmtSec(v.sourceMs||v.masterMs)}秒です。`;
     let summary='';
     if(v.recutting)summary='使用する長さを反映中…';
     else if(v.status==='ready'&&v.chosen&&inRange(v)){
-      summary=`先頭から実測${fmtSec(v.durationMs)}秒を使用・${v.billableSeconds}秒分・見積もり${v.billableSeconds*access.rate}cr`;
+      summary=`先頭から実測${fmtSec(v.durationMs)}秒を使用`;
     }
     $('kdUseSummary').textContent=summary;
     $('kdOrientationNote').style.display=v.status==='ready'&&inRange(v)&&orientationOf(v.durationMs)==='video'?'block':'none';
@@ -93,7 +93,7 @@
     $('kdRights').disabled=busy()||vid.status!=='idle';
     $('kdVideoFile').disabled=busy()||!access.allowed||!access.rate||!$('kdRights').checked;
     $('kdVideoName').textContent=vid.name||(access.lengthSelect?`お手本動画: MP4／MOV・${access.min}〜${access.sourceMax}秒・最大50MB`:`お手本動画: MP4／MOV・${access.min}〜${access.max}秒・最大50MB`);
-    let note=access.lengthSelect?`入力は${access.min}〜${access.sourceMax}秒・最大50MB。未選択なら元動画の長さに合わせ、${access.max}秒超は先頭${access.max}秒へ自動カットします。長さも選べます。延長・ループはしません。`:`${access.max}秒を超える動画は使えません。自動では短くしません。`;
+    let note=access.lengthSelect?`自動でお手本の長さに合わせます（${access.max}秒超は先頭${access.max}秒）。`:`${access.max}秒を超える動画は使えません。自動では短くしません。`;
     if(vid.status==='uploading')note='非公開領域へアップロード中…';
     else if(vid.status==='checking')note='形式・長さ・安全性を検査中…';
     else if(vid.status==='ready')note=inRange(vid)?`検査完了・${(vid.durationMs/1000).toFixed(3)}秒（課金${vid.billableSeconds}秒）`:`検査完了・${(vid.durationMs/1000).toFixed(3)}秒。ただしモーションは${access.min}〜${access.max}秒の動画が必要です。この動画では生成できません。`;
@@ -105,12 +105,16 @@
     $('kdVideoRemove').style.display=vid.status!=='idle'&&!busy()?'block':'none';
     const cost=estimate();const reason=blockReason();
     const btn=$('kdCreate');
-    btn.textContent=cost&&(!access.lengthSelect||state.video.chosen)?`作成する ✦ ${cost}`:'作成する';
-    $('kdCost').textContent=cost&&(!access.lengthSelect||state.video.chosen)?`消費クレジット: ${cost} cr（${access.rate}cr × ${state.video.billableSeconds}秒）`:(access.allowed&&access.rate?`お手本動画を入れると消費クレジットが表示されます（${access.rate}cr/秒）`:'');
+    btn.textContent='作成する';
+    $('kdCost').textContent=cost&&(!access.lengthSelect||state.video.chosen)?`消費クレジット: ${cost} cr（${access.rate}cr × ${state.video.billableSeconds}秒）`:(access.allowed&&access.rate?`${access.rate}cr/秒`:'');
     btn.disabled=!!reason||busy();
     btn.title=reason;
     const why=$('kdReason');
-    if(why){why.textContent=busy()?'処理中です。完了までお待ちください。':reason;why.hidden=!why.textContent;}
+    if(why){
+      const initial=access.allowed&&access.rate&&img.status==='idle'&&vid.status==='idle';
+      why.textContent=initial?'画像とお手本動画を追加してください':busy()?'処理中です。完了までお待ちください。':reason;
+      why.style.color=img.status==='failed'||vid.status==='failed'||(vid.status==='ready'&&!inRange(vid))?'#fca5a5':'#9ca3af';why.hidden=!why.textContent;
+    }
     if(vid.status==='ready'&&!inRange(vid))$('kdCost').textContent='対応する長さの動画を選ぶと見積もりを表示します。';
     return cost;
   }
@@ -309,6 +313,13 @@
       state.inFlight=false;generationRequestInFlight=false;render();
     }
   }
+
+  // Inline disclosure panels stay within the card at every viewport width.
+  const helpButtons=[...document.querySelectorAll('#kdSection .kdHelpButton')];
+  function closeHelp(button,restoreFocus=false){$(button.getAttribute('aria-controls')).hidden=true;button.setAttribute('aria-expanded','false');if(restoreFocus)button.focus();}
+  helpButtons.forEach(button=>button.addEventListener('click',()=>{const open=button.getAttribute('aria-expanded')==='true';helpButtons.forEach(b=>closeHelp(b));if(!open){$(button.getAttribute('aria-controls')).hidden=false;button.setAttribute('aria-expanded','true');}}));
+  document.addEventListener('click',event=>{helpButtons.forEach(button=>{if(!button.contains(event.target)&&!$(button.getAttribute('aria-controls')).contains(event.target))closeHelp(button);});});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'){const open=helpButtons.find(b=>b.getAttribute('aria-expanded')==='true');if(open){closeHelp(open,true);event.preventDefault();}}});
 
   $('kdImageFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';uploadImage(f)});
   $('kdVideoFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';uploadVideo(f)});
