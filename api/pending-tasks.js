@@ -67,6 +67,8 @@ module.exports = async function handler(req, res) {
       const { settings, ...publicTask } = task;
       return {
         ...publicTask,
+        dance_method: settings?.dance_method === 'kling_v3_motion_control' ? 'kling_v3_motion_control' : '',
+        provider_model: task.api_provider === 'wavespeed' && settings?.dance_method === 'kling_v3_motion_control' && settings?.provider_model === 'kwaivgi/kling-v3.0-pro/motion-control' ? 'kwaivgi/kling-v3.0-pro/motion-control' : '',
         ui_mode: settings?.ui_origin === 'storyboard' ? 'storyboard' : task.mode
       };
     });
