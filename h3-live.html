@@ -311,10 +311,12 @@
 
     function applyEligibility(elig){
       if(!elig || typeof elig !== 'object') return;
+      state.eligibility = elig;
       state.gate.planAllowed = elig.planAllowed !== false;
       state.gate.hasEnough = elig.hasEnoughCredits !== false;
       state.gate.balance = (typeof elig.balance === 'number') ? elig.balance : null;
-      if(typeof elig.creditCost === 'number' && elig.creditCost > 0) state.gate.creditCost = elig.creditCost;
+      state.gate.creditCost = elig.creditCosts ? elig.creditCosts[state.mode] : elig.creditCost;
+      state.gate.hasEnough = Number.isInteger(state.gate.creditCost) && (state.gate.balance == null || state.gate.balance >= state.gate.creditCost);
       if(state.gate.balance != null){
         $('balanceChip').innerHTML = '残高 <b>' + state.gate.balance + '</b> クレジット';
       }
@@ -441,6 +443,7 @@
         ? 'この画像をどう動かすか指示… 例：カメラをゆっくり引く、風で髪がなびく'
         : '生成する映像を指示… 例：ネオンの街を駆けるバイク、スローモーション';
       if(!isImg) clearImage();
+      if(state.eligibility) applyEligibility(state.eligibility);
     }
 
     async function uploadImage(file){
@@ -683,6 +686,7 @@
         var reqBody = isImage
           ? { instruction: text, mode: 'image', uploadId: sendUploadId }
           : { instruction: text };
+        reqBody.expectedCreditCost = state.gate.creditCost;
         var out = await api('/api/h3-live/start', {
           method: 'POST',
           headers: { 'Idempotency-Key': state.pendingIdemKey },

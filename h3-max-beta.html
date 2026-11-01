@@ -141,7 +141,7 @@
       var refReady=!isMultiMode()||(state.refImages.length>=1&&state.refImages.every(function(e){return e&&e.uploadId&&!e.busy}));
       $('send').disabled=state.sending||!!state.activeJobId||!state.planAllowed||!state.hasEnough||!text||!imageReady||!refReady;
     }
-    function applyEligibility(e){if(!e)return;state.planAllowed=e.planAllowed!==false;state.hasEnough=e.hasEnoughCredits!==false;state.balance=typeof e.balance==='number'?e.balance:null;state.creditCost=typeof e.creditCost==='number'?e.creditCost:state.creditCost;if(state.balance!=null)$('balanceChip').innerHTML='残高 <b>'+state.balance+'</b>';if(state.creditCost)$('priceText').textContent='15秒 / 768p / 1本 '+state.creditCost+' クレジット';var msgs=[];if(!state.planAllowed)msgs.push('H3 Max は Premium 以上の有効なプランで利用できます。');if(state.planAllowed&&state.hasEnough===false)msgs.push('クレジットが不足しています。必要: '+state.creditCost+' / 残高: '+(state.balance==null?'–':state.balance));$('gate').className=msgs.length?'gate show':'gate';$('gate').innerHTML=msgs.join('<br>');refreshSend()}
+    function applyEligibility(e){if(!e)return;state.planAllowed=e.planAllowed!==false;state.eligibility=e;state.hasEnough=e.hasEnoughCredits!==false;state.balance=typeof e.balance==='number'?e.balance:null;state.creditCost=e.creditCosts?e.creditCosts[state.mode]:(typeof e.creditCost==='number'?e.creditCost:null);state.hasEnough=state.creditCost!=null&&(state.balance==null||state.balance>=state.creditCost);if(state.balance!=null)$('balanceChip').innerHTML='残高 <b>'+state.balance+'</b>';if(state.creditCost)$('priceText').textContent='15秒 / 768p / 1本 '+state.creditCost+' クレジット';var msgs=[];if(!state.planAllowed)msgs.push('H3 Max は Premium 以上の有効なプランで利用できます。');if(state.planAllowed&&state.hasEnough===false)msgs.push('クレジットが不足しています。必要: '+state.creditCost+' / 残高: '+(state.balance==null?'–':state.balance));$('gate').className=msgs.length?'gate show':'gate';$('gate').innerHTML=msgs.join('<br>');refreshSend()}
     // モード切替では、既にアップロード済みの単一画像／参照画像を消さない。
     // 生成前に人物の基準画像を失う主因が「モードを切り替えただけで画像が
     // 消える」ことだったため、切替時はUI表示だけを現在のモードへ合わせ、
@@ -160,6 +160,7 @@
       $('refNote').hidden=state.mode!=='storyboard';
       $('rights').hidden=!(img||multi);
       if(multi)renderRefGrid();
+      if(state.eligibility)applyEligibility(state.eligibility);
       refreshSend();
     }
 
@@ -279,6 +280,7 @@
         if(state.mode==='image'){body={instruction:text,mode:'image',uploadId:state.uploadId}}
         else if(isMultiMode()){body={instruction:text,mode:state.mode,uploadIds:state.refImages.map(function(e){return e.uploadId})}}
         else{body={instruction:text}}
+        body.expectedCreditCost=state.creditCost;
         var d=await api('/api/h3-live/start',{method:'POST',headers:{'Idempotency-Key':idem},body:JSON.stringify(body)});
         var job=d.job;
         if(job&&['queued','submitting','processing'].indexOf(job.status)>=0){state.activeJobId=job.id;resetInputs();setGenerating(true,'映像を生成しています…');scheduleStatus(d.nextPollAfterMs||1600)}

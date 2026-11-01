@@ -11,7 +11,7 @@
 const { requireConfirmedAuth } = require('../_lib/confirmed-auth.js');
 const { serviceClient, sanitizeJob } = require('../_lib/h3-live-store.js');
 const { getH3LiveEntitlement } = require('../_lib/h3-live-entitlement.js');
-const { FEED_POLL_MS, currentCreditCost } = require('../_lib/h3-live-config.js');
+const { FEED_POLL_MS, creditCostForMode } = require('../_lib/h3-live-config.js');
 
 function effectiveBalance(row) {
   if (!row || typeof row !== 'object') return null;
@@ -76,10 +76,12 @@ module.exports = async function handler(req, res) {
   }
   const balance = balanceResult.error ? null : effectiveBalance(balanceResult.data);
   const planAllowed = entitlement && entitlement.ok ? Boolean(entitlement.allowed) : true;
-  const creditCost = currentCreditCost();
+  const creditCost = creditCostForMode('text');
+  const creditCosts = Object.fromEntries(['text', 'image', 'reference', 'storyboard'].map(mode => [mode, creditCostForMode(mode)]));
   const eligibility = {
     planAllowed,
     creditCost,
+    creditCosts,
     balance,
     hasEnoughCredits: balance == null ? true : balance >= creditCost
   };
@@ -87,7 +89,7 @@ module.exports = async function handler(req, res) {
   const etagBasis = JSON.stringify({
     a: activeResult.data ? [activeResult.data.id, activeResult.data.status, activeResult.data.updated_at] : null,
     o: onAirResult.data ? [onAirResult.data.id, onAirResult.data.completed_at] : null,
-    e: [planAllowed, balance, creditCost]
+    e: [planAllowed, balance, creditCosts]
   });
   const etag = 'W/"' + crypto.createHash('sha1').update(etagBasis).digest('hex') + '"';
 
