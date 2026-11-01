@@ -16,6 +16,8 @@ const {
   reviewFramePath,
   authorizeReferenceMotion,
   referenceDanceCredits,
+  MOTION_PROVIDER_REVIEW_MARKER,
+  isMotionOnlyReference,
   klingDance
 } = require('./_lib/reference-dance.js');
 
@@ -277,6 +279,11 @@ module.exports = async function handler(req, res) {
     if (!validateOwnedPath('staging', auth.user.id, assetId, row.staging_path)) {
       return res.status(400).json({ ok: false, error: 'invalid_reference_video_path' });
     }
+    if (row.status === 'blocked') return res.status(409).json({ ok: false, error: 'reference_video_blocked' });
+    if (!motion && isMotionOnlyReference(row)) return res.status(400).json({ ok: false, error: 'reference_video_motion_only' });
+    if (motion && row.status === 'ready' && ![MOTION_MASTER_MARKER, MOTION_PROVIDER_REVIEW_MARKER].includes(row.inspection_error)) {
+      return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
+    }
     if (row.status === 'ready' && !(motion && hasUseSeconds)) {
       return res.status(200).json(readyResponse(row));
     }
@@ -292,7 +299,7 @@ module.exports = async function handler(req, res) {
       }
       // Only an asset the motion pipeline sealed has a master to cut from. Anything else (a Seedance asset whose
       // source was deleted, a lost object) is refused BEFORE the row is touched and stays exactly as it was.
-      if (row.inspection_error !== MOTION_MASTER_MARKER) return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
+      if (![MOTION_MASTER_MARKER, MOTION_PROVIDER_REVIEW_MARKER].includes(row.inspection_error)) return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
       const masterState = await stagingMasterState(auth.supabase, auth.user.id, assetId);
       if (masterState === 'unknown') return res.status(503).json(MOTION_LENGTH_CHECK_FAILED);
       if (masterState === 'no') return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
@@ -349,6 +356,8 @@ module.exports = async function handler(req, res) {
       const { data: readyRow, error: readyError } = await auth.supabase.from(REFERENCE_DANCE_TABLE)
         .select('*').eq('id', assetId).eq('user_id', auth.user.id).maybeSingle();
       if (readyError || readyRow?.status !== 'ready') throw new Error('reference_video_ready_persist_failed');
+      if (!motion && isMotionOnlyReference(readyRow)) return res.status(400).json({ ok: false, error: 'reference_video_motion_only' });
+      if (motion && ![MOTION_MASTER_MARKER, MOTION_PROVIDER_REVIEW_MARKER].includes(readyRow.inspection_error)) return res.status(400).json(MOTION_LENGTH_UNAVAILABLE);
       return res.status(200).json(readyResponse(readyRow));
     }
 
@@ -372,25 +381,28 @@ module.exports = async function handler(req, res) {
     const inspected = validateInspection(railwayData, auth.user.id, assetId, motion ? { maxDurationMs: motionMaxMs, useSeconds } : null);
     if (!inspected) throw new Error('invalid_inspection_response');
 
-    const reviewUrls = [];
-    for (const path of inspected.reviewPaths) {
-      const { data, error } = await auth.supabase.storage.from(REFERENCE_DANCE_BUCKET).createSignedUrl(path, 10 * 60);
-      if (error || !data?.signedUrl) throw new Error('review_frame_url_failed');
-      reviewUrls.push(data.signedUrl);
-    }
-    const moderation = await moderateContent('', reviewUrls);
-    if (!moderation?.ok) throw new Error('reference_video_moderation_unavailable');
-    if (moderation.flagged === true) {
-      await removeObjects(auth.supabase, [row.staging_path, inspected.approvedPath, ...inspected.reviewPaths]);
-      await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
-        status: 'blocked',
-        approved_path: inspected.approvedPath,
-        review_paths: inspected.reviewPaths,
-        moderation_categories: moderation.categories || [],
-        expires_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
-      return res.status(422).json({ ok: false, error: 'reference_video_content_blocked', message: 'この参考動画は安全確認を通過できませんでした。' });
+    // Motion videos use provider content review; keep technical checks above and image/start moderation unchanged.
+    if (!motion) {
+      const reviewUrls = [];
+      for (const path of inspected.reviewPaths) {
+        const { data, error } = await auth.supabase.storage.from(REFERENCE_DANCE_BUCKET).createSignedUrl(path, 10 * 60);
+        if (error || !data?.signedUrl) throw new Error('review_frame_url_failed');
+        reviewUrls.push(data.signedUrl);
+      }
+      const moderation = await moderateContent('', reviewUrls);
+      if (!moderation?.ok) throw new Error('reference_video_moderation_unavailable');
+      if (moderation.flagged === true) {
+        await removeObjects(auth.supabase, [row.staging_path, inspected.approvedPath, ...inspected.reviewPaths]);
+        await auth.supabase.from(REFERENCE_DANCE_TABLE).update({
+          status: 'blocked',
+          approved_path: inspected.approvedPath,
+          review_paths: inspected.reviewPaths,
+          moderation_categories: moderation.categories || [],
+          expires_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq('id', assetId).eq('user_id', auth.user.id).eq('status', 'checking');
+        return res.status(422).json({ ok: false, error: 'reference_video_content_blocked', message: 'この参考動画は安全確認を通過できませんでした。' });
+      }
     }
 
     const expiresAt = new Date(Date.now() + REFERENCE_DANCE_RETENTION_MS).toISOString();
@@ -407,7 +419,7 @@ module.exports = async function handler(req, res) {
       video_codec: inspected.videoCodec,
       sha256: inspected.sha256,
       moderation_categories: [],
-      inspection_error: motion ? MOTION_MASTER_MARKER : null,
+      inspection_error: motion ? MOTION_PROVIDER_REVIEW_MARKER : null,
       // A length change keeps the retention it already had (extended at the claim only as far as the re-inspection
       // needs); only a first inspection starts the full retention. A change never renews the asset.
       ...(recut ? {} : { expires_at: expiresAt }),

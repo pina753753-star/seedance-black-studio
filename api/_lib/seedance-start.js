@@ -460,6 +460,7 @@ return async function handler(req, res) {
     const uiOrigin = body.ui_origin === 'storyboard' && mode === 'reference_to_video' ? 'storyboard' : '';
     const referenceDanceAssetId = String(body.reference_video_asset_id || '').trim();
     let referenceDance = null;
+    let referenceDanceInspectionMarker = null;
     let referenceDanceSignedUrl = '';
     // Kling dance is opt-in per request and always rides on a verified reference
     // video; an unknown method is refused instead of falling back to Seedance.
@@ -528,19 +529,20 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       }
       const { data: referenceDanceRow, error: referenceDanceError } = await db
         .from(REFERENCE_DANCE_TABLE)
-        .select('id,user_id,status,approved_path,size_bytes,duration_ms,billable_seconds,width,height,video_codec,sha256,rights_confirmed_at,expires_at,created_at')
+        .select('id,user_id,status,inspection_error,approved_path,size_bytes,duration_ms,billable_seconds,width,height,video_codec,sha256,rights_confirmed_at,expires_at,created_at')
         .eq('id', referenceDanceAssetId)
         .eq('user_id', user.id)
         .maybeSingle();
       if (referenceDanceError || !referenceDanceRow) {
         return res.status(400).json({ ok: false, error: 'reference_video_not_found', message: `${refVideoWord}を確認できませんでした。もう一度添付してください。` });
       }
+      referenceDanceInspectionMarker = referenceDanceRow.inspection_error ?? null;
       try {
         // Only the motion method reads an asset longer than the Seedance dance's 15 s, up to the stored-data bound (20 s)
         // regardless of the feature gate: with the gate closed, an existing 16-20 s asset is still validated as data and then
         // refused for a NEW generation by validateKlingDanceDuration (clear message, nothing charged), never misread as corrupt.
         referenceDance = validateReadyReferenceDance(referenceDanceRow, user.id,
-          isKlingDance ? { maxDurationMs: klingDance.KLING_DANCE_STORED_MAX_MS } : undefined);
+          isKlingDance ? { maxDurationMs: klingDance.KLING_DANCE_STORED_MAX_MS, allowMotionOnly: true } : undefined);
       } catch (error) {
         return res.status(400).json({ ok: false, error: error.code || 'reference_video_not_ready', message: `${refVideoWord}の安全確認が完了していません。もう一度添付してください。` });
       }
@@ -865,7 +867,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
           message: `${refVideoWord}の生成設定を保存できなかったため、生成を開始しませんでした。クレジットは消費されていません。`
         });
       }
-      const { data: boundRows, error: bindError } = await db.from(REFERENCE_DANCE_TABLE)
+      const bindQuery = db.from(REFERENCE_DANCE_TABLE)
         .update({ last_task_id: taskId, used_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq('id', referenceDance.assetId)
         .eq('user_id', user.id)
@@ -875,8 +877,11 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         // priced above; otherwise stop before any deduction.
         .eq('sha256', referenceDance.sha256)
         .eq('duration_ms', referenceDance.durationMs)
-        .eq('billable_seconds', referenceDance.billableSeconds)
-        .select('id');
+        .eq('billable_seconds', referenceDance.billableSeconds);
+      // Bind the moderation provenance as well as the exact file before charging.
+      const { data: boundRows, error: bindError } = await (referenceDanceInspectionMarker == null
+        ? bindQuery.is('inspection_error', null)
+        : bindQuery.eq('inspection_error', referenceDanceInspectionMarker)).select('id');
       if (bindError || !boundRows || boundRows.length !== 1) {
         await releaseTask(db, user.id, taskId, 'cancelled', 'Reference dance asset could not be bound');
         return res.status(503).json({

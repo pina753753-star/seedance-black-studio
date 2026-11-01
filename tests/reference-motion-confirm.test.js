@@ -31,7 +31,7 @@ function setup({ row = {}, upstream = inspected(), upstreamStatus = 200, flagged
     // a ready row sealed by the motion pipeline carries the marker (a Seedance one does not: pass inspection_error: null)
     ...(row.status === 'ready' ? { inspection_error: 'MOTION_MASTER' } : {}), ...row
   };
-  const lists = [];
+  const lists = [], moderationCalls = [];
   const updates = [], workerRequests = [], removals = [], claims = [];
   const db = {
     from() {
@@ -71,7 +71,7 @@ function setup({ row = {}, upstream = inspected(), upstreamStatus = 200, flagged
     console: { error(...a) { if (process.env.DBG) console.log('ERR', ...a); } }, process: { env: { WATERMARK_SERVER_URL: 'https://worker.invalid', WATERMARK_SECRET: 'mock-only' } },
     require(name) {
       if (name.includes('confirmed-auth')) return { requireConfirmedAuth: async () => ({ ok: true, user: { id: USER }, supabase: db }) };
-      if (name.includes('openai-moderation')) return { moderateContent: async () => ({ ok: true, flagged, categories: flagged ? ['x'] : [] }) };
+      if (name.includes('openai-moderation')) return { moderateContent: async (...args) => { moderationCalls.push(args); return { ok: true, flagged, categories: flagged ? ['x'] : [] }; } };
       if (name.includes('reference-dance')) return { ...lib, authorizeReferenceMotion: async () => ({ ok: true }) };
       throw new Error('Unexpected import ' + name);
     },
@@ -82,7 +82,7 @@ function setup({ row = {}, upstream = inspected(), upstreamStatus = 200, flagged
     await module.exports.handler?.({ method: 'POST', body }, res) ?? await module.exports({ method: 'POST', body }, res);
     return res;
   }
-  return { call, table, updates, workerRequests, removals, claims, lists, handler: module.exports };
+  return { call, table, updates, workerRequests, removals, claims, lists, moderationCalls, handler: module.exports };
 }
 test.afterEach(() => { klingDance.config.maxUseSeconds = 10; });
 
@@ -185,12 +185,13 @@ test('without a length key a ready asset returns its stored numbers (no recut, n
   assert.equal(h.workerRequests.length, 0);
 });
 
-test('moderation of the cut: flagged content blocks the asset and removes its objects', async () => {
+test('motion cut does not call OpenAI even when its mock would reject', async () => {
   const h = setup({ row: { status: 'ready' }, flagged: true, upstream: inspected({ durationMs: 12000 }, { mode: 'cut', useSeconds: 12 }) });
   const r = await h.call({ assetId: ASSET, profile: 'motion', useSeconds: 12 });
-  assert.equal(r.code, 422);
-  assert.equal(r.body.error, 'reference_video_content_blocked');
-  assert.equal(h.table.status, 'blocked');
+  assert.equal(r.code, 200);
+  assert.equal(h.moderationCalls.length, 0);
+  assert.equal(h.table.inspection_error, lib.MOTION_PROVIDER_REVIEW_MARKER);
+  assert.equal(h.removals.length, 0);
 });
 
 test('Seedance dance (no profile) is unchanged: 15 s limit, original staging removed after success', async () => {
@@ -271,8 +272,9 @@ test('gate closed again with 16-20 s data present: stored assets stay readable a
   // refuses >15 s without consent but the upload is RETAINED for an explicit choice - it is never deleted
   const retry = setup({ enabled: false, row: { status: 'uploading', inspection_error: 'MOTION_RECUT:VIDEO_CHECK_TIMEOUT' }, upstream: { ok: false, error: 'VIDEO_DURATION_INVALID', durationDiagnostics: { containerSeconds: 20, videoSeconds: 20 } }, upstreamStatus: 422 });
   const old = await retry.call({ assetId: ASSET, allowBoundaryTrim: false });
-  assert.equal(old.code, 422);
-  assert.equal(old.body.error, 'reference_video_trim_choice_required');
+  assert.equal(old.code, 400);
+  assert.equal(old.body.error, 'reference_video_motion_only');
+  assert.equal(retry.workerRequests.length, 0);
   assert.equal(retry.removals.length, 0, 'nothing is deleted');
   assert.equal(retry.table.status, 'uploading');
 });
@@ -371,7 +373,7 @@ test('motion asset with its master: the change succeeds, keeps the marker, and d
   const r = await h.call({ assetId: ASSET, profile: 'motion', useSeconds: 12 });
   assert.equal(r.code, 200, JSON.stringify(r.body));
   assert.equal(h.table.status, 'ready');
-  assert.equal(h.table.inspection_error, 'MOTION_MASTER');
+  assert.equal(h.table.inspection_error, lib.MOTION_PROVIDER_REVIEW_MARKER);
   assert.equal(h.table.expires_at, exp, 'no reset to a fresh 24 h');
   assert.equal(r.body.expiresAt, exp);
   // a first inspection still starts the full retention
@@ -379,7 +381,7 @@ test('motion asset with its master: the change succeeds, keeps the marker, and d
   const f = await first.call({ assetId: ASSET, profile: 'motion' });
   assert.equal(f.code, 200);
   assert.ok(Date.parse(first.table.expires_at) > Date.now() + 23 * 3600e3);
-  assert.equal(first.table.inspection_error, 'MOTION_MASTER');
+  assert.equal(first.table.inspection_error, lib.MOTION_PROVIDER_REVIEW_MARKER);
 });
 
 test('retention: near expiry the claim leaves enough time to finish; repeated changes never reset to a fresh 24 h', async () => {
@@ -442,3 +444,8 @@ test('a ready asset WITHOUT the motion marker is refused untouched even if an ob
 });
 
 test('30 second confirm accepts measured30 and refuses over30 with no ready write',async()=>{for(const ms of [30000,30001]){const h=setup({maxUse:30,upstream:inspected({durationMs:ms},{sourceDurationMs:45000,masterDurationMs:30000})});const r=await h.call({assetId:ASSET,profile:'motion'});if(ms===30000){assert.equal(r.code,200);assert.equal(r.body.billableSeconds,30);assert.equal(r.body.durationMs,30000);}else{assert.notEqual(r.code,200);assert.equal(h.updates.some(u=>u.status==='ready'),false);}}});
+
+test('first motion inspection records server purpose and makes zero OpenAI calls; body spoof cannot change it',async()=>{const h=setup({flagged:true});const r=await h.call({assetId:ASSET,profile:'motion',inspection_error:'MOTION_MASTER',moderation_categories:[]});assert.equal(r.code,200);assert.equal(h.moderationCalls.length,0);assert.equal(h.table.inspection_error,lib.MOTION_PROVIDER_REVIEW_MARKER);});
+test('ordinary video inspection retains OpenAI rejection and cleanup',async()=>{const h=setup({flagged:true,upstream:inspected({durationMs:10000})});const r=await h.call({assetId:ASSET});assert.equal(r.code,422);assert.equal(h.moderationCalls.length,1);assert.equal(h.table.status,'blocked');assert.ok(h.removals.length>0);});
+test('fake profile, cross-profile assets and blocked assets stop without inspection or moderation',async()=>{for(const [row,body,code] of [[{}, {profile:'fake'},400],[{status:'ready',inspection_error:lib.MOTION_PROVIDER_REVIEW_MARKER},{},400],[{status:'uploading',inspection_error:'MOTION_RECUT:x'},{},400],[{status:'ready',inspection_error:null},{profile:'motion'},400],[{status:'blocked',inspection_error:lib.MOTION_PROVIDER_REVIEW_MARKER},{profile:'motion'},409]]){const h=setup({row});const r=await h.call({assetId:ASSET,...body});assert.equal(r.code,code,JSON.stringify(r.body));assert.equal(h.workerRequests.length,0);assert.equal(h.moderationCalls.length,0);assert.equal(h.updates.length,0);}});
+test('technical-only asset recut and invalid-shortening restore preserve its purpose',async()=>{for(const fail of [false,true]){const h=setup({row:{status:'ready',inspection_error:lib.MOTION_PROVIDER_REVIEW_MARKER},upstream:fail?{ok:false,error:'MOTION_USE_EXCEEDS_SOURCE'}:inspected({durationMs:12000}),upstreamStatus:fail?422:200});const r=await h.call({assetId:ASSET,profile:'motion',useSeconds:12});assert.equal(r.code,fail?400:200);assert.equal(h.table.inspection_error,lib.MOTION_PROVIDER_REVIEW_MARKER);assert.equal(h.moderationCalls.length,0);}});

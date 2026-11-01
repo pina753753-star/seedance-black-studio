@@ -12,7 +12,7 @@ const USER = '5a951e62-7bc3-46c0-a89b-33fa5eea7bb3';
 const ASSET = '270bf01a-bafd-4255-8ad5-e18a4f1c8c47';
 function readyRow(overrides = {}) {
   return {
-    id: ASSET, user_id: USER, status: 'ready',
+    id: ASSET, user_id: USER, inspection_error: null, status: 'ready',
     approved_path: `approved/${USER}/${ASSET}.mp4`, size_bytes: 1024,
     duration_ms: 9500, billable_seconds: 10, width: 1920, height: 1080,
     video_codec: 'h264', sha256: 'a'.repeat(64),
@@ -23,7 +23,7 @@ function readyRow(overrides = {}) {
 
 // Load the real handler in an isolated module with all network/DB boundaries
 // mocked. No generation, storage write, or credit transaction leaves this test.
-async function runStart({ swapAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, accessAllowed = true, reserveDuplicate = false, bodyOverrides = {} } = {}) {
+async function runStart({ swapAfterRetention = false, swapPurposeAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, accessAllowed = true, reserveDuplicate = false, bodyOverrides = {} } = {}) {
   const rpcCalls = [], updates = [], providerCalls = [], events = [], accessCalls = [], moderated = [];
   const access = {
     ok: true, allowed: accessAllowed, plan: subscription ? 'premium' : 'free', accountStatus: 'active',
@@ -41,6 +41,7 @@ async function runStart({ swapAfterRetention = false, maxUse = 10, moderationBlo
             const current = expireBeforeRetention ? { ...row, expires_at: '2000-01-01T00:00:00.000Z' } : row;
             if (!predicates.every(predicate => predicate(current))) return { data: [], error: null };
             // A length change completes right after this request read the row: the row is 'ready' again, with a different file.
+            if (swapPurposeAfterRetention) row = { ...row, inspection_error: 'MOTION_PROVIDER_REVIEW' };
             if (swapAfterRetention) row = { ...row, sha256: 'b'.repeat(64), duration_ms: 8000, billable_seconds: 8 };
           }
           if (table === 'seedance_reference_video_uploads' && update.last_task_id) {
@@ -58,7 +59,7 @@ async function runStart({ swapAfterRetention = false, maxUse = 10, moderationBlo
         throw new Error(`Unexpected read: ${table}`);
       };
       const chain = {
-        select() { return chain; }, eq(key, value) { predicates.push(current => current[key] === value); return chain; }, in() { return chain; }, is() { return chain; },
+        select() { return chain; }, eq(key, value) { predicates.push(current => current[key] === value); return chain; }, in() { return chain; }, is(key,value) { if(key==='inspection_error')predicates.push(current=>current[key]===value); return chain; },
         gt(key, value) { predicates.push(current => current[key] > value); return chain; },
         update(value) { update = value; updates.push({ table, value }); events.push({ type: 'update', table, value }); return chain; },
         maybeSingle() { return Promise.resolve(result()); },
@@ -572,3 +573,7 @@ test('the feature gate and the stored-data bound are separate constants: gate 10
 
 for(const ms of [20001,25000,29901,30000])test(`30s candidate start ${ms}: server measurement and ceil19 agree`,async()=>{const r=await runStart({maxUse:30,row:motionRow(ms),bodyOverrides:motionBody(ms)});assert.equal(r.res.code,202,JSON.stringify(r.res.body));assert.equal(r.res.body.creditCost,Math.ceil(ms/1000)*19);assert.equal(r.providerCalls[0].payload.character_orientation,'video');});
 test('30s candidate refuses over30 and stale estimate before charge',async()=>{for(const [ms,extra] of [[30001,{}],[30000,{estimated_credits:380}],[30000,{use_billable_seconds:20}]]){const r=await runStart({maxUse:30,row:motionRow(ms),bodyOverrides:motionBody(ms,extra)});assert.notEqual(r.res.code,202);assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);}});
+
+test('motion-only purpose is accepted only by Kling; client profile cannot grant normal generation access',async()=>{const row=readyRow({inspection_error:'MOTION_PROVIDER_REVIEW'});const good=await runStart({row});assert.equal(good.res.code,202);assert.equal(good.moderated.length,1);const bad=await runStart({row,dance:false,bodyOverrides:{profile:'motion',reference_video_asset_id:ASSET}});assert.equal(bad.res.code,400);assert.equal(bad.providerCalls.length,0);assert.equal(bad.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);});
+test('same file with changed review purpose stops before deduction',async()=>{const r=await runStart({dance:false,swapPurposeAfterRetention:true,bodyOverrides:{reference_video_asset_id:ASSET}});assert.equal(r.res.code,503,JSON.stringify(r.res.body));assert.equal(r.res.body.error,'reference_video_bind_failed');assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);});
+test('provider refusal on technical-only motion still uses atomic refund, no automatic retry',async()=>{const r=await runStart({row:readyRow({inspection_error:'MOTION_PROVIDER_REVIEW'}),providerFailure:true});assert.equal(r.res.body.refunded,true);assert.equal(r.providerCalls.length,1);assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,1);});
