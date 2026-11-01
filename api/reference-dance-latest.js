@@ -1,7 +1,7 @@
 'use strict';
 
 const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
-const { REFERENCE_DANCE_TABLE, authorizeReferenceMotion } = require('./_lib/reference-dance.js');
+const { REFERENCE_DANCE_TABLE, authorizeReferenceMotion, MOTION_PROVIDER_REVIEW_MARKER, isMotionOnlyReference } = require('./_lib/reference-dance.js');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -23,10 +23,10 @@ module.exports = async function handler(req, res) {
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1);
-    if (motion) query = query.eq('inspection_error', 'MOTION_MASTER').eq('status', 'ready');
+    if (motion) query = query.in('inspection_error', ['MOTION_MASTER', MOTION_PROVIDER_REVIEW_MARKER]).eq('status', 'ready');
     const { data, error } = await query.maybeSingle();
     if (error) throw error;
-    if (!data) return res.status(200).json({ ok: true, asset: null });
+    if (!data || (!motion && isMotionOnlyReference(data))) return res.status(200).json({ ok: true, asset: null });
     return res.status(200).json({
       ok: true,
       asset: {

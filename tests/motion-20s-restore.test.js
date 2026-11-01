@@ -14,3 +14,5 @@ test('30s motion asset restores only in motion profile, with existing ownership 
  for(const change of [{user_id:'other'},{expires_at:'2000-01-01T00:00:00Z'},{duration_ms:30001},{inspection_error:null},{status:'blocked'},{last_task_id:'used'}])assert.equal((await read('motion',[row(change)])).body.asset,null,JSON.stringify(change));
  assert.equal((await read('unknown',[row()])).code,400);
 });
+
+test('technical-only 10s asset restores only in motion; ordinary UI cannot restore it',async()=>{const r=row({duration_ms:10000,billable_seconds:10,inspection_error:lib.MOTION_PROVIDER_REVIEW_MARKER});assert.equal((await read('motion',[r])).body.asset.id,'stored');assert.equal((await read(undefined,[r])).body.asset,null);});

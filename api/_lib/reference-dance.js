@@ -121,9 +121,17 @@ function referenceDanceCredits(referenceBillableSeconds, resolution = REFERENCE_
   return Math.ceil(((cents * 11) / 12) / 5) * 5;
 }
 
-function validateReadyReferenceDance(row, userId, { maxDurationMs = MAX_REFERENCE_DANCE_DURATION_MS } = {}) {
+// Server-written provenance; never accept a client-supplied moderation result.
+const MOTION_PROVIDER_REVIEW_MARKER = 'MOTION_PROVIDER_REVIEW';
+function isMotionOnlyReference(row) {
+  const marker = String(row?.inspection_error || '');
+  return marker === MOTION_PROVIDER_REVIEW_MARKER || marker.startsWith('MOTION_RECUT:');
+}
+
+function validateReadyReferenceDance(row, userId, { maxDurationMs = MAX_REFERENCE_DANCE_DURATION_MS, allowMotionOnly = false } = {}) {
   if (!row || row.user_id !== userId || !isUuid(row.id)) throw error('reference_video_not_found');
   if (row.status !== 'ready') throw error('reference_video_not_ready');
+  if (isMotionOnlyReference(row) && !allowMotionOnly) throw error('reference_video_motion_only');
   const expiresMs = Date.parse(String(row.expires_at || ''));
   if (!Number.isFinite(expiresMs) || expiresMs <= Date.now()) throw error('reference_video_expired');
   if (!Number.isFinite(Date.parse(String(row.rights_confirmed_at || '')))) throw error('reference_video_rights_unconfirmed');
@@ -323,6 +331,8 @@ const klingDance = Object.freeze({
 });
 
 module.exports = {
+  MOTION_PROVIDER_REVIEW_MARKER,
+  isMotionOnlyReference,
   klingDance,
   REFERENCE_DANCE_BUCKET,
   REFERENCE_DANCE_TABLE,
