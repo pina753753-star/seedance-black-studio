@@ -476,10 +476,11 @@ return async function handler(req, res) {
       return res.status(400).json({ ok: false, error: 'reference_video_required', message: 'モーションにはお手本動画の添付が必要です。' });
     }
     let klingDanceSeconds = 0;
+    let klingOrientation = 'image';
     let generationPlan = 'free';
     let generationAccess;
     if (SEEDANCE_25_MODELS.has(model)) {
-      const entitlement = referenceDanceAssetId || uiOrigin === 'storyboard' || mode === 'storyboard'
+      const entitlement = (referenceDanceAssetId && !isKlingDance) || uiOrigin === 'storyboard' || mode === 'storyboard'
         ? await getSeedance25SubscriptionEntitlement(db, user.id)
         : await getSeedance25Entitlement(db, user.id);
       if (!entitlement.ok) {
@@ -493,7 +494,9 @@ return async function handler(req, res) {
         return res.status(403).json({
           ok: false,
           error: 'seedance_25_plan_required',
-          message: referenceDanceAssetId
+          message: isKlingDance
+            ? 'モーションは対象の有効サブスク、または有効な購入クレジットで利用できます。'
+            : referenceDanceAssetId
             ? '参考ダンス動画は対象の有効なサブスクで利用できます。'
             : uiOrigin === 'storyboard' || mode === 'storyboard'
             ? 'Seedance 2.5の絵コンテは対象の有効なサブスクで利用できます。'
@@ -519,9 +522,9 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       } catch (error) {
         return res.status(400).json({ ok: false, error: error.code || 'reference_dance_variant_not_allowed', message: '参考ダンス動画はSeedance 2.5 Turbo・リファレンス・480p／720pで利用できます。生成尺と縦横比は参考動画に従います。' });
       }
-      const adminAccess = await authorizeReferenceDanceAdmin(auth);
+      const adminAccess = isKlingDance ? { ok: generationAccess.allowed === true } : await authorizeReferenceDanceAdmin(auth);
       if (!adminAccess.ok) {
-        return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden', message: isKlingDance ? 'モーションは現在、運営テスト専用です。' : '参考ダンス動画は現在、運営テスト専用です。' });
+        return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden', message: isKlingDance ? 'モーションには対象の有効サブスク、または有効な購入クレジットが必要です。' : '参考ダンス動画は現在、運営テスト専用です。' });
       }
       const { data: referenceDanceRow, error: referenceDanceError } = await db
         .from(REFERENCE_DANCE_TABLE)
@@ -533,7 +536,11 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         return res.status(400).json({ ok: false, error: 'reference_video_not_found', message: `${refVideoWord}を確認できませんでした。もう一度添付してください。` });
       }
       try {
-        referenceDance = validateReadyReferenceDance(referenceDanceRow, user.id);
+        // Only the motion method reads an asset longer than the Seedance dance's 15 s, up to the stored-data bound (20 s)
+        // regardless of the feature gate: with the gate closed, an existing 16-20 s asset is still validated as data and then
+        // refused for a NEW generation by validateKlingDanceDuration (clear message, nothing charged), never misread as corrupt.
+        referenceDance = validateReadyReferenceDance(referenceDanceRow, user.id,
+          isKlingDance ? { maxDurationMs: klingDance.KLING_DANCE_STORED_MAX_MS } : undefined);
       } catch (error) {
         return res.status(400).json({ ok: false, error: error.code || 'reference_video_not_ready', message: `${refVideoWord}の安全確認が完了していません。もう一度添付してください。` });
       }
@@ -548,7 +555,20 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         try {
           klingDanceSeconds = klingDance.validateKlingDanceDuration({ durationMs: referenceDance.durationMs, billableSeconds: referenceDance.billableSeconds });
         } catch (_) {
-          return res.status(400).json({ ok: false, error: 'kling_dance_duration_unsupported', message: `モーションで使えるお手本動画は${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.KLING_DANCE_MAX_SECONDS}秒です。自動では短くしません。動画を差し替えてください。` });
+          return res.status(400).json({ ok: false, error: 'kling_dance_duration_unsupported', message: `モーションで使えるお手本動画は${klingDance.KLING_DANCE_MIN_SECONDS}〜${klingDance.getKlingDanceMaxSeconds()}秒です。自動では短くしません。動画を差し替えてください。` });
+        }
+        // The orientation follows the measured length of the file that is actually sent. What the screen
+        // showed (length and orientation) must equal what the server derives from the sealed file, so a
+        // stale or altered selection stops here, before any reservation or charge.
+        klingOrientation = klingDance.klingDanceOrientation(referenceDance.durationMs);
+        const selectEnabled = klingDance.isKlingDanceLengthSelectEnabled();
+        const claimedSeconds = body.use_billable_seconds;
+        const claimedOrientation = body.orientation_mode;
+        if ((selectEnabled || claimedSeconds !== undefined) && claimedSeconds !== klingDanceSeconds) {
+          return res.status(409).json({ ok: false, error: 'motion_length_changed', credits: klingDanceSeconds * (klingDance.getKlingDanceCreditsPerSecond() || 0), message: '使用する長さが変わりました。画面を確認してから、もう一度お試しください。生成は開始していません。' });
+        }
+        if ((selectEnabled || claimedOrientation !== undefined) && claimedOrientation !== klingOrientation) {
+          return res.status(409).json({ ok: false, error: 'motion_orientation_changed', message: '人物の向きの基準が変わりました。画面を確認してから、もう一度お試しください。生成は開始していません。' });
         }
         if (klingDance.getKlingDanceCreditsPerSecond() === null) {
           return res.status(503).json({ ok: false, error: 'kling_dance_price_undecided', message: 'モーションは現在準備中です。料金確定後にご利用いただけます。' });
@@ -828,7 +848,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
           width: referenceDance.width,
           height: referenceDance.height
         },
-        ...(isKlingDance ? { dance_method: klingDance.KLING_DANCE_METHOD, provider_model: klingDance.KLING_DANCE_PROVIDER_MODEL } : {})
+        ...(isKlingDance ? { dance_method: klingDance.KLING_DANCE_METHOD, provider_model: klingDance.KLING_DANCE_PROVIDER_MODEL, character_orientation: klingOrientation } : {})
       };
       const { data: settingsRows, error: settingsError } = await db.from('generation_tasks')
         .update({ settings: danceSettings, updated_at: new Date().toISOString() })
@@ -850,6 +870,12 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         .eq('id', referenceDance.assetId)
         .eq('user_id', user.id)
         .eq('status', 'ready')
+        // The sealed file may have been replaced by a length change after this request read the row (it
+        // would still be 'ready' again). Bind only the exact file whose numbers were read, validated and
+        // priced above; otherwise stop before any deduction.
+        .eq('sha256', referenceDance.sha256)
+        .eq('duration_ms', referenceDance.durationMs)
+        .eq('billable_seconds', referenceDance.billableSeconds)
         .select('id');
       if (bindError || !boundRows || boundRows.length !== 1) {
         await releaseTask(db, user.id, taskId, 'cancelled', 'Reference dance asset could not be bound');
@@ -948,7 +974,8 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         ? klingDance.buildKlingDancePayload({
           prompt: providerPrompt,
           imageUrl: collectWaveSpeedReferenceImageUrls({ frameImages, inputReferences, firstFrameUrl, referenceUrl, referenceUrls })[0],
-          videoUrl: referenceDanceSignedUrl
+          videoUrl: referenceDanceSignedUrl,
+          orientation: klingOrientation
         })
       : referenceDance
         ? buildWaveSpeedMotionControlPayload({
