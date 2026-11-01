@@ -18,6 +18,7 @@ const {
   planMotionOutput,
   validateMotionOutput,
   motionOutputOptions,
+  motionMediaDiagnostics,
   videoStreamSeconds
 } = require('./reference-dance-inspection.js');
 
@@ -1090,6 +1091,8 @@ async function runMotionReferenceInspection({ userId, assetId, stagingPath, stor
   let jobDirectory;
   const processingDeadline = Date.now() + REFERENCE_DANCE_PROCESS_TIMEOUT_MS;
   let durationDiagnostics;
+  let stage = 'input';
+  let mediaDiagnostics = null;
   try {
     jobDirectory = fs.mkdtempSync('/tmp/pina-motion-');
     const inputFile = path.join(jobDirectory, 'input.mp4');
@@ -1101,23 +1104,30 @@ async function runMotionReferenceInspection({ userId, assetId, stagingPath, stor
     if (!sourceBuffer) throw referenceDanceError('VIDEO_NOT_FOUND');
     fs.writeFileSync(inputFile, sourceBuffer);
 
+    stage = 'decode';
     const probe = await referenceDanceProbe(inputFile, referenceDanceRemainingMs(processingDeadline));
     durationDiagnostics = referenceDanceDurationDiagnostics(probe);
+    mediaDiagnostics = motionMediaDiagnostics(probe);
+    stage = 'input';
     const inputMetadata = validateReferenceDanceProbe(probe, { allowHevcInput: true, motion: true });
     const plan = planMotionOutput({ sourceDurationSeconds: videoStreamSeconds(probe, inputMetadata.durationSeconds), useSeconds });
     if (capabilities?.masterUpload && plan.mode !== 'whole') throw referenceDanceError('MOTION_MASTER_INVALID');
 
+    stage = 'normalize';
     await runFfmpeg(
       () => ffmpeg(inputFile).inputOptions('-protocol_whitelist', 'file,pipe', '-threads', '1')
-        .outputOptions(...motionOutputOptions(plan, REFERENCE_DANCE_MAX_BYTES)).output(approvedFile),
+        .outputOptions(...motionOutputOptions(plan, REFERENCE_DANCE_MAX_BYTES, inputMetadata)).output(approvedFile),
       referenceDanceRemainingMs(processingDeadline)
     );
 
     // The sealed file that will be moderated, billed and sent is probed again: its measured
     // duration must be the planned one (never longer, at most one second shorter).
+    stage = 'postcheck';
     const approvedProbe = await referenceDanceProbe(approvedFile, referenceDanceRemainingMs(processingDeadline));
+    mediaDiagnostics = motionMediaDiagnostics(approvedProbe);
     const approvedMetadata = validateReferenceDanceProbe(approvedProbe, { requireNoAudio: true, motion: true });
     validateMotionOutput(plan, approvedMetadata);
+    stage = null;
     const { durationSeconds: approvedDuration, durationMs, width, height, fps } = approvedMetadata;
 
     const positions = [0.05, 0.25, 0.5, 0.75, 0.95].map((ratio) =>
@@ -1169,6 +1179,7 @@ async function runMotionReferenceInspection({ userId, assetId, stagingPath, stor
       }
     };
   } catch (error) {
+    if (stage) console.error('[motion-normalization] failed', { stage, ...mediaDiagnostics });
     if (durationDiagnostics) error.durationDiagnostics = durationDiagnostics;
     throw error;
   } finally {
