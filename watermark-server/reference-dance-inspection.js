@@ -14,6 +14,25 @@ function inspectionError(code) {
   return Object.assign(new Error(code), { publicCode: code });
 }
 
+// Fixed fields and enumerated values only: never log arbitrary stream tags,
+// file paths, media contents, URLs or native FFmpeg error text.
+function motionMediaDiagnostics(probe) {
+  const v = probe?.streams?.find(s => s?.codec_type === 'video') || {};
+  const pick = (value, allowed) => allowed.includes(value) ? value : 'unknown';
+  const sar = /^(\d{1,5}):(\d{1,5})$/.test(String(v.sample_aspect_ratio)) ? v.sample_aspect_ratio : 'unknown';
+  return {
+    codec: pick(v.codec_name, ['h264', 'hevc']),
+    pix_fmt: pick(v.pix_fmt, ['yuv420p', 'yuvj420p', 'yuv420p10le', 'yuv422p', 'yuv444p']),
+    profile: pick(v.profile, ['Main', 'Main 10', 'High', 'High 10', 'Baseline', 'Constrained Baseline']),
+    depth: pick(String(v.bits_per_raw_sample || ''), ['8', '10', '12']),
+    sar,
+    range: pick(v.color_range, ['pc', 'tv']),
+    transfer: pick(v.color_transfer, ['bt709', 'smpte170m', 'smpte2084', 'arib-std-b67']),
+    primaries: pick(v.color_primaries, ['bt709', 'smpte170m', 'bt2020']),
+    space: pick(v.color_space, ['bt709', 'smpte170m', 'bt470bg', 'bt2020nc', 'bt2020c'])
+  };
+}
+
 function parseFps(value) {
   if (!value) return 24;
   const parts = String(value).split('/').map(Number);
@@ -125,19 +144,25 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
       throw inspectionError('VIDEO_HDR_UNSUPPORTED');
     }
     // The scale filter operates on pixel dimensions and emits square pixels.
-    // Reject anamorphic sources instead of silently changing display shape.
+    // Motion inputs may have bounded anamorphic SAR, normalized using display
+    // aspect by motionOutputOptions. Legacy and sealed outputs stay square.
     // Missing/N/A/0:1 denote unspecified SAR; FFmpeg treats those as square.
     const sar = video.sample_aspect_ratio;
     if (sar !== undefined && sar !== null && sar !== 'N/A' && sar !== '0:1') {
       const match = /^(\d+):(\d+)$/.exec(String(sar));
       if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) < 1
-        || Number(match[1]) !== Number(match[2])) throw inspectionError('VIDEO_PROFILE_UNSUPPORTED');
+        || !Number.isSafeInteger(Number(match[2])) || Number(match[2]) < 1
+        || (motion && !requireNoAudio
+          ? Number(match[1]) / Number(match[2]) < 0.25 || Number(match[1]) / Number(match[2]) > 4
+          : Number(match[1]) !== Number(match[2]))) throw inspectionError('VIDEO_PROFILE_UNSUPPORTED');
     }
     const supportedProfile = codec === 'hevc' ? video.profile === 'Main'
       : ['Constrained Baseline', 'Baseline', 'Main', 'High'].includes(video.profile);
-    if (video.pix_fmt !== 'yuv420p' || !supportedProfile
+    const convertibleInput = motion && !requireNoAudio;
+    if (!(convertibleInput ? ['yuv420p', 'yuvj420p'].includes(video.pix_fmt) : video.pix_fmt === 'yuv420p') || !supportedProfile
       || (Number(video.bits_per_raw_sample || 8) !== 8)) throw inspectionError('VIDEO_PROFILE_UNSUPPORTED');
   }
+  if (motion && requireNoAudio && video.color_range !== 'tv') throw inspectionError('VIDEO_PROFILE_UNSUPPORTED');
   return Object.freeze({
     durationSeconds,
     durationMs,
@@ -145,6 +170,7 @@ function validateReferenceDanceProbe(probe, { requireNoAudio = false, allowHevcI
     height,
     fps,
     videoCodec: codec,
+    ...(motion && !requireNoAudio ? { inputRange: video.pix_fmt === 'yuvj420p' || video.color_range === 'pc' ? 'full' : video.color_range === 'tv' ? 'limited' : 'auto' } : {}),
     ...(requiresBoundaryTrim ? { requiresBoundaryTrim: true } : {})
   });
 }
@@ -202,13 +228,17 @@ function validateMotionOutput(plan, approvedMetadata) {
 }
 
 // The exact FFmpeg output options of the motion transcode (also used by the real-FFmpeg tests).
-function motionOutputOptions(plan, maxBytes) {
+function motionOutputOptions(plan, maxBytes, inputMetadata = {}) {
+  const range = ['full', 'limited'].includes(inputMetadata.inputRange) ? inputMetadata.inputRange : 'auto';
+  // Respect display aspect (including SAR after FFmpeg's automatic rotation),
+  // then emit square pixels. Convert sample values, not just range tags.
+  const factor = 'min(1,min(1280/max(iw*sar,ih),720/min(iw*sar,ih)))';
   return [
     '-map', '0:v:0', '-c:v', 'libx264', '-threads', '2', '-filter_threads', '1',
     '-preset', 'veryfast', '-crf', '23', '-maxrate', '6M', '-bufsize', '12M',
-    '-vf', "fps=30,scale=w='min(iw,if(gte(iw,ih),1280,720))':h='min(ih,if(gte(iw,ih),720,1280))':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+    '-vf', `fps=30,scale=w='max(2,trunc(iw*sar*${factor}/2)*2)':h='max(2,trunc(ih*${factor}/2)*2)':in_range=${range}:out_range=limited,setsar=1`,
     '-frames:v', String(plan.frames),
-    '-pix_fmt', 'yuv420p', '-metadata:s:v:0', 'rotate=0',
+    '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-bsf:v', 'h264_metadata=video_full_range_flag=0', '-metadata:s:v:0', 'rotate=0',
     '-fs', String(maxBytes),
     '-an', '-movflags', '+faststart'
   ];
@@ -216,6 +246,6 @@ function motionOutputOptions(plan, maxBytes) {
 
 module.exports = {
   validateReferenceDanceProbe, validateReferenceDanceDurationMatch, referenceDanceDurationDiagnostics,
-  planMotionOutput, validateMotionOutput, motionOutputOptions, videoStreamSeconds,
+  planMotionOutput, validateMotionOutput, motionOutputOptions, videoStreamSeconds, motionMediaDiagnostics,
   MOTION_MIN_USE_SECONDS, MOTION_MAX_USE_SECONDS, MOTION_MAX_SOURCE_SECONDS, MOTION_FPS
 };
