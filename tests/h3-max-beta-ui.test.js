@@ -54,7 +54,7 @@ test('H3 Max: 保存はBlobを取得してobject URLからファイル保存す�
 
 test('H3 Max: 料金と残高はfeedのserver値で表示・ゲートする', () => {
   assert.match(html, /api\('\/api\/h3-live\/feed'\)/);
-  assert.match(html, /state\.creditCost=typeof e\.creditCost==='number'/);
+  assert.match(html, /state\.creditCost=e\.creditCosts\?e\.creditCosts\[state\.mode\]/);
   assert.match(html, /state\.hasEnough=e\.hasEnoughCredits!==false/);
   assert.match(html, /1本 '\+state\.creditCost\+' クレジット/);
 });
@@ -66,4 +66,26 @@ test('Vercel: 既存h3-live.html導線を新BETA UIへ先にルーティング�
   assert.ok(betaIndex >= 0);
   assert.ok(filesystemIndex >= 0);
   assert.ok(betaIndex < filesystemIndex);
+});
+
+test('H3 mode quote and balance gate follow server prices at the 120/130 boundary', () => {
+  const vm = require('node:vm');
+  const source = html.match(/    function applyEligibility\(e\)\{[^\n]+/)[0];
+  const elements = new Map();
+  const context = {
+    state: { mode: 'text' },
+    $: id => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); },
+    refreshSend() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  const eligibility = { planAllowed: true, balance: 125, creditCost: 120,
+    creditCosts: { text: 120, image: 130, reference: 130, storyboard: 130 } };
+  for (const mode of ['text', 'image', 'reference', 'storyboard', 'text']) {
+    context.state.mode = mode;
+    context.applyEligibility(eligibility);
+    assert.equal(context.state.creditCost, eligibility.creditCosts[mode]);
+    assert.equal(context.state.hasEnough, mode === 'text');
+    assert.match(elements.get('priceText').textContent, new RegExp(String(eligibility.creditCosts[mode])));
+  }
 });

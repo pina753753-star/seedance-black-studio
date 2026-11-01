@@ -309,7 +309,7 @@ function makeReserveRpc({ code = null, jobId = uuid(50), existing = false, retry
       }
       return { data: [{ job_id: code ? (existing ? jobId : null) : jobId, code, retry_after_seconds: retryAfter, existing }], error: null };
     }
-    if (name === 'deduct_h3_live_credits_atomic') {
+    if (name === 'deduct_h3_live_credits_quoted_atomic') {
       return { data: { ok: true, code: 'deducted', deducted: 60, new_balance: 940, from_subscription: 0, from_free: 60, from_purchased: 0 }, error: null };
     }
     if (name === 'refund_h3_live_job_atomic') {
@@ -462,7 +462,7 @@ test('moderation未完了(pending)画像: DB側(reserve RPC)がimage_not_usable�
     const db = makeFakeDb({
       jobsRows: [],
       rpcImpl: async (name, args) => {
-        if (name === 'deduct_h3_live_credits_atomic') deductCalled = true;
+        if (name === 'deduct_h3_live_credits_quoted_atomic') deductCalled = true;
         return makeReserveRpc({ code: 'image_not_usable' })(name, args);
       }
     });
@@ -490,7 +490,7 @@ test('3枚中1枚だけmoderation NG: charge 0 / fal 0、422で停止する', as
     const db = makeFakeDb({
       jobsRows: [],
       rpcImpl: async (name, args) => {
-        if (name === 'deduct_h3_live_credits_atomic') deductCalled = true;
+        if (name === 'deduct_h3_live_credits_quoted_atomic') deductCalled = true;
         return makeReserveRpc()(name, args);
       }
     });
@@ -519,7 +519,7 @@ test('安全な画像 + NGプロンプト: 422、画像rowはblockedにならな
     const db = makeFakeDb({
       jobsRows: [],
       rpcImpl: async (name, args) => {
-        if (name === 'deduct_h3_live_credits_atomic') deductCalled = true;
+        if (name === 'deduct_h3_live_credits_quoted_atomic') deductCalled = true;
         return makeReserveRpc()(name, args);
       }
     });
@@ -579,7 +579,7 @@ test('2枚目画像NG: 3枚目以降は送らない、reserve 0 / charge 0 / fal
       jobsRows: [],
       rpcImpl: async (name, args) => {
         rpcCalled = true;
-        if (name === 'deduct_h3_live_credits_atomic') deductCalled = true;
+        if (name === 'deduct_h3_live_credits_quoted_atomic') deductCalled = true;
         return makeReserveRpc()(name, args);
       }
     });
@@ -608,7 +608,7 @@ test('image moderation unavailable: 503、reserve 0 / charge 0 / fal 0', async (
       jobsRows: [],
       rpcImpl: async (name, args) => {
         rpcCalled = true;
-        if (name === 'deduct_h3_live_credits_atomic') deductCalled = true;
+        if (name === 'deduct_h3_live_credits_quoted_atomic') deductCalled = true;
         return makeReserveRpc()(name, args);
       }
     });
@@ -634,7 +634,7 @@ test('text moderation unavailable: 503、reserve 0 / charge 0 / fal 0', async ()
       jobsRows: [],
       rpcImpl: async (name, args) => {
         rpcCalled = true;
-        if (name === 'deduct_h3_live_credits_atomic') deductCalled = true;
+        if (name === 'deduct_h3_live_credits_quoted_atomic') deductCalled = true;
         return makeReserveRpc()(name, args);
       }
     });
@@ -709,7 +709,7 @@ test('二重送信(同時実行の2本目がactive_job): 409で停止し、2本�
     const db = makeFakeDb({
       jobsRows: [],
       rpcImpl: async (name, args) => {
-        if (name === 'deduct_h3_live_credits_atomic') deductCalls++;
+        if (name === 'deduct_h3_live_credits_quoted_atomic') deductCalls++;
         return makeReserveRpc({ code: 'active_job' })(name, args);
       }
     });

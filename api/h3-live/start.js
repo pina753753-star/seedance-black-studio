@@ -62,7 +62,7 @@ const {
 const {
   INSTRUCTION_MIN_CHARS,
   INSTRUCTION_MAX_CHARS,
-  CREDIT_COST,
+  creditCostForMode,
   STATUS_POLL_MS,
   FAL_MODEL_ID_TEXT,
   FAL_MODEL_ID_REFERENCE,
@@ -146,7 +146,7 @@ module.exports = async function handler(req, res) {
       note: 'POST only. Authorization: Bearer <supabase-jwt> and Idempotency-Key: <uuid> required.',
       models: { text: FAL_MODEL_ID_TEXT, image: FAL_MODEL_ID_REFERENCE, reference: FAL_MODEL_ID_REFERENCE, storyboard: FAL_MODEL_ID_REFERENCE },
       modes: ['text', 'image', 'reference', 'storyboard'],
-      fixed: { durationSeconds: 15, resolution: '768p', creditCost: CREDIT_COST }
+      fixed: { durationSeconds: 15, resolution: '768p', creditCost: creditCostForMode() }
     });
   }
 
@@ -737,12 +737,13 @@ module.exports = async function handler(req, res) {
     console.warn('[h3-live/start] resuming interrupted, uncharged job. jobId:', jobId);
   }
 
-  // ---- Deduct 110 credits ----
+  // ---- Deduct the stored price only if it matches the displayed quote ----
   let deduction;
   try {
-    const { data, error } = await db.rpc('deduct_h3_live_credits_atomic', {
+    const { data, error } = await db.rpc('deduct_h3_live_credits_quoted_atomic', {
       p_job_id: jobId,
-      p_user_id: user.id
+      p_user_id: user.id,
+      p_expected_credit_cost: Number.isInteger(body.expectedCreditCost) ? body.expectedCreditCost : null
     });
     if (error) {
       console.error('[h3-live/start] deduct RPC error:', error.message, 'jobId:', jobId);
@@ -761,6 +762,11 @@ module.exports = async function handler(req, res) {
   }
 
   if (!deduction?.ok) {
+    if (deduction?.code === 'price_changed') {
+      return res.status(409).json({ ok: false, error: 'price_changed',
+        message: '料金が更新されました。画面の料金を確認してから、もう一度お試しください。',
+        required: deduction.required });
+    }
     // reserve/deduct RPCs already move the job to a terminal failed state for
     // insufficient_credits / service_disabled / balance_not_found.
     if (deduction?.code === 'insufficient_credits') {
@@ -832,7 +838,7 @@ module.exports = async function handler(req, res) {
       error: 'h3_live_disabled',
       message: 'H3 Live は現在利用できません。' + (r.refunded ? 'クレジットは返還しました。' : ''),
       refunded: r.refunded,
-      creditRefunded: r.refunded ? CREDIT_COST : 0
+      creditRefunded: r.refunded ? deduction.deducted : 0
     });
   }
 
@@ -853,7 +859,7 @@ module.exports = async function handler(req, res) {
             error: 'image_url_sign_failed',
             message: '生成の開始に失敗しました。' + (r.refunded ? 'クレジットは返還しました。' : ''),
             refunded: r.refunded,
-            creditRefunded: r.refunded ? CREDIT_COST : 0
+            creditRefunded: r.refunded ? deduction.deducted : 0
           }
         : { ok: false, error: 'refund_state_uncertain', message: REFUND_UNCONFIRMED_MESSAGE, jobId });
     }
@@ -948,7 +954,7 @@ module.exports = async function handler(req, res) {
       error: `provider_${submission.category}`,
       message: message + (r.refunded ? 'クレジットは返還しました。' : ''),
       refunded: r.refunded,
-      creditRefunded: r.refunded ? CREDIT_COST : 0
+      creditRefunded: r.refunded ? deduction.deducted : 0
     });
   }
 
