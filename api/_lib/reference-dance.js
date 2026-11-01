@@ -224,7 +224,7 @@ const KLING_DANCE_VIDEO_ORIENTATION = 'video';
 // another tab can leak in. TASK_PROMPT is what is stored (history) and moderated; the
 // provider prompt keeps the character image as the basis. It does not guarantee results.
 const KLING_DANCE_TASK_PROMPT = 'モーション（画像とお手本動画）';
-const KLING_DANCE_PROVIDER_PROMPT = 'Keep the character from the input image as pictured: face, hairstyle, body shape, clothing and background. Reproduce only the dance and body motion of the reference video. Do not copy the reference video person, clothing or background.';
+const KLING_DANCE_PROVIDER_PROMPT = 'Transfer the choreography, movement and timing from the reference video to the subject in the input image. Preserve that subject’s identity, anatomy, body proportions and existing limbs or appendages; adapt the motion to its anatomy without adding or replacing body parts. Use a fixed camera positioned in front of the subject, with its whole body clearly visible at a consistent, easy-to-see size and comfortable space around it throughout the dance. Allow natural body turns required by the choreography; keep the camera fixed rather than forcing the subject to face forward at every moment. Preserve the input image’s appearance and background. Do not copy other subjects or the background from the reference video, or transfer its camera movement, pullbacks, zooms or cuts.';
 
 // Kling-only credits per second (owner decision: 19 cr/s, i.e. 5 s = 95, 10 s = 190).
 // Never derived from Seedance pricing and never read from the request. If it is

@@ -369,7 +369,13 @@ test('motion needs no prompt: empty/missing body.prompt works, the server builds
     assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
     assert.equal(r.providerCalls[0].payload.prompt, klingDance.KLING_DANCE_PROVIDER_PROMPT);
     assert.match(r.providerCalls[0].payload.prompt, /input image/);
-    assert.match(r.providerCalls[0].payload.prompt, /face, hairstyle, body shape, clothing and background/);
+    assert.match(r.providerCalls[0].payload.prompt, /identity, anatomy, body proportions and existing limbs or appendages/);
+    assert.match(r.providerCalls[0].payload.prompt, /without adding or replacing body parts/);
+    assert.match(r.providerCalls[0].payload.prompt, /fixed camera positioned in front/);
+    assert.match(r.providerCalls[0].payload.prompt, /whole body clearly visible/);
+    assert.match(r.providerCalls[0].payload.prompt, /Allow natural body turns required by the choreography/);
+    assert.match(r.providerCalls[0].payload.prompt, /pullbacks, zooms or cuts/);
+    assert.doesNotMatch(r.providerCalls[0].payload.prompt, /bird|human|hairstyle/i);
     const reserve = r.rpcCalls.find(c => c.name === 'reserve_generation_task').args;
     assert.equal(reserve.p_prompt, klingDance.KLING_DANCE_TASK_PROMPT);
   }
