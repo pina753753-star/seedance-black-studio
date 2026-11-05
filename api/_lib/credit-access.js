@@ -3,7 +3,7 @@
 // Subscription benefits and credit-purchase access are deliberately separate.
 // Never mutate profiles.plan or subscription expiry to grant pack access.
 const PAID_PLANS = Object.freeze(['standard', 'premium', 'ultimate', 'team', 'scale']);
-const MODEL_PLANS = Object.freeze(['premium', 'ultimate', 'team', 'scale']);
+const MODEL_PLANS = Object.freeze(['standard', 'premium', 'ultimate', 'team', 'scale']);
 function activeSubscription(plan, expiry, now = Date.now()) {
   return PAID_PLANS.includes(String(plan || '').trim().toLowerCase())
     && Number.isFinite(Date.parse(String(expiry || '')))
@@ -41,10 +41,11 @@ async function getCreditAccess(db, userId, { paidPlans = MODEL_PLANS, now = Date
   result.allowed = false;
   result.hasPurchasedAccess = false;
   if (base.accountStatus !== 'active') return { ...result, error: 'account_restricted' };
-  // Existing subscriber path retains its feature allow-list. Every active
-  // subscription, including Standard, retains its watermark exemption.
+  // Model access comes from the subscription, independently of purchased funds.
+  // Standard debits use a separate RPC that checks risk before any purchased
+  // spillover; never represent a subscription as purchase-based access.
   if (base.hasActiveSubscription && paidPlans.includes(base.plan)) {
-    return { ...result, allowed: true };
+    return { ...result, allowed: true, ...(base.plan === 'standard' ? { standardSubscriptionAccess: true } : {}) };
   }
   if (!(Number(balanceRow.purchased_credits) > 0)
       || !(Date.parse(String(balanceRow.purchased_expires_at || '')) > now)) return result;

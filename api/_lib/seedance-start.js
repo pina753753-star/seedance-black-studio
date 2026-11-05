@@ -170,9 +170,11 @@ function serviceClient() {
 // Deducts the balance and writes all per-pool charge ledger rows in one DB
 // transaction. The task row and balance row are locked by the RPC, and a retry
 // for the same task returns the existing charge instead of deducting twice.
-async function checkAndDeduct(db, userId, creditCost, taskId) {
+async function checkAndDeduct(db, userId, creditCost, taskId, standardSubscriptionAccess = false) {
   try {
-    const { data, error } = await db.rpc('deduct_generation_credits_atomic', {
+    const { data, error } = await db.rpc(standardSubscriptionAccess
+      ? 'deduct_standard_generation_credits_atomic'
+      : 'deduct_generation_credits_atomic', {
       p_task_id: taskId,
       p_user_id: userId,
       p_credit_cost: creditCost
@@ -807,7 +809,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       let originError = null;
       try {
         const originResult = await db.from('generation_tasks')
-          .update({ settings: { ...(uiOrigin ? { ui_origin: uiOrigin } : {}), watermark_required: generationAccess.watermarkRequired !== false, purchase_access_required: generationAccess.hasPurchasedAccess === true }, updated_at: new Date().toISOString() })
+          .update({ settings: { ...(uiOrigin ? { ui_origin: uiOrigin } : {}), watermark_required: generationAccess.watermarkRequired !== false, purchase_access_required: generationAccess.hasPurchasedAccess === true, standard_subscription_access: generationAccess.standardSubscriptionAccess === true }, updated_at: new Date().toISOString() })
           .eq('id', taskId)
           .eq('user_id', user.id)
           .eq('status', 'queued')
@@ -843,6 +845,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         // Preserve the same server-owned policy saved before this asset bind.
         watermark_required: generationAccess.watermarkRequired !== false,
         purchase_access_required: generationAccess.hasPurchasedAccess === true,
+        standard_subscription_access: generationAccess.standardSubscriptionAccess === true,
         reference_dance: {
           asset_id: referenceDance.assetId,
           billable_seconds: referenceDance.billableSeconds,
@@ -893,7 +896,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     }
 
     // Deduct balance + ledger rows in one DB transaction.
-    deduction = await checkAndDeduct(db, user.id, creditCost, taskId);
+    deduction = await checkAndDeduct(db, user.id, creditCost, taskId, generationAccess.standardSubscriptionAccess === true);
     if (!deduction.ok) {
       console.error('[seedance-start] credit deduction failed:', deduction.error, 'taskId:', taskId);
 

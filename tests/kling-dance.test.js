@@ -23,11 +23,11 @@ function readyRow(overrides = {}) {
 
 // Load the real handler in an isolated module with all network/DB boundaries
 // mocked. No generation, storage write, or credit transaction leaves this test.
-async function runStart({ swapAfterRetention = false, swapPurposeAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, accessAllowed = true, reserveDuplicate = false, bodyOverrides = {} } = {}) {
+async function runStart({ swapAfterRetention = false, swapPurposeAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, subscriptionPlan = 'premium', debitError = null, accessAllowed = true, reserveDuplicate = false, bodyOverrides = {} } = {}) {
   const rpcCalls = [], updates = [], providerCalls = [], events = [], accessCalls = [], moderated = [];
   const access = {
-    ok: true, allowed: accessAllowed, plan: subscription ? 'premium' : 'free', accountStatus: 'active',
-    hasActiveSubscription: subscription, hasPurchasedAccess: !subscription,
+    ok: true, allowed: accessAllowed, plan: subscription ? subscriptionPlan : 'free', accountStatus: 'active',
+    hasActiveSubscription: subscription, hasPurchasedAccess: !subscription, standardSubscriptionAccess: subscription && subscriptionPlan === 'standard',
     subscriptionExpiresAt: subscription ? '2999-01-01T00:00:00Z' : null,
     watermarkRequired: !subscription, balance: 5000
   };
@@ -71,7 +71,8 @@ async function runStart({ swapAfterRetention = false, swapPurposeAfterRetention 
       rpcCalls.push({ name, args }); events.push({ type: 'rpc', name });
       if (name === 'reserve_generation_task' && reserveDuplicate) return { data: null, error: { message: 'existing active task' } };
       if (name === 'reserve_generation_task') return { data: { task_id: 'task-1' }, error: null };
-      if (name === 'deduct_generation_credits_atomic') return { data: { ok: true, deducted: args.p_credit_cost, new_balance: 4000, from_free: args.p_credit_cost }, error: null };
+      if (name === 'deduct_standard_generation_credits_atomic' && debitError) return {data:null,error:{message:debitError}};
+      if (name === 'deduct_generation_credits_atomic' || name === 'deduct_standard_generation_credits_atomic') return { data: { ok: true, deducted: args.p_credit_cost, new_balance: 4000, from_free: args.p_credit_cost }, error: null };
       if (name === 'refund_generation_task_atomic') return { data: { ok: true, code: 'refunded' }, error: null };
       if (name === 'release_generation_task') return { data: true, error: null };
       throw new Error(`Unexpected RPC: ${name}`);
@@ -583,3 +584,32 @@ test('30s candidate refuses over30 and stale estimate before charge',async()=>{f
 test('motion-only purpose is accepted only by Kling; client profile cannot grant normal generation access',async()=>{const row=readyRow({inspection_error:'MOTION_PROVIDER_REVIEW'});const good=await runStart({row});assert.equal(good.res.code,202);assert.equal(good.moderated.length,1);const bad=await runStart({row,dance:false,bodyOverrides:{profile:'motion',reference_video_asset_id:ASSET}});assert.equal(bad.res.code,400);assert.equal(bad.providerCalls.length,0);assert.equal(bad.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);});
 test('same file with changed review purpose stops before deduction',async()=>{const r=await runStart({dance:false,swapPurposeAfterRetention:true,bodyOverrides:{reference_video_asset_id:ASSET}});assert.equal(r.res.code,503,JSON.stringify(r.res.body));assert.equal(r.res.body.error,'reference_video_bind_failed');assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);});
 test('provider refusal on technical-only motion still uses atomic refund, no automatic retry',async()=>{const r=await runStart({row:readyRow({inspection_error:'MOTION_PROVIDER_REVIEW'}),providerFailure:true});assert.equal(r.res.body.refunded,true);assert.equal(r.providerCalls.length,1);assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,1);});
+
+for (const model of ['bytedance/seedance-2.5','bytedance/seedance-2.5-standard']) {
+  for(const resolution of (model.endsWith('standard')?['720p']:['720p','1080p'])) test(`Standard ${model} ${resolution} uses source-aware debit, success and provider failure`,async()=>{
+    for(const providerFailure of [false,true]){
+      const r=await runStart({subscriptionPlan:'standard',dance:false,resolution,providerFailure,bodyOverrides:{model}});
+      assert.equal(r.rpcCalls.filter(c=>c.name==='deduct_standard_generation_credits_atomic').length,1,JSON.stringify(r.res.body));
+      assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);
+      assert.equal(r.providerCalls.length,1);
+      assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,providerFailure?1:0);
+      const settings=r.updates.find(u=>u.value.settings).value.settings;
+      assert.equal(settings.standard_subscription_access,true);assert.equal(settings.purchase_access_required,false);
+      if(!providerFailure) assert.equal(r.res.code,202);
+    }
+  });
+}
+test('Standard public Kling preserves monthly entitlement in both settings writes',async()=>{
+  const r=await runStart({subscriptionPlan:'standard',role:'user',row:motionRow(10000),bodyOverrides:motionBody(10000)});
+  assert.equal(r.res.code,202,JSON.stringify(r.res.body));
+  assert.equal(r.rpcCalls.filter(c=>c.name==='deduct_standard_generation_credits_atomic').length,1);
+  for(const update of r.updates.filter(u=>u.value.settings)){
+    assert.equal(update.value.settings.standard_subscription_access,true);assert.equal(update.value.settings.purchase_access_required,false);
+  }
+});
+test('missing Standard RPC fails closed without fallback or provider call',async()=>{
+  const r=await runStart({subscriptionPlan:'standard',dance:false,debitError:'RPC not installed'});
+  assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);
+  assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,1);
+  assert.notEqual(r.res.code,202);
+});
