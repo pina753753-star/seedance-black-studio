@@ -13,10 +13,10 @@ const { hasSeedance25PlanAccess } = require('../api/_lib/video-plan-entitlements
 // The actual handler executes with inert local credentials and all external
 // boundaries replaced. Moderation deliberately stops accepted model requests,
 // so this test cannot create a task, deduct credits, or invoke a provider.
-function harness({ subscription = false } = {}) {
+function harness({ subscription = false, plan = 'premium' } = {}) {
   const calls = { purchasedGate: 0, subscriptionGate: 0, moderation: 0, signedAudio: 0, dbWrites: 0, rpc: 0, provider: 0, danceAdmin: 0 };
   const access = {
-    ok: true, allowed: true, plan: subscription ? 'premium' : 'free', accountStatus: 'active',
+    ok: true, allowed: true, plan: subscription ? plan : 'free', accountStatus: 'active',
     hasActiveSubscription: subscription, hasPurchasedAccess: !subscription,
     subscriptionExpiresAt: subscription ? '2999-01-01T00:00:00Z' : null,
     watermarkRequired: !subscription, balance: 1000
@@ -51,7 +51,7 @@ function harness({ subscription = false } = {}) {
       if (name === './video-plan-entitlements.js') return {
         hasSeedance25PlanAccess,
         getSeedance25Entitlement: async () => { calls.purchasedGate++; return { ...access }; },
-        getSeedance25SubscriptionEntitlement: async () => { calls.subscriptionGate++; return { ...access, allowed: subscription }; }
+        getSeedance25SubscriptionEntitlement: async () => { calls.subscriptionGate++; return { ...access, allowed: subscription && hasSeedance25PlanAccess(plan, access.subscriptionExpiresAt) }; }
       };
       if (name === './reference-audio.js') return { ...audio, createReferenceAudioSignedUrls: async (_db, paths) => { calls.signedAudio++; return { ok: true, urls: paths.map(() => 'https://mock.invalid/signed-audio') }; } };
       if (name === './openai-moderation.js') return { moderateContent: async () => { calls.moderation++; return { ok: false }; } };
@@ -154,3 +154,16 @@ for(const model of ['bytedance/seedance-2.0','bytedance/seedance-2.5']){
   assert.equal(r.body.error,'content_safety_check_unavailable');assert.equal(h.calls.moderation,1);noSpendOrProvider(h.calls);
  });
 }
+
+for (const model of ['bytedance/seedance-2.5', 'bytedance/seedance-2.5-standard']) {
+  for (const body of [{mode:'storyboard'},{mode:'reference_to_video',ui_origin:'storyboard'}]) test(`Standard ${model} cannot invoke hidden storyboard ${JSON.stringify(body)}`,async()=>{
+    const h=harness({subscription:true,plan:'standard'});const r=await h.request({model,resolution:'720p',...body});
+    assert.equal(r.statusCode,403);assert.equal(h.calls.moderation,0);noSpendOrProvider(h.calls);
+  });
+}
+test('Standard cannot replay hidden song or admin-dance inputs',async()=>{
+  for(const body of [{reference_audio_paths:['users/owner/clip.mp3']},{mode:'reference_to_video',resolution:'720p',reference_video_asset_id:'270bf01a-bafd-4255-8ad5-e18a4f1c8c47'}]){
+    const h=harness({subscription:true,plan:'standard'});const r=await h.request(body);
+    assert.equal(r.statusCode,403);assert.equal(h.calls.moderation,0);assert.equal(h.calls.dbWrites,0);noSpendOrProvider(h.calls);
+  }
+});

@@ -10,7 +10,7 @@ const {
 } = require('../api/_lib/video-plan-entitlements.js');
 const { calculateVideoCreditCost } = require('../api/_lib/video-pricing.js');
 
-test('Seedance 2.5は有効期限内のPremium以上だけを許可する', () => {
+test('Seedance 2.5の曲・絵コンテは有効期限内のPremium以上だけを許可する', () => {
   const now = Date.parse('2026-08-21T00:00:00Z');
   const future = '2026-09-21T00:00:00Z';
   const past = '2026-07-21T00:00:00Z';

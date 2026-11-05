@@ -28,11 +28,11 @@ test('capability endpoint uses confirmed owner, exposes booleans only and disabl
   assert.equal(res.statusCode,200);assert.equal(res.headers['Cache-Control'],'no-store');
   assert.deepEqual(JSON.parse(JSON.stringify(res.body)), {ok:true,seedance25:true,resolution1080:false,referenceAudio:false,storyboard25:false,watermarkRequired:true});
   assert.equal(h.calls[0][0],'db-mock');assert.equal(h.calls[0][1],'owner');
-  assert.deepEqual(Array.from(h.calls[0][2].paidPlans),['premium','ultimate','team','scale']);
+  assert.equal(h.calls[0][2], undefined);
 });
-test('active Standard preserves watermark exemption without adding restricted model or extras access', async () => {
-  const h=apiHarness({access:{ok:true,allowed:false,hasActiveSubscription:true,hasPurchasedAccess:false,watermarkRequired:false,accountStatus:'active',plan:'standard'}});
-  const res=await h.request();assert.equal(res.body.seedance25,false);assert.equal(res.body.referenceAudio,false);assert.equal(res.body.storyboard25,false);assert.equal(res.body.watermarkRequired,false);assert.equal(res.body.resolution1080,true);
+test('active Standard gains normal models and preserves 1080p without extras', async () => {
+  const h=apiHarness({access:{ok:true,allowed:true,hasActiveSubscription:true,hasPurchasedAccess:false,watermarkRequired:false,accountStatus:'active',plan:'standard'}});
+  const res=await h.request();assert.equal(res.body.seedance25,true);assert.equal(res.body.referenceAudio,false);assert.equal(res.body.storyboard25,false);assert.equal(res.body.watermarkRequired,false);assert.equal(res.body.resolution1080,true);
 });
 test('free-only account gets no restricted capabilities', async () => {
   const h=apiHarness({access:{ok:true,allowed:false,hasActiveSubscription:false,hasPurchasedAccess:false,watermarkRequired:true,accountStatus:'active'}});
@@ -105,7 +105,7 @@ test('active high subscription keeps audio/storyboard, expired high subscription
   }
 });
 test('purchase UI can generate normal 2.5 but cannot attach audio or use a locked 2.5 storyboard', () => {
-  const context={seedance25Access:true,referenceAudioAccess:false,storyboard25Access:false,sbLocked:false,mode:'text_to_video',$:id=>({value:id==='resolution'?'1080p':'bytedance/seedance-2.5'}),isSeedance25Model:()=>true};
+  const context={REFERENCE_AUDIO_UI_ENABLED:true,seedance25Access:true,referenceAudioAccess:false,storyboard25Access:false,sbLocked:false,mode:'text_to_video',$:id=>({value:id==='resolution'?'1080p':'bytedance/seedance-2.5'}),isSeedance25Model:()=>true};
   for(const prefix of ['function canUseReferenceAudio()', 'function canUseSelectedSeedance25()']){
     const a=html.indexOf(prefix);vm.runInNewContext(html.slice(a,html.indexOf('\n',a)),context);
   }

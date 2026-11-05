@@ -52,8 +52,8 @@ for (const plan of ['premium','ultimate','team','scale']) test(`motion preserves
  const a = await accessFor({plan, balance:{subscription_expires_at:FUTURE,purchased_credits:0}});
  assert.equal(a.ok,true); assert.equal(a.watermarkRequired,false);
 });
-test('Standard needs purchase; its active subscription still exempts watermark', async () => {
- assert.equal((await accessFor({plan:'standard',balance:{subscription_expires_at:FUTURE,purchased_credits:0}})).ok,false);
+test('Standard monthly subscription grants motion and still exempts watermark', async () => {
+ assert.equal((await accessFor({plan:'standard',balance:{subscription_expires_at:FUTURE,purchased_credits:0}})).ok,true);
  const a = await accessFor({plan:'standard',balance:{subscription_expires_at:FUTURE}}); assert.equal(a.ok,true);assert.equal(a.watermarkRequired,false);
 });
 for (const [label, opts] of [
