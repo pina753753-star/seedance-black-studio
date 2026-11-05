@@ -44,6 +44,8 @@ function loadPricingPlansHandlers({ billing = 'monthly' } = {}) {
     billing,
     checkout: (...args) => { checkoutCalls.push(args); },
     showMsg: (msg) => { messages.push(msg); },
+    // pricing.htmlの先頭で定義される定数(plans配列の文言が参照する)。このテストはプランのクリック動作だけを見る。
+    REFERENCE_AUDIO_UI_ENABLED: false,
     shouldShowAnnualCampaignPrice: () => true,
     isAnnualCampaignActive: () => true,
     document: {
