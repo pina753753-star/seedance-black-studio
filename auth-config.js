@@ -175,9 +175,10 @@ window.flowvidSupabaseClient = function(){
     }
     localStorage.setItem('flowvidUserOperations',JSON.stringify(keep.slice(0,10)));
   }
-  async function ensureCredits(user){
+  async function ensureCredits(session){
+    if(!session?.access_token||!session?.user?.id) return;
     try{
-      await fetch('/api/ensure-user-credits',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:user.id,email:user.email||''})});
+      await fetch('/api/ensure-user-credits',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({userId:session.user.id})});
     }catch(_){}
   }
   async function totalCredits(client,userId){
@@ -190,7 +191,7 @@ window.flowvidSupabaseClient = function(){
     const {data:sessionData,error:sessionError}=await client.auth.getSession();
     const user=sessionData?.session?.user||null;
     if(sessionError||!user){location.href='./login.html';return}
-    await ensureCredits(user);
+    await ensureCredits(sessionData.session);
     const balance=await totalCredits(client,user.id);
     if(balance<GENERATION_CREDIT_COST){status(`クレジット不足です。${GENERATION_CREDIT_COST}クレジット必要です。`,true);return}
     const prompt=(document.getElementById('prompt')?.value||'').trim();

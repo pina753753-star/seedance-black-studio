@@ -1,3 +1,5 @@
+const { requireConfirmedAuth } = require('./_lib/confirmed-auth.js');
+
 function config() {
   return {
     supabaseUrl: (process.env.SUPABASE_URL || '').replace(/\/$/, ''),
@@ -30,6 +32,7 @@ async function supabase(path, options = {}) {
 }
 
 module.exports = async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') {
     return res.status(200).json({
       ok: true,
@@ -39,10 +42,24 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-    const userId = String(body.userId || body.user_id || '').trim();
-    const email = String(body.email || '').trim().toLowerCase();
-    if (!userId) return res.status(400).json({ ok: false, error: 'userId is required' });
+    const auth = await requireConfirmedAuth(req);
+    if (!auth.ok) return res.status(auth.status).json(auth.body);
+    const userId = auth.user.id;
+    const email = String(auth.user.email || '').trim().toLowerCase();
+    let body;
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    } catch (_) {
+      return res.status(400).json({ ok: false, error: 'INVALID_BODY' });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return res.status(400).json({ ok: false, error: 'INVALID_BODY' });
+    }
+    // Legacy identity fields may be supplied, but can never select another user.
+    if (['userId', 'user_id'].some(key => Object.hasOwn(body, key) && body[key] !== userId)
+      || (Object.hasOwn(body, 'email') && (typeof body.email !== 'string' || body.email.trim().toLowerCase() !== email))) {
+      return res.status(403).json({ ok: false, error: 'IDENTITY_MISMATCH' });
+    }
 
     const existing = await supabase(`credit_balances?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`);
     if (existing?.[0]) {
@@ -57,17 +74,16 @@ module.exports = async function handler(req, res) {
     // credit_balancesを作成する。
     // このAPIは、何らかの理由で行が欠けている場合の補完専用とし、
     // キャンペーンクレジットは一切付与しない。
-    try {
-      await supabase('profiles', {
-        method: 'POST',
-        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify({ id: userId, email, plan: 'free' })
-      });
-    } catch (_) {}
-
-    const rows = await supabase('credit_balances', {
+    // Ignore conflicts: never reset an existing profile's plan or other fields.
+    await supabase('profiles?on_conflict=id', {
       method: 'POST',
-      headers: { Prefer: 'return=representation' },
+      headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify({ id: userId, email, plan: 'free' })
+    });
+
+    const rows = await supabase('credit_balances?on_conflict=user_id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
       body: JSON.stringify({
         user_id: userId,
         free_credits: 0,
@@ -76,12 +92,15 @@ module.exports = async function handler(req, res) {
       })
     });
 
+    // Another request/trigger may have initialized the balance in the meantime.
+    const balance = rows?.[0] || (await supabase(`credit_balances?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`))?.[0];
+    if (!balance) throw new Error('Balance initialization failed');
     return res.status(200).json({
       ok: true,
-      created: true,
-      balance: rows?.[0] || null
+      created: Boolean(rows?.[0]),
+      balance
     });
-  } catch (error) {
-    return res.status(error.status || 500).json({ ok: false, error: error?.message || 'Unknown error' });
+  } catch (_) {
+    return res.status(500).json({ ok: false, error: 'CREDIT_INITIALIZATION_FAILED' });
   }
 };
