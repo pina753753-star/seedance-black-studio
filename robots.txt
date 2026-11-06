@@ -1,2 +1,7 @@
 User-agent: *
 Disallow: /
+Allow: /$
+Allow: /index.html$
+Allow: /assets/brand/pina-icon-v2-favicon.png$
+Allow: /assets/brand/pina-logo-header-full.png$
+Allow: /assets/brand/pina-ogp-share.png$
