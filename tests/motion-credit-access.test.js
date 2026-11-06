@@ -57,7 +57,7 @@ test('Standard monthly subscription grants motion and still exempts watermark', 
  const a = await accessFor({plan:'standard',balance:{subscription_expires_at:FUTURE}}); assert.equal(a.ok,true);assert.equal(a.watermarkRequired,false);
 });
 for (const [label, opts] of [
- ['expired',{balance:{purchased_expires_at:PAST}}],['empty',{balance:{purchased_credits:0,free_credits:1000}}],
+ ['expired',{balance:{purchased_expires_at:PAST}}],['empty',{balance:{purchased_credits:0,free_credits:0}}],
  ['no grant',{grants:[]}],['held',{grants:[{id:'g',user_id:OWNER,purchase_type:'credit_pack',grant_status:'granted'},{id:'h',user_id:OWNER,grant_status:'held'}]}],
  ['risk',{risks:[{id:'r',user_id:OWNER,status:'open'}]}],['restricted',{accountStatus:'suspended'}],['lookup failure',{errors:{credit_balances:true}}]
 ]) test(`motion denies ${label}`, async()=>{assert.equal((await accessFor(opts)).ok,false)});
@@ -83,4 +83,9 @@ for(const route of ['access','upload-url','confirm-upload'])test(`motion ${route
  });const res={setHeader(){},status(n){this.code=n;return this},json(b){this.body=b;return this}};
  await module.exports({method:route==='access'?'GET':'POST',body:{}},res);
  assert.equal(res.code,route==='access'?200:403);if(route==='access')assert.equal(res.body.allowed,false);
+});
+
+test('free/invite balance opens public motion without subscription privileges',async()=>{
+ const a=await accessFor({balance:{purchased_credits:0,free_credits:800},grants:[]});
+ assert.equal(a.ok,true);assert.equal(a.freeCreditAccess,true);assert.equal(a.watermarkRequired,true);assert.equal(a.hasActiveSubscription,false);
 });

@@ -35,7 +35,7 @@
   }
 
   function blockReason(){
-    if(!access.allowed)return '有効な購入クレジット、または対象サブスクが必要です';
+    if(!access.allowed)return '利用可能な無料・購入クレジット、または対象サブスクが必要です';
     if(!access.rate)return 'モーションは現在準備中です。料金確定後にご利用いただけます。';
     const reasons=[];
     if(state.image.status!=='completed')reasons.push('キャラクター画像を1枚追加してください');
