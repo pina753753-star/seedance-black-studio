@@ -36,7 +36,7 @@ function apiFixture(externalDb){
  return {data,error:null};}return chain;
  },async rpc(name,args){
  if(name==='reserve_generation_task'){counters.reserve++;const id='00000000-0000-4000-8000-'+String(counters.reserve).padStart(12,'0');tasks.set(id,{id,user_id:args.p_user_id,status:'queued',settings:{},credit_cost:args.p_credit_cost});return {data:[{task_id:id}],error:null};}
- if(name==='deduct_generation_credits_atomic'){counters.deduct++;row.free_credits-=args.p_credit_cost;return {data:{ok:true,new_balance:row.free_credits,from_free:args.p_credit_cost},error:null};}
+ if(name==='deduct_generation_credits_atomic'||name==='deduct_free_generation_credits_atomic'){counters.deduct++;row.free_credits-=args.p_credit_cost;return {data:{ok:true,new_balance:row.free_credits,from_free:args.p_credit_cost},error:null};}
  if(name==='refund_generation_task_atomic'){const t=tasks.get(args.p_task_id);if(t.status!=='failed'){counters.refund++;row.free_credits+=t.credit_cost;t.status='failed';}return {data:{ok:true,code:'refunded'},error:null};}
  throw new Error('Unexpected RPC '+name);
  }};

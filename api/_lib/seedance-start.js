@@ -170,9 +170,11 @@ function serviceClient() {
 // Deducts the balance and writes all per-pool charge ledger rows in one DB
 // transaction. The task row and balance row are locked by the RPC, and a retry
 // for the same task returns the existing charge instead of deducting twice.
-async function checkAndDeduct(db, userId, creditCost, taskId, standardSubscriptionAccess = false) {
+async function checkAndDeduct(db, userId, creditCost, taskId, standardSubscriptionAccess = false, freeCreditAccess = false) {
   try {
-    const { data, error } = await db.rpc(standardSubscriptionAccess
+    const { data, error } = await db.rpc(freeCreditAccess
+      ? 'deduct_free_generation_credits_atomic'
+      : standardSubscriptionAccess
       ? 'deduct_standard_generation_credits_atomic'
       : 'deduct_generation_credits_atomic', {
       p_task_id: taskId,
@@ -498,23 +500,30 @@ return async function handler(req, res) {
           ok: false,
           error: 'seedance_25_plan_required',
           message: isKlingDance
-            ? 'モーションは対象の有効サブスク、または有効な購入クレジットで利用できます。'
+            ? 'モーションは対象の有効サブスク、または利用可能な無料・購入クレジットで利用できます。'
             : referenceDanceAssetId
             ? '参考ダンス動画は対象の有効なサブスクで利用できます。'
             : uiOrigin === 'storyboard' || mode === 'storyboard'
             ? 'Seedance 2.5の絵コンテは対象の有効なサブスクで利用できます。'
-            : 'Seedance 2.5は対象の有効サブスク、または有効な購入クレジットで利用できます。',
+            : 'Seedance 2.5は対象の有効サブスク、または利用可能な無料・購入クレジットで利用できます。',
           redirect: '/pricing.html#monthly'
         });
       }
       generationPlan = entitlement.plan;
       generationAccess = entitlement;
     }
-if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.id);
+    if (!generationAccess) {
+      generationAccess = await readSubscriptionAccess(db, user.id);
+      // Legacy Seedance 2.0 public generation also needs the safe free debit.
+      if (generationAccess.ok && !generationAccess.hasActiveSubscription && Number(generationAccess.balanceRow?.free_credits) > 0) {
+        generationAccess.freeCreditAccess = true;
+      }
+    }
     if (!generationAccess.ok) return res.status(503).json({ ok: false, error: 'plan_check_unavailable' });
+    if (generationAccess.accountStatus && generationAccess.accountStatus !== 'active') return res.status(403).json({ ok: false, error: 'account_restricted' });
     // New requests only: never rewrite existing tasks, output policy or balances.
     if (resolution === '1080p' && generationAccess.hasActiveSubscription !== true) {
-      return res.status(403).json({ ok: false, error: 'resolution_subscription_required', message: '1080pは有効なサブスク会員限定です。単体購入では720p以下を選択してください。' });
+      return res.status(403).json({ ok: false, error: 'resolution_subscription_required', message: '1080pは有効なサブスク会員限定です。非サブスクでは720p以下を選択してください。' });
     }
     if (referenceDanceAssetId) {
       if (!isReferenceDanceUuid(referenceDanceAssetId)) {
@@ -809,7 +818,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
       let originError = null;
       try {
         const originResult = await db.from('generation_tasks')
-          .update({ settings: { ...(uiOrigin ? { ui_origin: uiOrigin } : {}), watermark_required: generationAccess.watermarkRequired !== false, purchase_access_required: generationAccess.hasPurchasedAccess === true, standard_subscription_access: generationAccess.standardSubscriptionAccess === true }, updated_at: new Date().toISOString() })
+          .update({ settings: { ...(uiOrigin ? { ui_origin: uiOrigin } : {}), watermark_required: generationAccess.watermarkRequired !== false, purchase_access_required: generationAccess.hasPurchasedAccess === true, free_credit_access: generationAccess.freeCreditAccess === true, standard_subscription_access: generationAccess.standardSubscriptionAccess === true }, updated_at: new Date().toISOString() })
           .eq('id', taskId)
           .eq('user_id', user.id)
           .eq('status', 'queued')
@@ -845,6 +854,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
         // Preserve the same server-owned policy saved before this asset bind.
         watermark_required: generationAccess.watermarkRequired !== false,
         purchase_access_required: generationAccess.hasPurchasedAccess === true,
+        free_credit_access: generationAccess.freeCreditAccess === true,
         standard_subscription_access: generationAccess.standardSubscriptionAccess === true,
         reference_dance: {
           asset_id: referenceDance.assetId,
@@ -896,7 +906,7 @@ if (!generationAccess) generationAccess = await readSubscriptionAccess(db, user.
     }
 
     // Deduct balance + ledger rows in one DB transaction.
-    deduction = await checkAndDeduct(db, user.id, creditCost, taskId, generationAccess.standardSubscriptionAccess === true);
+    deduction = await checkAndDeduct(db, user.id, creditCost, taskId, generationAccess.standardSubscriptionAccess === true, generationAccess.freeCreditAccess === true);
     if (!deduction.ok) {
       console.error('[seedance-start] credit deduction failed:', deduction.error, 'taskId:', taskId);
 

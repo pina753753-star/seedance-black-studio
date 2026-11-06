@@ -41,10 +41,10 @@ function fixture({ plan = 'free', accountStatus = 'active', balance = {}, grants
   return { db, queries, rows, access: (options = {}) => getCreditAccess(db, OWNER, { now: NOW, ...options }) };
 }
 
-test('free grants alone cannot unlock restricted models even with a stale settled purchase row', async () => {
+test('free grants unlock public models without a settled purchase', async () => {
   const f = fixture({ balance: { free_credits: 500, purchased_credits: 0 } });
   const a = await f.access();
-  assert.equal(a.ok, true); assert.equal(a.allowed, false); assert.equal(a.hasPurchasedAccess, false);
+  assert.equal(a.ok, true); assert.equal(a.allowed, true); assert.equal(a.freeCreditAccess, true); assert.equal(a.hasPurchasedAccess, false);
   assert.equal(a.balance, 500); assert.equal(a.watermarkRequired, true);
   assert.equal(f.queries.some(q => q.table === 'stripe_payment_ledger'), false);
 });
@@ -63,7 +63,7 @@ test('expired subscription plus purchased balance keeps model access with waterm
   const f = fixture({ plan: 'premium', balance: { subscription_expires_at: PAST, subscription_credits: 800, free_credits: 20 } });
   const a = await f.access();
   assert.equal(a.allowed, true); assert.equal(a.hasActiveSubscription, false);
-  assert.equal(a.hasPurchasedAccess, true); assert.equal(a.watermarkRequired, true);
+  assert.equal(a.hasPurchasedAccess, false); assert.equal(a.freeCreditAccess, true); assert.equal(a.watermarkRequired, true);
   assert.equal(a.balance, 1020);
 });
 test('active Premium plus extra credits keeps subscription access without watermark', async () => {
@@ -89,10 +89,10 @@ test('Standard without purchase gains normal model access from its monthly subsc
 
 });
 for (const expiry of [PAST, null, '', 'not-a-date', new Date(NOW).toISOString()]) {
-  test(`purchase expiry ${String(expiry)} cannot unlock models or count expired purchase credits`, async () => {
+  test(`purchase expiry ${String(expiry)} cannot count purchased credits; free still opens public models`, async () => {
     const f = fixture({ balance: { purchased_expires_at: expiry, free_credits: 10 } });
     const a = await f.access();
-    assert.equal(a.allowed, false); assert.equal(a.hasPurchasedAccess, false);
+    assert.equal(a.allowed, true); assert.equal(a.freeCreditAccess, true); assert.equal(a.hasPurchasedAccess, false);
     assert.equal(a.watermarkRequired, true); assert.equal(a.balance, 10);
   });
 }
@@ -237,4 +237,29 @@ test('real Standard capability and public-motion routes agree and do not expose 
       assert.equal(res.body.seedance25,true);assert.equal(res.body.resolution1080,true);assert.equal(res.body.referenceAudio,false);assert.equal(res.body.storyboard25,false);
     } else assert.equal(res.body.allowed,true);
   }
+});
+
+for (const status of ['open','reviewing']) test(`free access with ${status} purchase risk retains separate debit policy`,async()=>{
+ const f=fixture({balance:{free_credits:100},risks:[{id:'risk',user_id:OWNER,status}]});
+ const a=await f.access();assert.equal(a.allowed,true);assert.equal(a.freeCreditAccess,true);assert.equal(a.hasPurchasedAccess,false);assert.equal(a.watermarkRequired,true);
+});
+
+// Cross-layer estimate uses the real backend and shared access implementation.
+test('free balance estimate admits 2.5/Turbo, excludes 1080p, and never starts work',async()=>{
+ const {createExistingApiBackend}=require('../local-mcp/existing-api-backend');
+ const {createCore}=require('../local-mcp/core');
+ const {createMockStore}=require('../local-mcp/mock-store');
+ const {createQuoteIntegrity}=require('../local-mcp/quote-integrity');
+ const f=fixture({balance:{free_credits:800,purchased_credits:0},grants:[]});
+ const backend=createExistingApiBackend({resolveAccount:async id=>({ok:true,user:{id},supabase:f.db}),startHandler:()=>assert.fail('estimate cannot start'),statusHandler:()=>assert.fail('estimate cannot poll')});
+ const app=createCore({backend,store:createMockStore(),integrity:createQuoteIntegrity(Buffer.alloc(32,7)),authenticate:async()=>({userId:OWNER,emailConfirmed:true,accountStatus:'active',expiresAt:Date.now()+60000,scopes:['generation:read']})});
+ for(const model of ['bytedance/seedance-2.0','bytedance/seedance-2.0-fast','bytedance/seedance-2.5-standard','bytedance/seedance-2.5']){
+  const input={prompt:'Paper boat',model,duration:5,resolution:'720p',aspect_ratio:'16:9'};
+  const q=await app.dispatch('pina_estimate_generation',input,{});assert.equal(q.watermark_required,true);assert.equal(q.sufficient_balance,true);
+  await assert.rejects(app.dispatch('pina_estimate_generation',{...input,resolution:'1080p'},{}),e=>e.code===(['bytedance/seedance-2.0','bytedance/seedance-2.5'].includes(model)?'resolution_subscription_required':'invalid_resolution'));
+ }
+ const {getH3LiveEntitlement}=require('../api/_lib/h3-live-entitlement');
+ const {getSeedance25SubscriptionEntitlement}=require('../api/_lib/video-plan-entitlements');
+ assert.equal((await getH3LiveEntitlement(f.db,OWNER)).allowed,false);
+ assert.equal((await getSeedance25SubscriptionEntitlement(f.db,OWNER)).allowed,false);
 });

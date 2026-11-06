@@ -34,7 +34,7 @@ test('active Standard gains normal models and preserves 1080p without extras', a
   const h=apiHarness({access:{ok:true,allowed:true,hasActiveSubscription:true,hasPurchasedAccess:false,watermarkRequired:false,accountStatus:'active',plan:'standard'}});
   const res=await h.request();assert.equal(res.body.seedance25,true);assert.equal(res.body.referenceAudio,false);assert.equal(res.body.storyboard25,false);assert.equal(res.body.watermarkRequired,false);assert.equal(res.body.resolution1080,true);
 });
-test('free-only account gets no restricted capabilities', async () => {
+test('account without usable credits gets no restricted capabilities', async () => {
   const h=apiHarness({access:{ok:true,allowed:false,hasActiveSubscription:false,hasPurchasedAccess:false,watermarkRequired:true,accountStatus:'active'}});
   const res=await h.request();assert.equal(res.body.seedance25,false);assert.equal(res.body.referenceAudio,false);assert.equal(res.body.storyboard25,false);
 });
@@ -114,4 +114,9 @@ test('purchase UI can generate normal 2.5 but cannot attach audio or use a locke
   context.referenceAudioAccess=true;context.storyboard25Access=true;
   assert.equal(context.canUseReferenceAudio(),true);assert.equal(context.canUseSelectedSeedance25(),true);
   assert.match(html,/isSeedance25Model\(\$\('sbModel'\)\?\.value\)&&!storyboard25Access/);
+});
+
+test('free credit capability response opens normal models only',async()=>{
+ const h=apiHarness({access:{ok:true,allowed:true,freeCreditAccess:true,hasActiveSubscription:false,hasPurchasedAccess:false,watermarkRequired:true,accountStatus:'active',plan:'free'}});
+ const res=await h.request();assert.equal(res.body.seedance25,true);assert.equal(res.body.referenceAudio,false);assert.equal(res.body.storyboard25,false);assert.equal(res.body.resolution1080,false);assert.equal(res.body.watermarkRequired,true);
 });

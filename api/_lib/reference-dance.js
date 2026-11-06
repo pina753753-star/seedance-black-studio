@@ -90,7 +90,7 @@ async function authorizeReferenceDanceAdmin(auth) {
   return { ok: true, admin: data };
 }
 
-// Public motion BETA uses the existing settled-purchase/subscription policy.
+// Public motion BETA uses the shared free-credit/settled-purchase/subscription policy.
 // Owning an existing upload still permits reading/removing it after credits expire;
 // those handlers enforce user_id and never inspect, generate or charge.
 async function authorizeReferenceMotion(auth, { existingOnly = false } = {}) {

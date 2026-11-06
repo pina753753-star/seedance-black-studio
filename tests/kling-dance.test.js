@@ -23,11 +23,11 @@ function readyRow(overrides = {}) {
 
 // Load the real handler in an isolated module with all network/DB boundaries
 // mocked. No generation, storage write, or credit transaction leaves this test.
-async function runStart({ swapAfterRetention = false, swapPurposeAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, subscriptionPlan = 'premium', debitError = null, accessAllowed = true, reserveDuplicate = false, bodyOverrides = {} } = {}) {
+async function runStart({ freeAccess = false, swapAfterRetention = false, swapPurposeAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, subscriptionPlan = 'premium', debitError = null, accessAllowed = true, reserveDuplicate = false, bodyOverrides = {} } = {}) {
   const rpcCalls = [], updates = [], providerCalls = [], events = [], accessCalls = [], moderated = [];
   const access = {
     ok: true, allowed: accessAllowed, plan: subscription ? subscriptionPlan : 'free', accountStatus: 'active',
-    hasActiveSubscription: subscription, hasPurchasedAccess: !subscription, standardSubscriptionAccess: subscription && subscriptionPlan === 'standard',
+    hasActiveSubscription: subscription, hasPurchasedAccess: !subscription && !freeAccess, freeCreditAccess: freeAccess, standardSubscriptionAccess: subscription && subscriptionPlan === 'standard',
     subscriptionExpiresAt: subscription ? '2999-01-01T00:00:00Z' : null,
     watermarkRequired: !subscription, balance: 5000
   };
@@ -71,8 +71,8 @@ async function runStart({ swapAfterRetention = false, swapPurposeAfterRetention 
       rpcCalls.push({ name, args }); events.push({ type: 'rpc', name });
       if (name === 'reserve_generation_task' && reserveDuplicate) return { data: null, error: { message: 'existing active task' } };
       if (name === 'reserve_generation_task') return { data: { task_id: 'task-1' }, error: null };
-      if (name === 'deduct_standard_generation_credits_atomic' && debitError) return {data:null,error:{message:debitError}};
-      if (name === 'deduct_generation_credits_atomic' || name === 'deduct_standard_generation_credits_atomic') return { data: { ok: true, deducted: args.p_credit_cost, new_balance: 4000, from_free: args.p_credit_cost }, error: null };
+      if (['deduct_free_generation_credits_atomic','deduct_standard_generation_credits_atomic'].includes(name) && debitError) return {data:null,error:{message:debitError}};
+      if (['deduct_generation_credits_atomic','deduct_standard_generation_credits_atomic','deduct_free_generation_credits_atomic'].includes(name)) return { data: { ok: true, deducted: args.p_credit_cost, new_balance: 4000, from_free: args.p_credit_cost }, error: null };
       if (name === 'refund_generation_task_atomic') return { data: { ok: true, code: 'refunded' }, error: null };
       if (name === 'release_generation_task') return { data: true, error: null };
       throw new Error(`Unexpected RPC: ${name}`);
@@ -103,7 +103,7 @@ async function runStart({ swapAfterRetention = false, swapPurposeAfterRetention 
     './openai-moderation.js': { moderateContent: async (text, images) => { moderated.push({ text, images }); return { ok: true }; } },
     './moderation-decision.js': { resolveModerationDecision: async () => (moderationBlock ? { ok: true, allow: false, status: 400, body: { ok: false, error: 'moderation_blocked' } } : { ok: true, allow: true }) },
     './generation-control.js': { checkGenerationControl: async () => ({ ok: true }) },
-    './credit-access': { readSubscriptionAccess: async () => ({ ...access }) },
+    './credit-access': { readSubscriptionAccess: async () => ({ ...access, freeCreditAccess: undefined, standardSubscriptionAccess: undefined, balanceRow: { free_credits: freeAccess ? 800 : 0 } }) },
     './video-plan-entitlements.js': {
       hasSeedance25PlanAccess,
       getSeedance25Entitlement: async () => { accessCalls.push('purchase'); return { ...access }; },
@@ -612,4 +612,20 @@ test('missing Standard RPC fails closed without fallback or provider call',async
   assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);
   assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,1);
   assert.notEqual(r.res.code,202);
+});
+
+for(const dance of [true,false]) test(`free public start selects dedicated atomic debit; dance=${dance}`,async()=>{
+ const r=await runStart({subscription:false,freeAccess:true,dance});
+ assert.equal(r.res.code,202);assert.equal(r.rpcCalls.filter(x=>x.name==='deduct_free_generation_credits_atomic').length,1);
+ assert.equal(r.rpcCalls.some(x=>x.name==='deduct_generation_credits_atomic'),false);
+ const policy=r.updates.find(x=>x.value.settings?.free_credit_access);assert.equal(policy.value.settings.watermark_required,true);assert.equal(policy.value.settings.purchase_access_required,false);
+});
+test('missing free RPC fails closed before provider without old-RPC fallback',async()=>{
+ const r=await runStart({subscription:false,freeAccess:true,debitError:'function does not exist'});
+ assert.notEqual(r.res.code,200);assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(x=>x.name==='deduct_generation_credits_atomic'),false);
+});
+
+for(const model of ['bytedance/seedance-2.0','bytedance/seedance-2.0-fast','bytedance/seedance-2.5-standard','bytedance/seedance-2.5']) test(`free ${model} keeps 720p and rejects 1080p before spend`,async()=>{
+ const r=await runStart({subscription:false,freeAccess:true,dance:false,bodyOverrides:{model}});assert.equal(r.res.code,202);assert.equal(r.rpcCalls.filter(x=>x.name==='deduct_free_generation_credits_atomic').length,1);
+ const denied=await runStart({subscription:false,freeAccess:true,dance:false,resolution:'1080p',bodyOverrides:{model}});const supported1080=['bytedance/seedance-2.0','bytedance/seedance-2.5'].includes(model);assert.equal(denied.res.code,supported1080?403:400);assert.equal(denied.res.body.error,supported1080?'resolution_subscription_required':'invalid_resolution');assert.equal(denied.rpcCalls.length,0);assert.equal(denied.providerCalls.length,0);
 });

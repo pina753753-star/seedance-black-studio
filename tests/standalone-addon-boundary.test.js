@@ -13,11 +13,11 @@ const { hasSeedance25PlanAccess } = require('../api/_lib/video-plan-entitlements
 // The actual handler executes with inert local credentials and all external
 // boundaries replaced. Moderation deliberately stops accepted model requests,
 // so this test cannot create a task, deduct credits, or invoke a provider.
-function harness({ subscription = false, plan = 'premium' } = {}) {
+function harness({ subscription = false, plan = 'premium', freeAccess = false } = {}) {
   const calls = { purchasedGate: 0, subscriptionGate: 0, moderation: 0, signedAudio: 0, dbWrites: 0, rpc: 0, provider: 0, danceAdmin: 0 };
   const access = {
     ok: true, allowed: true, plan: subscription ? plan : 'free', accountStatus: 'active',
-    hasActiveSubscription: subscription, hasPurchasedAccess: !subscription,
+    hasActiveSubscription: subscription, hasPurchasedAccess: !subscription && !freeAccess, freeCreditAccess: freeAccess,
     subscriptionExpiresAt: subscription ? '2999-01-01T00:00:00Z' : null,
     watermarkRequired: !subscription, balance: 1000
   };
@@ -166,4 +166,8 @@ test('Standard cannot replay hidden song or admin-dance inputs',async()=>{
     const h=harness({subscription:true,plan:'standard'});const r=await h.request(body);
     assert.equal(r.statusCode,403);assert.equal(h.calls.moderation,0);assert.equal(h.calls.dbWrites,0);noSpendOrProvider(h.calls);
   }
+});
+
+for(const body of [{mode:'storyboard'},{mode:'reference_to_video',ui_origin:'storyboard'},{mode:'text_to_video',reference_audio_paths:['users/owner/clip.mp3']}]) test(`free credits cannot unlock extras: ${JSON.stringify(body)}`,async()=>{
+ const h=harness({freeAccess:true});const res=await h.request(body);assert.equal(res.statusCode,403);noSpendOrProvider(h.calls);assert.equal(h.calls.moderation,0);
 });

@@ -47,6 +47,11 @@ async function getCreditAccess(db, userId, { paidPlans = MODEL_PLANS, now = Date
   if (base.hasActiveSubscription && paidPlans.includes(base.plan)) {
     return { ...result, allowed: true, ...(base.plan === 'standard' ? { standardSubscriptionAccess: true } : {}) };
   }
+  // Free/invite grants unlock public models, never subscription extras.
+  // The dedicated debit rechecks funds and any purchased spillover under locks.
+  if (Number(balanceRow.free_credits) > 0) {
+    return { ...result, allowed: true, freeCreditAccess: true };
+  }
   if (!(Number(balanceRow.purchased_credits) > 0)
       || !(Date.parse(String(balanceRow.purchased_expires_at || '')) > now)) return result;
   try {
