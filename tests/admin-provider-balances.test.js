@@ -56,3 +56,76 @@ for (const [label, status, error] of [
   assert.equal(result.headers['Cache-Control'], 'no-store');
   assert.doesNotMatch(JSON.stringify(result), /private auth diagnostic/);
 });
+
+test('billing key takes precedence only for fal balances', async () => {
+  const env = { ...baseEnv(), FAL_BILLING_KEY: '  mock-billing-only  ' };
+  const s = setup({ env }); await s.call();
+  assert.equal(s.state.calls[1].init.headers.Authorization, 'Key mock-billing-only');
+  assert.equal(s.state.calls[0].init.headers.Authorization, 'Bearer mock-wave-key');
+  assert.equal(env.FAL_KEY, 'mock-fal-key');
+});
+test('billing-only configuration does not require an inference key', async () => {
+  const s = setup({ env: { ADMIN_EMAIL: 'admin@example.test', FAL_BILLING_KEY: 'mock-billing-only' } });
+  const r = await s.call(); assert.equal(s.state.calls.length, 1);
+  assert.equal(r.body.providers[1].state, 'current');
+  assert.doesNotMatch(JSON.stringify(r), /mock-billing-only/);
+});
+test('blank billing key preserves existing FAL_KEY and FAL_API_KEY fallback', async () => {
+  for (const legacy of [{ FAL_KEY: 'mock-primary', FAL_API_KEY: 'mock-secondary' }, { FAL_API_KEY: 'mock-secondary' }]) {
+    const s = setup({ env: { ADMIN_EMAIL: 'admin@example.test', FAL_BILLING_KEY: '  ', ...legacy } });
+    await s.call(); assert.equal(s.state.calls[0].init.headers.Authorization, 'Key ' + (legacy.FAL_KEY || legacy.FAL_API_KEY));
+  }
+});
+test('billing permission denial never retries with inference key', async () => {
+  const s = setup({ env: { ...baseEnv(), FAL_BILLING_KEY: 'mock-denied' }, fetch: async () => json({}, 403) });
+  const r = await s.call();
+  const falCalls = s.state.calls.filter(c => c.url.includes('api.fal.ai'));
+  assert.equal(falCalls.length, 1); assert.equal(falCalls[0].init.headers.Authorization, 'Key mock-denied');
+  assert.equal(r.body.providers[1].state, 'unknown'); assert.equal(r.body.providers[1].error, 'access_unavailable');
+});
+test('changing billing key invalidates old account balance cache', async () => {
+  const env = { ...baseEnv(), FAL_BILLING_KEY: 'mock-billing-first' };
+  const s = setup({ env }); await s.call();
+  env.FAL_BILLING_KEY = 'mock-billing-second'; await s.call();
+  assert.equal(s.state.calls.length, 3);
+  assert.equal(s.state.calls[2].init.headers.Authorization, 'Key mock-billing-second');
+});
+test('H3 generation config ignores billing key and keeps inference key', () => {
+  const vm = require('node:vm'), fs = require('node:fs');
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../api/_lib/h3-live-config.js'), 'utf8'), {
+    module, exports: module.exports, URL,
+    process: { env: { FAL_BILLING_KEY: 'mock-billing-only', FAL_KEY: 'mock-generation-only' } }
+  });
+  assert.equal(module.exports.falApiKey(), 'mock-generation-only');
+});
+
+for (const [label, response, expected] of [
+  ['401', () => json({}, 401), 'access_unavailable'],
+  ['429', () => json({}, 429), 'rate_limited'],
+  ['500', () => json({}, 500), 'provider_unavailable'],
+  ['malformed JSON', () => new Response('{'), 'provider_unavailable'],
+  ['missing balance', () => json({}), 'invalid_response'],
+  ['timeout', (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('mock-private-error')))), 'timeout']
+]) test('dedicated billing failure ' + label + ' is bounded and never uses inference fallback', async () => {
+  const s = setup({ env: { ADMIN_EMAIL: 'admin@example.test', FAL_BILLING_KEY: 'mock-billing-only', FAL_KEY: 'mock-generation-only' }, fetch: response });
+  const first = await s.call();
+  assert.equal(first.body.providers[1].state, 'unknown');
+  assert.equal(first.body.providers[1].balance, null);
+  assert.equal(first.body.providers[1].error, expected);
+  await s.call();
+  assert.equal(s.state.calls.length, 1, 'failures are cached, no immediate retry');
+  assert.equal(s.state.calls[0].init.headers.Authorization, 'Key mock-billing-only');
+  assert.doesNotMatch(JSON.stringify(first), /mock-billing|mock-generation|mock-private/);
+});
+test('dedicated billing failed refresh preserves stale balance and timestamp', async () => {
+  let failed = false;
+  const s = setup({ env: { ADMIN_EMAIL: 'admin@example.test', FAL_BILLING_KEY: 'mock-billing-only' }, fetch: () => failed ? json({}, 403) : json({ credits: { current_balance: 0, currency: 'USD' } }) });
+  const first = await s.call(); failed = true; s.state.time += 30001;
+  const next = await s.call();
+  assert.equal(next.body.providers[1].state, 'stale');
+  assert.equal(next.body.providers[1].balance, 0);
+  assert.equal(next.body.providers[1].fetchedAt, first.body.providers[1].fetchedAt);
+  assert.equal(next.body.providers[1].error, 'access_unavailable');
+  assert.equal(s.state.calls.length, 2);
+});

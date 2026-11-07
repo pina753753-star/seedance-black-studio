@@ -80,7 +80,7 @@ function createHandler({ requireAuth, fetchImpl = globalThis.fetch, env = proces
         return res.status(403).json({ ok: false, error: 'forbidden' });
       const providers = await Promise.all([
         readProvider('wavespeed', String(env.WAVESPEED_API_KEY || '').trim(), auth.user.id),
-        readProvider('fal', String(env.FAL_KEY || env.FAL_API_KEY || '').trim(), auth.user.id)
+        readProvider('fal', String(env.FAL_BILLING_KEY || '').trim() || String(env.FAL_KEY || env.FAL_API_KEY || '').trim(), auth.user.id)
       ]);
       return res.status(200).json({ ok: true, providers, cacheSeconds: TTL_MS / 1000 });
     } catch { return res.status(503).json({ ok: false, error: 'verification_unavailable' }); }
