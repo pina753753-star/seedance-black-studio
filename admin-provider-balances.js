@@ -7,7 +7,7 @@
   const info = {
     wavespeed: ['WaveSpeed', 'https://wavespeed.ai/top-up', 'Seedance 2.5・2.5 Turbo、Klingモーションなど。実際の経路はモデル設定によります。'],
     fal: ['fal', 'https://fal.ai/dashboard/billing', 'H3 Max Liveなど。既存キーに残高の読取権限がない場合は取得できません。'],
-    openrouter: ['OpenRouter', 'https://openrouter.ai/settings/credits', 'Seedance 2.0・2.0 Fast、絵コンテなど。公式画面で確認してください。'],
+    openrouter: ['OpenRouter', 'https://openrouter.ai/settings/credits', 'Seedance 2.0・2.0 Fast、絵コンテなど。購入総額と使用総額の差（USD）です。管理キー未設定の場合は公式画面で確認してください。'],
     openai: ['OpenAI', 'https://platform.openai.com/settings/organization/billing/overview', 'モデレーション・画像判定など。公式画面で確認してください。']
   };
   const errors = { not_configured: '未設定', access_unavailable: '認証・読取権限を確認', rate_limited: '取得制限中', timeout: '取得時間切れ', provider_unavailable: '取得失敗', invalid_response: '応答を確認できません' };
@@ -19,7 +19,7 @@
     if (row.state === 'stale') return '古い残高・' + (errors[row.error] || '再確認が必要');
     if (row.state === 'current') {
       if (Date.now() - Date.parse(row.fetchedAt) >= 30000) return '古い残高・更新してください';
-      return row.balance <= 0 ? '残高なし・要確認' : '取得済み';
+      return row.balance < 0 ? '残高マイナス・要確認' : row.balance === 0 ? '残高なし・要確認' : '取得済み';
     }
     return '未取得・' + (errors[row.error] || '不明');
   }

@@ -4,7 +4,9 @@ const TTL_MS = 30000;
 const MAX_BYTES = 16384;
 const TARGETS = Object.freeze({
   wavespeed: 'https://api.wavespeed.ai/api/v3/balance',
-  fal: 'https://api.fal.ai/v1/account/billing?expand=credits'
+  fal: 'https://api.fal.ai/v1/account/billing?expand=credits',
+  // Official account credits endpoint; it requires an OpenRouter management key.
+  openrouter: 'https://openrouter.ai/api/v1/credits'
 });
 const fail = code => Object.assign(new Error(code), { category: code });
 async function smallJson(response) {
@@ -48,10 +50,20 @@ function createHandler({ requireAuth, fetchImpl = globalThis.fetch, env = proces
           throw fail([401, 403].includes(response.status) ? 'access_unavailable' : response.status === 429 ? 'rate_limited' : 'provider_unavailable');
         }
         const json = await smallJson(response);
-        const balance = id === 'fal' ? json?.credits?.current_balance : json?.data?.balance;
-        const currency = id === 'fal' ? json?.credits?.currency : 'USD';
-        if ((id === 'wavespeed' && json?.code !== 200) || typeof balance !== 'number' || !Number.isFinite(balance) || balance < 0
-          || typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) throw fail('invalid_response');
+        let balance, currency;
+        if (id === 'openrouter') {
+          // Remaining balance = total purchased credits - total usage (both USD).
+          // A negative difference is a real, reportable state, never clamped to zero.
+          const purchased = json?.data?.total_credits, used = json?.data?.total_usage;
+          if (![purchased, used].every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)) throw fail('invalid_response');
+          balance = Math.round((purchased - used) * 1e6) / 1e6; currency = 'USD';
+          if (!Number.isFinite(balance)) throw fail('invalid_response');
+        } else {
+          balance = id === 'fal' ? json?.credits?.current_balance : json?.data?.balance;
+          currency = id === 'fal' ? json?.credits?.currency : 'USD';
+          if ((id === 'wavespeed' && json?.code !== 200) || typeof balance !== 'number' || !Number.isFinite(balance) || balance < 0
+            || typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) throw fail('invalid_response');
+        }
         slot.value = { id, state: 'current', balance, currency, fetchedAt: new Date(now()).toISOString(), checkedAt, error: null };
       } catch (error) {
         const category = controller.signal.aborted ? 'timeout' : ['access_unavailable','rate_limited','provider_unavailable','invalid_response'].includes(error.category) ? error.category : 'provider_unavailable';
@@ -80,7 +92,9 @@ function createHandler({ requireAuth, fetchImpl = globalThis.fetch, env = proces
         return res.status(403).json({ ok: false, error: 'forbidden' });
       const providers = await Promise.all([
         readProvider('wavespeed', String(env.WAVESPEED_API_KEY || '').trim(), auth.user.id),
-        readProvider('fal', String(env.FAL_BILLING_KEY || '').trim() || String(env.FAL_KEY || env.FAL_API_KEY || '').trim(), auth.user.id)
+        readProvider('fal', String(env.FAL_BILLING_KEY || '').trim() || String(env.FAL_KEY || env.FAL_API_KEY || '').trim(), auth.user.id),
+        // Management key only: never substitute the generation key (OPENROUTER_API_KEY).
+        readProvider('openrouter', String(env.OPENROUTER_MANAGEMENT_KEY || '').trim(), auth.user.id)
       ]);
       return res.status(200).json({ ok: true, providers, cacheSeconds: TTL_MS / 1000 });
     } catch { return res.status(503).json({ ok: false, error: 'verification_unavailable' }); }

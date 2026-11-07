@@ -129,3 +129,69 @@ test('dedicated billing failed refresh preserves stale balance and timestamp', a
   assert.equal(next.body.providers[1].error, 'access_unavailable');
   assert.equal(s.state.calls.length, 2);
 });
+
+const orOk = (credits, usage) => json({ data: { total_credits: credits, total_usage: usage } });
+const orEnv = extra => ({ ADMIN_EMAIL: 'admin@example.test', OPENROUTER_MANAGEMENT_KEY: '  mock-or-management  ', ...extra });
+const orRow = r => r.body.providers.find(p => p.id === 'openrouter');
+test('openrouter: management key, official credits URL, balance = purchased - used in USD', async () => {
+  const s = setup({ env: orEnv(), fetch: async () => orOk(25.5, 6.8) }); const r = await s.call();
+  assert.equal(s.state.calls.length, 1);
+  assert.equal(s.state.calls[0].url, 'https://openrouter.ai/api/v1/credits');
+  assert.equal(s.state.calls[0].init.headers.Authorization, 'Bearer mock-or-management');
+  assert.equal(s.state.calls[0].init.method, 'GET'); assert.equal(s.state.calls[0].init.redirect, 'error');
+  const row = orRow(r);
+  assert.equal(row.state, 'current'); assert.equal(row.balance, 18.7); assert.equal(row.currency, 'USD'); assert.equal(row.error, null);
+  assert.doesNotMatch(JSON.stringify(r), /mock-or-management|total_credits|total_usage/);
+});
+test('openrouter: unconfigured when only the generation key exists (no substitution)', async () => {
+  const s = setup({ env: orEnv({ OPENROUTER_MANAGEMENT_KEY: ' ', OPENROUTER_API_KEY: 'mock-generation-only' }) }); const r = await s.call();
+  assert.equal(s.state.calls.length, 0);
+  assert.equal(orRow(r).state, 'unconfigured'); assert.equal(orRow(r).balance, null); assert.equal(orRow(r).error, 'not_configured');
+});
+test('openrouter: zero and negative balances are real values, not failures', async () => {
+  for (const [credits, usage, expected] of [[10, 10, 0], [5, 7.25, -2.25]]) {
+    const s = setup({ env: orEnv(), fetch: async () => orOk(credits, usage) }); const row = orRow(await s.call());
+    assert.equal(row.state, 'current'); assert.equal(row.balance, expected); assert.equal(row.error, null);
+  }
+});
+test('openrouter: float noise is removed from the difference', async () => {
+  const s = setup({ env: orEnv(), fetch: async () => orOk(0.3, 0.1) }); assert.equal(orRow(await s.call()).balance, 0.2);
+});
+for (const [label, response, expected] of [
+  ['401', () => json({}, 401), 'access_unavailable'], ['403', () => json({}, 403), 'access_unavailable'],
+  ['429', () => json({}, 429), 'rate_limited'], ['500', () => json({}, 500), 'provider_unavailable'],
+  ['malformed JSON', () => new Response('{'), 'provider_unavailable'],
+  ['missing data', () => json({}), 'invalid_response'],
+  ['string numbers', () => json({ data: { total_credits: '25', total_usage: '1' } }), 'invalid_response'],
+  ['negative purchased', () => json({ data: { total_credits: -1, total_usage: 0 } }), 'invalid_response'],
+  ['negative usage', () => json({ data: { total_credits: 1, total_usage: -1 } }), 'invalid_response'],
+  ['missing usage', () => json({ data: { total_credits: 5 } }), 'invalid_response']
+]) test('openrouter failure ' + label + ' is unknown, never zero, never uses the generation key', async () => {
+  const s = setup({ env: orEnv({ OPENROUTER_API_KEY: 'mock-generation-only' }), fetch: response });
+  const r = await s.call(); const row = orRow(r);
+  assert.equal(row.state, 'unknown'); assert.equal(row.balance, null); assert.equal(row.error, expected);
+  await s.call(); assert.equal(s.state.calls.length, 1, 'failure is cached, no immediate retry');
+  assert.equal(s.state.calls[0].init.headers.Authorization, 'Bearer mock-or-management');
+  assert.doesNotMatch(JSON.stringify(r), /mock-or|mock-generation/);
+});
+test('openrouter: failed refresh keeps the last value as stale with its original timestamp', async () => {
+  let failed = false;
+  const s = setup({ env: orEnv(), fetch: () => failed ? json({}, 500) : orOk(3, 3) });
+  const first = orRow(await s.call()); failed = true; s.state.time += 30001;
+  const next = orRow(await s.call());
+  assert.equal(next.state, 'stale'); assert.equal(next.balance, 0); assert.equal(next.fetchedAt, first.fetchedAt); assert.equal(next.error, 'provider_unavailable');
+});
+test('openrouter: changing the management key invalidates the cached balance', async () => {
+  const env = orEnv(); const s = setup({ env, fetch: async () => orOk(2, 1) });
+  await s.call(); env.OPENROUTER_MANAGEMENT_KEY = 'mock-or-second'; await s.call();
+  assert.equal(s.state.calls.length, 2); assert.equal(s.state.calls[1].init.headers.Authorization, 'Bearer mock-or-second');
+});
+test('openrouter: balance is not readable without admin authentication', async () => {
+  const s = setup({ env: orEnv(), fetch: async () => orOk(2, 1) }); await s.call();
+  s.state.auth = false; const r = await s.call();
+  assert.equal(r.status, 401); assert.equal(r.body.providers, undefined);
+});
+test('openrouter: a slow response is bounded by the timeout', async () => {
+  const s = setup({ env: orEnv(), fetch: (_u, init) => new Promise((_r, rej) => init.signal.addEventListener('abort', () => rej(new Error('mock-private')))) });
+  const r = await s.call(); assert.equal(orRow(r).error, 'timeout'); assert.doesNotMatch(JSON.stringify(r), /mock-private/);
+});
