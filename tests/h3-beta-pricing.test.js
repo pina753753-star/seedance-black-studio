@@ -68,3 +68,13 @@ test('DB migration: pricing helpersと課金RPCはservice_roleだけに維持す
   assert.match(migration, /revoke all on function public\.deduct_h3_live_credits_atomic\(uuid, uuid\) from public, anon, authenticated/);
   assert.match(migration, /revoke all on function public\.deduct_h3_director_credits_atomic\(uuid, uuid, boolean\) from public, anon, authenticated/);
 });
+
+
+test('H3 text cost uses normal 768p rate and keeps reference modes separate', () => {
+  const rounded = Math.ceil((1.20 * 170 * 1.055 * 2 / 3.725) / 5) * 5;
+  assert.equal(rounded, 120);
+  assert.equal(maxConfig.creditCostForMode('text'), rounded);
+  for (const mode of ['image', 'reference', 'storyboard']) {
+    assert.equal(maxConfig.creditCostForMode(mode), 130);
+  }
+});

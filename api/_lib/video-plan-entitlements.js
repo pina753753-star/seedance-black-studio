@@ -1,5 +1,7 @@
 'use strict';
 
+// Subscription-only add-ons (audio, storyboard, legacy admin dance) deliberately
+// retain Premium+; normal models use MODEL_PLANS in credit-access.
 const SEEDANCE_25_ALLOWED_PLANS = Object.freeze(['premium', 'ultimate', 'team', 'scale']);
 
 function hasSeedance25PlanAccess(plan, subscriptionExpiresAt, nowMs = Date.now()) {
@@ -12,7 +14,7 @@ function hasSeedance25PlanAccess(plan, subscriptionExpiresAt, nowMs = Date.now()
 
 async function getSeedance25Entitlement(db, userId) {
   const { getCreditAccess } = require('./credit-access');
-  const access = await getCreditAccess(db, userId, { paidPlans: SEEDANCE_25_ALLOWED_PLANS });
+  const access = await getCreditAccess(db, userId);
   if (!access.ok) return { ok: false, allowed: false, plan: 'free', error: access.error };
   return access;
 }

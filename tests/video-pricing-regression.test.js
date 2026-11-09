@@ -39,6 +39,9 @@ for (const model of MODELS) {
     for (const resolution of RESOLUTIONS) {
       for (const duration of DURATIONS) {
         const input = { model, mode, resolution, duration };
+        // Seedance 2.0 / Fast 480p 4-15s (non-storyboard) is intentionally repriced;
+        // its exact values are verified in seedance20-480p-pricing.test.js.
+        if ((model === 'bytedance/seedance-2.0' || model === 'bytedance/seedance-2.0-fast') && resolution === '480p' && mode !== 'storyboard' && duration >= 4 && duration <= 15) continue;
         assert.equal(
           calculateVideoCreditCost(input),
           model === 'bytedance/seedance-2.0' && resolution === '1080p'

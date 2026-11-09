@@ -127,6 +127,10 @@ async function normalizeHistoryRow(row) {
     provider: row.provider || row.api_provider || '',
     model: row.model || '',
     mode: resolveMode(row),
+    // Only the one known value is passed through, read from the settings the start
+    // route already saves; it lets the history label Kling dance tasks.
+    dance_method: row.settings?.dance_method === 'kling_v3_motion_control' ? 'kling_v3_motion_control' : '',
+    provider_model: (row.provider || row.api_provider) === 'wavespeed' && row.settings?.dance_method === 'kling_v3_motion_control' && row.settings?.provider_model === 'kwaivgi/kling-v3.0-pro/motion-control' ? 'kwaivgi/kling-v3.0-pro/motion-control' : '',
     reference_urls: Array.isArray(row.reference_urls) ? row.reference_urls : [],
     video_uri: url,
     video_url: url,

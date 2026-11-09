@@ -224,7 +224,7 @@ test('spent credits or loss of start eligibility does not hide existing complete
 });
 
 test('current main pricing: 1080 aspect floor and both 2.5 variants, Fast1080 rejected',async()=>{
- const h=fixture();
+ const h=fixture();h.state.watermark=false;
  for(const [input,credits] of [[{model:INPUT.model,resolution:'1080p',duration:15},535],[{model:INPUT.model,resolution:'1080p',duration:15,aspect_ratio:'1:1'},335],[{model:'bytedance/seedance-2.5-standard',duration:15},495],[{model:'bytedance/seedance-2.5',resolution:'1080p',duration:15},300]])assert.equal((await h.estimate('alice',{...INPUT,...input})).credits,credits);
  await rejects(()=>h.estimate('alice',{...INPUT,model:'bytedance/seedance-2.0-fast',resolution:'1080p'}),'invalid_resolution');
  assert.equal(h.state.starts.length,0);
@@ -264,13 +264,21 @@ test('cancelled existing task remains readable without provider URLs or assumed 
 });
 
 
-test('Fast 1-3s estimates fail before proposal persistence; supported 4s stays55credits', async()=>{
+test('Fast 1-3s estimates fail before proposal persistence; supported 4s 1:1 480p is 10 credits (right-sized)', async()=>{
  const h=fixture();let proposals=0;const original=h.store.createProposal.bind(h.store);h.store.createProposal=async q=>{proposals++;return original(q);};
  const input={...INPUT,model:'bytedance/seedance-2.0-fast',resolution:'480p',aspect_ratio:'1:1'};
  for(const duration of [1,2,3])await rejects(()=>h.estimate('alice',{...input,duration}),'invalid_duration');
  assert.equal(proposals,0);assert.equal(h.state.starts.length,0);assert.equal(h.state.credits,1000);
- const q=await h.estimate('alice',{...input,duration:4});assert.equal(q.credits,55);assert.equal(q.approval_required,true);assert.equal(proposals,1);
+ const q=await h.estimate('alice',{...input,duration:4});assert.equal(q.credits,10);assert.equal(q.approval_required,true);assert.equal(proposals,1);
  const {validateVideoGenerationOptions}=require('../api/_lib/video-model-validation');
  for(const mode of ['text_to_video','image_to_video','reference_to_video','storyboard'])for(const duration of [1,2,3])assert.equal(validateVideoGenerationOptions({...input,mode,duration}).error,'invalid_duration');
  for(const resolution of ['480p','720p'])for(const duration of [4,15])assert.equal(validateVideoGenerationOptions({...input,mode:'text_to_video',duration,resolution}).ok,true);
+});
+
+test('1080p quote requires active subscription and expiry rejects start without consuming',async()=>{
+ const h=fixture(),input={...INPUT,resolution:'1080p'};
+ await rejects(()=>h.estimate('alice',input),'resolution_subscription_required');
+ h.state.watermark=false;const q=await h.estimate('alice',input);await h.approve(q);
+ h.state.watermark=true;await rejects(()=>h.start(q),'resolution_subscription_required');
+ assert.equal(h.state.starts.length,0);assert.equal(h.state.credits,1000);
 });

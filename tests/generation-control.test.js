@@ -204,7 +204,7 @@ test('Seedanceの控除処理は原子的RPC以外で残高や台帳を書き込
   const end = source.indexOf('// Returns credits to the exact pools', start);
   const functionSource = source.slice(start, end);
 
-  assert.match(functionSource, /db\.rpc\('deduct_generation_credits_atomic'/, 'atomic deduction RPC is missing');
+  assert.match(functionSource, /db\.rpc\(freeCreditAccess\s*\? 'deduct_free_generation_credits_atomic'\s*:\s*standardSubscriptionAccess\s*\? 'deduct_standard_generation_credits_atomic'\s*:\s*'deduct_generation_credits_atomic'/, 'source-aware atomic deduction RPC is missing');
   assert.doesNotMatch(functionSource, /\.from\('credit_balances'\)/, 'balance must not be updated outside the transaction');
   assert.doesNotMatch(functionSource, /\.from\('credit_transactions'\)/, 'ledger must not be inserted outside the transaction');
 });

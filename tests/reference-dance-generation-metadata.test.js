@@ -278,3 +278,13 @@ test('normal purchase-only generation remains allowed with server-owned purchase
   assert.equal(result.providerCalls.length, 1);
   assert.match(result.providerCalls[0].url, /text-to-video-turbo$/);
 });
+
+test('verified admin dance path is exempt from the estimate comparison (known display gap 95 vs server price) but not from format validation', async () => {
+  const lowButValid = await runStart({ bodyOverrides: { estimated_credits: 95 } });
+  assert.equal(lowButValid.res.code, 202, JSON.stringify(lowButValid.res.body));
+  assert.equal(lowButValid.rpcCalls.find(call => call.name === 'deduct_generation_credits_atomic').args.p_credit_cost, 605);
+  const invalid = await runStart({ bodyOverrides: { estimated_credits: null } });
+  assert.equal(invalid.res.code, 400);
+  assert.equal(invalid.rpcCalls.length, 0);
+  assert.equal(invalid.providerCalls.length, 0);
+});

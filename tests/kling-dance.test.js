@@ -1,0 +1,631 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { createRequire } = require('node:module');
+const { validateReadyReferenceDance } = require('../api/_lib/reference-dance.js');
+const { hasSeedance25PlanAccess } = require('../api/_lib/video-plan-entitlements.js');
+
+const USER = '5a951e62-7bc3-46c0-a89b-33fa5eea7bb3';
+const ASSET = '270bf01a-bafd-4255-8ad5-e18a4f1c8c47';
+function readyRow(overrides = {}) {
+  return {
+    id: ASSET, user_id: USER, inspection_error: null, status: 'ready',
+    approved_path: `approved/${USER}/${ASSET}.mp4`, size_bytes: 1024,
+    duration_ms: 9500, billable_seconds: 10, width: 1920, height: 1080,
+    video_codec: 'h264', sha256: 'a'.repeat(64),
+    rights_confirmed_at: new Date().toISOString(), created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 3600000).toISOString(), ...overrides
+  };
+}
+
+// Load the real handler in an isolated module with all network/DB boundaries
+// mocked. No generation, storage write, or credit transaction leaves this test.
+async function runStart({ freeAccess = false, swapAfterRetention = false, swapPurposeAfterRetention = false, maxUse = 10, moderationBlock = false, omit = [], rate = 19, providerFailure = false, resolution = '720p', dance = true, row = readyRow(), role = 'admin', settingsFail = false, expireBeforeRetention = false, subscription = true, subscriptionPlan = 'premium', debitError = null, accessAllowed = true, reserveDuplicate = false, bodyOverrides = {} } = {}) {
+  const rpcCalls = [], updates = [], providerCalls = [], events = [], accessCalls = [], moderated = [];
+  const access = {
+    ok: true, allowed: accessAllowed, plan: subscription ? subscriptionPlan : 'free', accountStatus: 'active',
+    hasActiveSubscription: subscription, hasPurchasedAccess: !subscription && !freeAccess, freeCreditAccess: freeAccess, standardSubscriptionAccess: subscription && subscriptionPlan === 'standard',
+    subscriptionExpiresAt: subscription ? '2999-01-01T00:00:00Z' : null,
+    watermarkRequired: !subscription, balance: 5000
+  };
+  const db = {
+    from(table) {
+      let update;
+      const predicates = [];
+      const result = () => {
+        if (update) {
+          if (table === 'seedance_reference_video_uploads' && update.expires_at) {
+            const current = expireBeforeRetention ? { ...row, expires_at: '2000-01-01T00:00:00.000Z' } : row;
+            if (!predicates.every(predicate => predicate(current))) return { data: [], error: null };
+            // A length change completes right after this request read the row: the row is 'ready' again, with a different file.
+            if (swapPurposeAfterRetention) row = { ...row, inspection_error: 'MOTION_PROVIDER_REVIEW' };
+            if (swapAfterRetention) row = { ...row, sha256: 'b'.repeat(64), duration_ms: 8000, billable_seconds: 8 };
+          }
+          if (table === 'seedance_reference_video_uploads' && update.last_task_id) {
+            if (!predicates.every(predicate => predicate(row))) return { data: [], error: null };
+          }
+          if (table === 'generation_tasks' && update.settings) {
+            const stage = update.settings.reference_dance ? 'dance' : 'policy';
+            if (settingsFail === true || settingsFail === stage) return { data: [], error: { message: 'settings unavailable' } };
+          }
+          return { data: [{ id: 'task-1' }], error: null };
+        }
+        if (table === 'profiles') return { data: { id: USER, email: 'admin@example.test', role }, error: null };
+        if (table === 'seedance_reference_video_uploads') return { data: row, error: null };
+        if (table === 'credit_balances') return { data: { free_credits: 5000 }, error: null };
+        throw new Error(`Unexpected read: ${table}`);
+      };
+      const chain = {
+        select() { return chain; }, eq(key, value) { predicates.push(current => current[key] === value); return chain; }, in() { return chain; }, is(key,value) { if(key==='inspection_error')predicates.push(current=>current[key]===value); return chain; },
+        gt(key, value) { predicates.push(current => current[key] > value); return chain; },
+        update(value) { update = value; updates.push({ table, value }); events.push({ type: 'update', table, value }); return chain; },
+        maybeSingle() { return Promise.resolve(result()); },
+        then(resolve, reject) { return Promise.resolve(result()).then(resolve, reject); }
+      };
+      return chain;
+    },
+    async rpc(name, args) {
+      rpcCalls.push({ name, args }); events.push({ type: 'rpc', name });
+      if (name === 'reserve_generation_task' && reserveDuplicate) return { data: null, error: { message: 'existing active task' } };
+      if (name === 'reserve_generation_task') return { data: { task_id: 'task-1' }, error: null };
+      if (['deduct_free_generation_credits_atomic','deduct_standard_generation_credits_atomic'].includes(name) && debitError) return {data:null,error:{message:debitError}};
+      if (['deduct_generation_credits_atomic','deduct_standard_generation_credits_atomic','deduct_free_generation_credits_atomic'].includes(name)) return { data: { ok: true, deducted: args.p_credit_cost, new_balance: 4000, from_free: args.p_credit_cost }, error: null };
+      if (name === 'refund_generation_task_atomic') return { data: { ok: true, code: 'refunded' }, error: null };
+      if (name === 'release_generation_task') return { data: true, error: null };
+      throw new Error(`Unexpected RPC: ${name}`);
+    },
+    storage: { from() { return { async createSignedUrl() { return { data: { signedUrl: 'https://storage.example.test/source.mp4' }, error: null }; } }; } }
+  };
+  const filename = path.resolve(__dirname, '../api/_lib/seedance-start.js');
+  const localRequire = createRequire(filename);
+  // Execute the actual admin helper with a deterministic inert address, never
+  // the host's environment/configuration. Preserve its real role/email checks.
+  const adminEmail = 'admin@example.test';
+  const danceModule = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../api/_lib/reference-dance.js'), 'utf8'), {
+    module: danceModule, process: { env: { ADMIN_EMAIL: adminEmail } }
+  });
+  const realDance = danceModule.exports;
+  realDance.klingDance.config.creditsPerSecond = rate;
+  realDance.klingDance.config.maxUseSeconds = maxUse;
+  const baseFrom = db.from;
+  db.from = (table) => {
+    if (table !== 'profiles') return baseFrom(table);
+    const chain = { select() { return chain; }, eq() { return chain; }, async maybeSingle() { return { data: { id: USER, email: adminEmail, role }, error: null }; } };
+    return chain;
+  };
+  const stubs = {
+    '@supabase/supabase-js': { createClient() { throw new Error('Unexpected live client'); } },
+    './confirmed-auth.js': { requireConfirmedAuth: async () => ({ ok: true, user: { id: USER, email: adminEmail }, supabase: db }) },
+    './openai-moderation.js': { moderateContent: async (text, images) => { moderated.push({ text, images }); return { ok: true }; } },
+    './moderation-decision.js': { resolveModerationDecision: async () => (moderationBlock ? { ok: true, allow: false, status: 400, body: { ok: false, error: 'moderation_blocked' } } : { ok: true, allow: true }) },
+    './generation-control.js': { checkGenerationControl: async () => ({ ok: true }) },
+    './credit-access': { readSubscriptionAccess: async () => ({ ...access, freeCreditAccess: undefined, standardSubscriptionAccess: undefined, balanceRow: { free_credits: freeAccess ? 800 : 0 } }) },
+    './video-plan-entitlements.js': {
+      hasSeedance25PlanAccess,
+      getSeedance25Entitlement: async () => { accessCalls.push('purchase'); return { ...access }; },
+      getSeedance25SubscriptionEntitlement: async () => { accessCalls.push('subscription'); return { ...access, allowed: subscription }; }
+    },
+    './reference-audio.js': { normalizeReferenceAudioPaths: () => ({ ok: true, paths: [] }), createReferenceAudioSignedUrls: async () => ({ ok: true, urls: [] }) },
+    './reference-dance.js': realDance
+  };
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
+    module, exports: module.exports,
+    require: (name) => Object.hasOwn(stubs, name) ? stubs[name] : localRequire(name),
+    process: { env: { WAVESPEED_API_KEY: 'mock-only', OPENROUTER_API_KEY: 'mock-only' } },
+    console: { log() {}, warn() {}, error() {} }, URL,
+    fetch: async (url, options) => {
+      providerCalls.push({ url, payload: JSON.parse(options.body) }); events.push({ type: 'provider' });
+      return providerFailure ? { ok: false, status: 422, text: async () => 'synthetic rejected input' } : { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 'prediction-1', status: 'created' } }) };
+    }
+  }, { filename });
+  const res = { status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; }, setHeader() {} };
+  const requestBody = {
+    prompt: 'Dance naturally', model: 'bytedance/seedance-2.5', mode: 'reference_to_video',
+    resolution, duration: 5, aspect_ratio: '9:16', input_references: ['https://example.test/identity.png'],
+    ...(dance ? { reference_video_asset_id: ASSET, dance_method: 'kling_v3_motion_control', estimated_credits: 19 * (row.billable_seconds || 0) } : {}), ...bodyOverrides
+  };
+  for (const key of omit) delete requestBody[key];
+  await module.exports({ method: 'POST', body: requestBody }, res);
+  return { res, rpcCalls, updates, providerCalls, events, accessCalls, moderated };
+}
+
+
+const klingDance = require('../api/_lib/reference-dance.js').klingDance;
+const KLING = /kwaivgi\/kling-v3\.0-pro\/motion-control$/;
+
+test('price undecided: refuses before reservation, charge or provider call', async () => {
+  const r = await runStart({ rate: null });
+  assert.equal(r.res.code, 503);
+  assert.equal(r.res.body.error, 'kling_dance_price_undecided');
+  assert.equal(r.rpcCalls.length, 0);
+  assert.equal(r.providerCalls.length, 0);
+});
+
+test('mocked price: payload has server-owned orientation/sound, one image, signed video, no resolution/duration', async () => {
+  const r = await runStart({ rate: 19 });
+  assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+  assert.equal(r.providerCalls.length, 1);
+  assert.match(r.providerCalls[0].url, KLING);
+  assert.deepEqual(r.providerCalls[0].payload, {
+    image: 'https://example.test/identity.png',
+    video: 'https://storage.example.test/source.mp4',
+    prompt: klingDance.KLING_DANCE_PROVIDER_PROMPT,
+    character_orientation: 'image',
+    keep_original_sound: false
+  });
+  const reserve = r.rpcCalls.find(c => c.name === 'reserve_generation_task').args;
+  assert.equal(reserve.p_credit_cost, 190);
+  assert.equal(reserve.p_duration_secs, 10);
+  const deduct = r.rpcCalls.filter(c => c.name === 'deduct_generation_credits_atomic');
+  assert.equal(deduct.length, 1);
+  assert.equal(r.res.body.creditCost, 190);
+  const settings = r.updates.find(u => u.value.settings?.reference_dance).value.settings;
+  assert.equal(settings.dance_method, 'kling_v3_motion_control');
+});
+
+test('browser cannot inject orientation/sound or extra provider fields', async () => {
+  const r = await runStart({ rate: 19, bodyOverrides: { character_orientation: 'video', keep_original_sound: true, resolution_override: '1080p' } });
+  assert.equal(r.res.code, 202);
+  assert.equal(r.providerCalls[0].payload.character_orientation, 'image');
+  assert.equal(r.providerCalls[0].payload.keep_original_sound, false);
+  assert.equal(Object.keys(r.providerCalls[0].payload).length, 5);
+});
+
+for (const [label, row] of [
+  ['over 10 s (11 s)', readyRow({ duration_ms: 10001, billable_seconds: 11 })],
+  ['15 s long video', readyRow({ duration_ms: 15000, billable_seconds: 15 })]
+]) {
+  test(`unsupported length is refused with no trim or method switch: ${label}`, async () => {
+    const r = await runStart({ rate: 19, row });
+    assert.equal(r.res.code, 400);
+    assert.equal(r.res.body.error, 'kling_dance_duration_unsupported');
+    assert.equal(r.rpcCalls.length, 0);
+    assert.equal(r.providerCalls.length, 0);
+  });
+}
+
+test('boundary: exactly 10 s and 4 s (inspector minimum) are accepted and priced per second', async () => {
+  const ten = await runStart({ rate: 7, row: readyRow({ duration_ms: 10000, billable_seconds: 10 }), bodyOverrides: { estimated_credits: 70 } });
+  assert.equal(ten.res.code, 202, JSON.stringify(ten.res.body));
+  assert.equal(ten.res.body.creditCost, 70);
+  const four = await runStart({ rate: 7, row: readyRow({ duration_ms: 4000, billable_seconds: 4 }), bodyOverrides: { estimated_credits: 28 } });
+  assert.equal(four.res.code, 202);
+  assert.equal(four.res.body.creditCost, 28);
+});
+
+test('estimated_credits: missing, malformed -> 400 invalid_estimated_credits; lower than server -> 409; equal/higher accepted', async () => {
+  for (const bad of [undefined, 0, -1, 1.5, '100', null]) {
+    const o = bad === undefined ? { estimated_credits: undefined } : { estimated_credits: bad };
+    const body = { ...o };
+    const r = await runStart({ rate: 19, bodyOverrides: body });
+    assert.equal(r.res.code, 400, String(bad));
+    assert.equal(r.res.body.error, 'invalid_estimated_credits');
+    assert.equal(r.rpcCalls.length, 0);
+    assert.equal(r.providerCalls.length, 0);
+  }
+  const low = await runStart({ rate: 19, bodyOverrides: { estimated_credits: 189 } });
+  assert.equal(low.res.code, 409);
+  assert.equal(low.res.body.error, 'credit_cost_changed');
+  assert.equal(low.res.body.credits, 190);
+  assert.equal(low.rpcCalls.length, 0);
+  assert.equal(low.providerCalls.length, 0);
+  const equal = await runStart({ rate: 19, bodyOverrides: { estimated_credits: 190 } });
+  assert.equal(equal.res.code, 202);
+  const higher = await runStart({ rate: 19, bodyOverrides: { estimated_credits: 250 } });
+  assert.equal(higher.res.code, 202);
+  assert.equal(higher.res.body.creditCost, 190);
+});
+
+test('estimated_credits absent (legacy shape) is refused for kling only', async () => {
+  const r = await runStart({ rate: 19, omit: ['estimated_credits'] });
+  assert.equal(r.res.code, 400);
+  assert.equal(r.res.body.error, 'invalid_estimated_credits');
+  assert.equal(r.rpcCalls.length, 0);
+  assert.equal(r.providerCalls.length, 0);
+});
+
+test('unknown dance_method and missing video are refused', async () => {
+  const unknown = await runStart({ rate: 19, bodyOverrides: { dance_method: 'kling_v3_motion_control ' + 'x' } });
+  assert.equal(unknown.res.code, 400);
+  assert.equal(unknown.res.body.error, 'invalid_dance_method');
+  assert.equal(unknown.providerCalls.length, 0);
+  const noVideo = await runStart({ rate: 19, dance: false, bodyOverrides: { dance_method: 'kling_v3_motion_control', estimated_credits: 190 } });
+  assert.equal(noVideo.res.code, 400);
+  assert.equal(noVideo.res.body.error, 'reference_video_required');
+  assert.equal(noVideo.rpcCalls.length, 0);
+});
+
+test('public BETA accepts eligible non-admin; ready rights-checked asset and one identity image remain required', async () => {
+  const nonAdmin = await runStart({ rate: 19, role: 'user' });
+  assert.equal(nonAdmin.res.code, 202);
+  assert.equal(nonAdmin.rpcCalls.filter(c => c.name === 'deduct_generation_credits_atomic').length, 1);
+  const noImage = await runStart({ rate: 19, bodyOverrides: { input_references: [] } });
+  assert.equal(noImage.res.code, 400);
+  assert.equal(noImage.res.body.error, 'identity_reference_image_required');
+  const twoImages = await runStart({ rate: 19, bodyOverrides: { input_references: ['https://example.test/a.png', 'https://example.test/b.png'] } });
+  assert.equal(twoImages.res.code, 400);
+  assert.equal(twoImages.res.body.error, 'kling_dance_single_image_required');
+  assert.equal(twoImages.rpcCalls.length, 0);
+  const notReady = await runStart({ rate: 19, row: readyRow({ status: 'pending' }) });
+  assert.equal(notReady.res.code, 400);
+  assert.equal(notReady.rpcCalls.length, 0);
+  const noRights = await runStart({ rate: 19, row: readyRow({ rights_confirmed_at: null }) });
+  assert.equal(noRights.res.code, 400);
+  assert.equal(noRights.providerCalls.length, 0);
+});
+
+test('provider rejection refunds the task once and returns refunded', async () => {
+  const r = await runStart({ rate: 19, providerFailure: true });
+  assert.ok(r.res.code >= 400, String(r.res.code));
+  assert.equal(r.rpcCalls.filter(c => c.name === 'deduct_generation_credits_atomic').length, 1);
+  assert.equal(r.rpcCalls.filter(c => c.name === 'refund_generation_task_atomic').length, 1);
+  assert.equal(r.res.body.refunded, true);
+});
+
+test('settings save failure never charges or calls the provider', async () => {
+  const r = await runStart({ rate: 19, settingsFail: 'dance' });
+  assert.equal(r.res.code, 500);
+  assert.equal(r.rpcCalls.some(c => c.name === 'deduct_generation_credits_atomic'), false);
+  assert.equal(r.providerCalls.length, 0);
+});
+
+test('regression: existing Seedance dance (no dance_method) keeps its endpoint, price and exemption', async () => {
+  const r = await runStart({ rate: 19, row: readyRow({ duration_ms: 15000, billable_seconds: 15 }), bodyOverrides: { dance_method: undefined, estimated_credits: 95, reference_url: 'https://example.test/identity.png', input_references: undefined } });
+  assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+  assert.match(r.providerCalls[0].url, /seedance-2\.5\/motion-control$/);
+  assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, 605);
+  assert.equal('character_orientation' in r.providerCalls[0].payload, false);
+});
+
+test('regression: normal generation is untouched and kling module never loads a price', async () => {
+  const r = await runStart({ dance: false });
+  assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+  assert.match(r.providerCalls[0].url, /text-to-video-turbo$|image-to-video|reference/);
+  assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, 95);
+});
+
+test('kling-dance module: owner price 19 cr/s, 4-30 s range, strict helpers', () => {
+  const k = require('../api/_lib/reference-dance.js').klingDance;
+  assert.equal(k.config.creditsPerSecond, 19);
+  assert.equal(k.getKlingDanceCreditsPerSecond(), 19);
+  assert.equal(k.klingDanceCredits(5), 95);
+  assert.equal(k.klingDanceCredits(10), 190);
+  assert.equal(k.klingDanceCredits(4), 76);
+  assert.throws(() => k.klingDanceCredits(5, null), /kling_dance_price_undecided/);
+  assert.throws(() => k.validateKlingDanceSeconds(3), /kling_dance_duration_unsupported/);
+  assert.throws(() => k.validateKlingDanceSeconds(31), /kling_dance_duration_unsupported/);
+  assert.equal(k.validateKlingDanceSeconds(4), 4);
+  assert.equal(k.KLING_DANCE_MIN_SECONDS, 4);
+  assert.equal(k.KLING_DANCE_MAX_SECONDS, 10);
+  assert.equal(k.parseKlingDanceMethod({}), '');
+  assert.equal(k.KLING_DANCE_PROVIDER_MODEL, 'kwaivgi/kling-v3.0-pro/motion-control');
+});
+
+// Measured length decides acceptance; billed seconds = ceil(durationMs / 1000) (the inspector's rule).
+const BOUNDARIES = [
+  [4000, 4, 'accept', 76], [4001, 5, 'accept', 95], [4999, 5, 'accept', 95], [5000, 5, 'accept', 95],
+  [9500, 10, 'accept', 190], [9999, 10, 'accept', 190], [10000, 10, 'accept', 190],
+  [10001, 11, 'reject'], [10999, 11, 'reject'], [15000, 15, 'reject']
+];
+for (const [ms, billed, outcome, credits] of BOUNDARIES) {
+  test(`boundary ${ms} ms (billed ${billed} s): ${outcome}${credits ? ` ${credits} cr` : ''}`, async () => {
+    const r = await runStart({ row: readyRow({ duration_ms: ms, billable_seconds: billed }), bodyOverrides: { estimated_credits: credits || 1 } });
+    if (outcome === 'reject') {
+      assert.equal(r.res.code, 400);
+      assert.equal(r.res.body.error, 'kling_dance_duration_unsupported');
+      assert.equal(r.rpcCalls.length, 0);
+      assert.equal(r.providerCalls.length, 0);
+      return;
+    }
+    assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+    assert.equal(r.res.body.creditCost, credits);
+    assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, credits);
+    assert.equal(r.rpcCalls.find(c => c.name === 'deduct_generation_credits_atomic').args.p_credit_cost ?? r.rpcCalls.find(c => c.name === 'deduct_generation_credits_atomic').args.p_cost, credits);
+  });
+}
+
+test('under 4 s (3.9 s and 3 s) fails the existing inspection before any reservation/charge/provider call', async () => {
+  for (const ms of [3999, 3000]) {
+    const r = await runStart({ row: readyRow({ duration_ms: ms, billable_seconds: 4 }) });
+    assert.equal(r.res.code, 400, String(ms));
+    assert.equal(r.rpcCalls.length, 0);
+    assert.equal(r.providerCalls.length, 0);
+  }
+});
+
+test('client-supplied price/seconds are never a billing basis (5 s => 95, 10 s => 190 regardless of body)', async () => {
+  const fake = { credits_per_second: 1, creditsPerSecond: 1, duration: 4, duration_seconds: 4, billable_seconds: 3, credit_cost: 1, cost: 1 };
+  const five = await runStart({ row: readyRow({ duration_ms: 5000, billable_seconds: 5 }), bodyOverrides: { ...fake, estimated_credits: 95 } });
+  assert.equal(five.res.code, 202, JSON.stringify(five.res.body));
+  assert.equal(five.res.body.creditCost, 95);
+  assert.equal(five.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_duration_secs, 5);
+  const ten = await runStart({ row: readyRow({ duration_ms: 10000, billable_seconds: 10 }), bodyOverrides: { ...fake, estimated_credits: 190 } });
+  assert.equal(ten.res.code, 202);
+  assert.equal(ten.res.body.creditCost, 190);
+  // a tampered low confirmation is refused with 409 and nothing is charged
+  const low = await runStart({ row: readyRow({ duration_ms: 10000, billable_seconds: 10 }), bodyOverrides: { ...fake, estimated_credits: 1 } });
+  assert.equal(low.res.code, 409);
+  assert.equal(low.rpcCalls.length, 0);
+});
+
+test('reservation, deduction and response amounts are identical (19 x billed seconds)', async () => {
+  const r = await runStart({ row: readyRow({ duration_ms: 7300, billable_seconds: 8 }), bodyOverrides: { estimated_credits: 152 } });
+  assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+  const amounts = [
+    r.res.body.creditCost,
+    r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost,
+    Object.entries(r.rpcCalls.find(c => c.name === 'deduct_generation_credits_atomic').args).find(([k]) => /cost|amount/.test(k))[1]
+  ];
+  assert.deepEqual(amounts, [152, 152, 152]);
+});
+
+test('motion needs no prompt: empty/missing body.prompt works, the server builds the fixed image-based instruction', async () => {
+  for (const omit of [['prompt'], []]) {
+    const r = await runStart({ omit, bodyOverrides: omit.length ? {} : { prompt: '' } });
+    assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+    assert.equal(r.providerCalls[0].payload.prompt, klingDance.KLING_DANCE_PROVIDER_PROMPT);
+    assert.match(r.providerCalls[0].payload.prompt, /input image/);
+    assert.match(r.providerCalls[0].payload.prompt, /identity, anatomy, body proportions and existing limbs or appendages/);
+    assert.match(r.providerCalls[0].payload.prompt, /without adding or replacing body parts/);
+    assert.match(r.providerCalls[0].payload.prompt, /fixed camera positioned in front/);
+    assert.match(r.providerCalls[0].payload.prompt, /whole body clearly visible/);
+    assert.match(r.providerCalls[0].payload.prompt, /Allow natural body turns required by the choreography/);
+    assert.match(r.providerCalls[0].payload.prompt, /pullbacks, zooms or cuts/);
+    assert.doesNotMatch(r.providerCalls[0].payload.prompt, /bird|human|hairstyle/i);
+    const reserve = r.rpcCalls.find(c => c.name === 'reserve_generation_task').args;
+    assert.equal(reserve.p_prompt, klingDance.KLING_DANCE_TASK_PROMPT);
+  }
+});
+
+test('text typed elsewhere (body.prompt) never reaches the motion task, moderation text or provider; images are still moderated', async () => {
+  const r = await runStart({ bodyOverrides: { prompt: 'TEXT FROM ANOTHER TAB' } });
+  assert.equal(r.res.code, 202);
+  assert.equal(JSON.stringify(r.providerCalls[0].payload).includes('ANOTHER TAB'), false);
+  assert.equal(JSON.stringify(r.rpcCalls).includes('ANOTHER TAB'), false);
+  assert.equal(r.moderated.length, 1);
+  assert.equal(r.moderated[0].text, klingDance.KLING_DANCE_TASK_PROMPT);
+  assert.deepEqual([...r.moderated[0].images], ['https://example.test/identity.png']);
+});
+
+test('moderation rejection still stops a prompt-less motion request before reservation/charge/provider', async () => {
+  // moderation outcome comes from resolveModerationDecision; reject it for this case only
+  const r = await runStart({ omit: ['prompt'], moderationBlock: true });
+  assert.equal(r.res.code, 422);
+  assert.equal(r.res.body.error, 'content_policy_violation');
+  assert.equal(r.rpcCalls.length, 0);
+  assert.equal(r.providerCalls.length, 0);
+});
+
+test('shared reference-video messages use the motion wording for Kling only', async () => {
+  const k = await runStart({ row: readyRow({ status: 'pending' }) });
+  assert.equal(k.res.code, 400);
+  assert.match(k.res.body.message, /^お手本動画/);
+  const s = await runStart({ row: readyRow({ status: 'pending' }), omit: ['dance_method'], bodyOverrides: { input_references: undefined, reference_url: 'https://example.test/identity.png', estimated_credits: 95 } });
+  assert.equal(s.res.code, 400);
+  assert.match(s.res.body.message, /^参考動画/);
+});
+
+test('other methods still require a prompt (normal generation and Seedance dance)', async () => {
+  for (const o of [{ dance: false, omit: ['prompt'] }, { omit: ['prompt', 'dance_method'], bodyOverrides: { reference_url: 'https://example.test/identity.png' } }]) {
+    const r = await runStart(o);
+    assert.equal(r.res.code, 400);
+    assert.equal(r.res.body.error, 'prompt is required');
+    assert.equal(r.rpcCalls.length, 0);
+  }
+});
+
+
+test('purchased-only non-admin motion uses purchase access, snapshots watermark/risk requirement and deducts once', async () => {
+ const r=await runStart({subscription:false,role:'user'});assert.equal(r.res.code,202);
+ assert.deepEqual(r.accessCalls,['purchase']);
+ for(const u of r.updates.filter(u=>u.value.settings)){assert.equal(u.value.settings.watermark_required,true);assert.equal(u.value.settings.purchase_access_required,true)}
+ assert.equal(r.rpcCalls.filter(c=>c.name==='deduct_generation_credits_atomic').length,1);
+});
+test('purchase access rejection and 1080p are refused before charge/provider',async()=>{
+ for(const opts of [{accessAllowed:false},{resolution:'1080p'}]){
+ const r=await runStart({subscription:false,role:'user',...opts});assert.equal(r.res.code,403);assert.equal(r.rpcCalls.length,0);assert.equal(r.providerCalls.length,0);
+ }
+});
+test('purchase cannot unlock storyboard or legacy Seedance dance',async()=>{
+ for(const bodyOverrides of [{ui_origin:'storyboard'},{dance_method:undefined}]){
+ const r=await runStart({subscription:false,role:'user',bodyOverrides});assert.equal(r.res.code,403);assert.deepEqual(r.accessCalls,['subscription']);assert.equal(r.rpcCalls.length,0);
+ }
+});
+test('motion foreign/unknown asset cannot charge and duplicate reservation cannot deduct again',async()=>{
+ for(const row of [readyRow({user_id:'other'}),readyRow({status:'failed',inspection_error:'MODERATION_UNKNOWN'})]){
+ const r=await runStart({subscription:false,role:'user',row});assert.equal(r.res.code,400);assert.equal(r.rpcCalls.length,0);assert.equal(r.providerCalls.length,0);
+ }
+ const r=await runStart({subscription:false,role:'user',reserveDuplicate:true});assert.equal(r.rpcCalls.filter(c=>c.name==='deduct_generation_credits_atomic').length,0);assert.equal(r.providerCalls.length,0);
+});
+
+// ---- length choice enabled (maxUseSeconds 20): 4-20 s, orientation by measured length, stale selections refused ----
+const motionRow = (ms) => readyRow({ duration_ms: ms, billable_seconds: Math.max(4, Math.ceil(ms / 1000)) });
+const motionBody = (ms, extra = {}) => ({ estimated_credits: Math.ceil(ms / 1000) * 19, use_billable_seconds: Math.ceil(ms / 1000), orientation_mode: ms > 10000 ? 'video' : 'image', ...extra });
+const CASES = [
+  [4000, 76, 'image'], [10000, 190, 'image'], [10001, 209, 'video'], [15000, 285, 'video'], [16000, 304, 'video'],
+  [16200, 323, 'video'], [19001, 380, 'video'], [20000, 380, 'video']
+];
+for (const [ms, credits, orientation] of CASES) {
+  test(`length choice on: ${ms} ms -> ${credits} cr, character_orientation ${orientation}`, async () => {
+    const r = await runStart({ maxUse: 20, row: motionRow(ms), bodyOverrides: motionBody(ms) });
+    assert.equal(r.res.code, 202, JSON.stringify(r.res.body));
+    assert.equal(r.res.body.creditCost, credits);
+    assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_credit_cost, credits);
+    assert.equal(r.rpcCalls.find(c => c.name === 'reserve_generation_task').args.p_duration_secs, credits / 19);
+    const deduct = r.rpcCalls.find(c => c.name === 'deduct_generation_credits_atomic').args;
+    assert.equal(Object.entries(deduct).find(([k]) => /cost|amount/.test(k))[1], credits);
+    assert.deepEqual({ ...r.providerCalls[0].payload }, {
+      image: 'https://example.test/identity.png', video: 'https://storage.example.test/source.mp4',
+      prompt: klingDance.KLING_DANCE_PROVIDER_PROMPT, character_orientation: orientation, keep_original_sound: false
+    });
+    assert.equal(r.updates.find(u => u.value.settings?.reference_dance).value.settings.character_orientation, orientation);
+  });
+}
+
+test('length choice on: 20001 ms is refused before any reservation (also never accepted as 20 s)', async () => {
+  const r = await runStart({ maxUse: 20, row: motionRow(20001), bodyOverrides: motionBody(20001, { use_billable_seconds: 21 }) });
+  assert.equal(r.res.code, 400);
+  assert.equal(r.rpcCalls.length, 0);
+  assert.equal(r.providerCalls.length, 0);
+});
+
+test('length choice on: what the screen showed must equal the sealed file - stale seconds / orientation / missing fields => 409, nothing charged', async () => {
+  const row = motionRow(15000);
+  for (const [label, overrides, remove, error] of [
+    ['stale seconds (screen said 14)', { use_billable_seconds: 14 }, [], 'motion_length_changed'],
+    ['seconds missing', {}, ['use_billable_seconds'], 'motion_length_changed'],
+    ['stale orientation (screen said image)', { orientation_mode: 'image' }, [], 'motion_orientation_changed'],
+    ['orientation missing', {}, ['orientation_mode'], 'motion_orientation_changed']
+  ]) {
+    const r = await runStart({ maxUse: 20, row, omit: remove, bodyOverrides: motionBody(15000, overrides) });
+    assert.equal(r.res.code, 409, label);
+    assert.equal(r.res.body.error, error, label);
+    assert.equal(r.rpcCalls.length, 0, label);
+    assert.equal(r.providerCalls.length, 0, label);
+  }
+});
+
+test('length choice on: the confirmed estimate still guards the price (lower => 409, malformed/missing => 400)', async () => {
+  const low = await runStart({ maxUse: 20, row: motionRow(16000), bodyOverrides: motionBody(16000, { estimated_credits: 285 }) });
+  assert.equal(low.res.code, 409);
+  assert.equal(low.res.body.error, 'credit_cost_changed');
+  assert.equal(low.res.body.credits, 304);
+  assert.equal(low.rpcCalls.length, 0);
+  const missing = await runStart({ maxUse: 20, row: motionRow(16000), omit: ['estimated_credits'], bodyOverrides: motionBody(16000) });
+  assert.equal(missing.res.code, 400);
+  assert.equal(missing.res.body.error, 'invalid_estimated_credits');
+});
+
+test('length choice on: admin-BETA, rights, single image and moderation gates are unchanged for 16-20 s', async () => {
+  assert.equal((await runStart({ maxUse: 20, role: 'user', subscription:false, row: motionRow(16000), bodyOverrides: motionBody(16000) })).res.code, 202);
+  assert.equal((await runStart({ maxUse: 20, row: readyRow({ ...motionRow(16000), rights_confirmed_at: null }), bodyOverrides: motionBody(16000) })).res.code, 400);
+  const two = await runStart({ maxUse: 20, row: motionRow(16000), bodyOverrides: motionBody(16000, { input_references: ['https://example.test/a.png', 'https://example.test/b.png'] }) });
+  assert.equal(two.res.body.error, 'kling_dance_single_image_required');
+  const blocked = await runStart({ maxUse: 20, row: motionRow(16000), moderationBlock: true, bodyOverrides: motionBody(16000) });
+  assert.equal(blocked.res.code, 422);
+  assert.equal(blocked.rpcCalls.length, 0);
+});
+
+test('length choice on: a 16-20 s asset can never be used by the Seedance dance (no dance_method), whatever the config', async () => {
+  for (const maxUse of [10, 20, 30]) {
+    for (const ms of [16000, 20000]) {
+      const r = await runStart({ maxUse, row: motionRow(ms), omit: ['dance_method'], bodyOverrides: { estimated_credits: 605, reference_url: 'https://example.test/identity.png', input_references: undefined } });
+      assert.equal(r.res.code, 400, `${maxUse}/${ms}`);
+      assert.equal(r.res.body.error, 'invalid_reference_video_duration');
+      assert.equal(r.rpcCalls.length, 0);
+      assert.equal(r.providerCalls.length, 0);
+    }
+  }
+});
+
+test('gate closed (default 10): behaviour is the 4-10 s release - 11 s rows are refused and legacy bodies are accepted', async () => {
+  const over = await runStart({ row: motionRow(11000), bodyOverrides: { estimated_credits: 209 } });
+  assert.equal(over.res.body.error, 'kling_dance_duration_unsupported');
+  const ok = await runStart({ row: motionRow(10000), bodyOverrides: { estimated_credits: 190 } });
+  assert.equal(ok.res.code, 202);
+  assert.equal(ok.providerCalls[0].payload.character_orientation, 'image');
+});
+
+test('klingDance helpers: orientation by measured length, gate values, payload orientation is closed', () => {
+  const k = require('../api/_lib/reference-dance.js').klingDance;
+  assert.equal(k.klingDanceOrientation(10000), 'image');
+  assert.equal(k.klingDanceOrientation(10001), 'video');
+  assert.equal(k.getKlingDanceMaxSeconds(), 30);
+  assert.equal(k.isKlingDanceLengthSelectEnabled(), true);
+  assert.throws(() => k.buildKlingDancePayload({ prompt: 'p', imageUrl: 'i', videoUrl: 'v', orientation: 'free' }), /invalid_kling_orientation/);
+  assert.equal(k.buildKlingDancePayload({ prompt: 'p', imageUrl: 'i', videoUrl: 'v', orientation: 'video' }).character_orientation, 'video');
+});
+
+test('a length change that lands after the row was read cannot be billed: the bind requires the exact file that was priced', async () => {
+  for (const maxUse of [10, 20, 30]) {
+    const r = await runStart({ maxUse, swapAfterRetention: true, row: motionRow(10000), bodyOverrides: motionBody(10000) });
+    assert.equal(r.res.code, 503, String(maxUse));
+    assert.equal(r.res.body.error, 'reference_video_bind_failed');
+    assert.equal(r.rpcCalls.some(c => c.name === 'deduct_generation_credits_atomic'), false, 'no deduction');
+    assert.equal(r.providerCalls.length, 0, 'nothing sent to the provider');
+    assert.equal(r.updates.some(u => u.table === 'generation_tasks' && u.value.status === 'cancelled'), true);
+  }
+  // control: without the swap the same request starts normally
+  const ok = await runStart({ maxUse: 20, row: motionRow(10000), bodyOverrides: motionBody(10000) });
+  assert.equal(ok.res.code, 202);
+});
+
+// ---- gate closed again (rollback to 10 s) while 16-20 s data already exists: nothing is deleted or misread, only NEW acceptance stops ----
+test('gate closed with an existing 16-20 s asset: a new motion generation is refused with the normal message (not "corrupt"), nothing charged', async () => {
+  for (const ms of [11000, 16000, 20000]) {
+    const r = await runStart({ maxUse: 10, row: motionRow(ms), bodyOverrides: { estimated_credits: Math.ceil(ms / 1000) * 19 } });
+    assert.equal(r.res.code, 400, String(ms));
+    assert.equal(r.res.body.error, 'kling_dance_duration_unsupported', String(ms));
+    assert.match(r.res.body.message, /4〜10秒/);
+    assert.equal(r.rpcCalls.length, 0);
+    assert.equal(r.providerCalls.length, 0);
+    assert.equal(r.updates.some(u => u.table === 'seedance_reference_video_uploads'), false, 'the asset row is not modified or removed');
+  }
+});
+
+test('the feature gate and the stored-data bound are separate constants: gate 10/20, stored data always up to 20 s', () => {
+  const k = require('../api/_lib/reference-dance.js').klingDance;
+  assert.equal(k.KLING_DANCE_STORED_MAX_MS, 30000);
+  assert.equal(k.config.maxUseSeconds, 30, '30 s candidate: DB and worker must deploy before this API');
+  const lib = require('../api/_lib/reference-dance.js');
+  const row = { id: '270bf01a-bafd-4255-8ad5-e18a4f1c8c47', user_id: USER, status: 'ready', approved_path: `approved/${USER}/270bf01a-bafd-4255-8ad5-e18a4f1c8c47.mp4`, size_bytes: 1024, duration_ms: 17500, billable_seconds: 18, width: 1280, height: 720, video_codec: 'h264', sha256: 'a'.repeat(64), rights_confirmed_at: new Date().toISOString(), expires_at: new Date(Date.now() + 3600e3).toISOString() };
+  assert.throws(() => lib.validateReadyReferenceDance(row, USER), /invalid_reference_video_duration/, 'Seedance bound stays 15 s');
+  assert.equal(lib.validateReadyReferenceDance(row, USER, { maxDurationMs: k.KLING_DANCE_STORED_MAX_MS }).billableSeconds, 18, 'stored data is readable whatever the gate');
+});
+
+for(const ms of [20001,25000,29901,30000])test(`30s candidate start ${ms}: server measurement and ceil19 agree`,async()=>{const r=await runStart({maxUse:30,row:motionRow(ms),bodyOverrides:motionBody(ms)});assert.equal(r.res.code,202,JSON.stringify(r.res.body));assert.equal(r.res.body.creditCost,Math.ceil(ms/1000)*19);assert.equal(r.providerCalls[0].payload.character_orientation,'video');});
+test('30s candidate refuses over30 and stale estimate before charge',async()=>{for(const [ms,extra] of [[30001,{}],[30000,{estimated_credits:380}],[30000,{use_billable_seconds:20}]]){const r=await runStart({maxUse:30,row:motionRow(ms),bodyOverrides:motionBody(ms,extra)});assert.notEqual(r.res.code,202);assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);}});
+
+test('motion-only purpose is accepted only by Kling; client profile cannot grant normal generation access',async()=>{const row=readyRow({inspection_error:'MOTION_PROVIDER_REVIEW'});const good=await runStart({row});assert.equal(good.res.code,202);assert.equal(good.moderated.length,1);const bad=await runStart({row,dance:false,bodyOverrides:{profile:'motion',reference_video_asset_id:ASSET}});assert.equal(bad.res.code,400);assert.equal(bad.providerCalls.length,0);assert.equal(bad.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);});
+test('same file with changed review purpose stops before deduction',async()=>{const r=await runStart({dance:false,swapPurposeAfterRetention:true,bodyOverrides:{reference_video_asset_id:ASSET}});assert.equal(r.res.code,503,JSON.stringify(r.res.body));assert.equal(r.res.body.error,'reference_video_bind_failed');assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);});
+test('provider refusal on technical-only motion still uses atomic refund, no automatic retry',async()=>{const r=await runStart({row:readyRow({inspection_error:'MOTION_PROVIDER_REVIEW'}),providerFailure:true});assert.equal(r.res.body.refunded,true);assert.equal(r.providerCalls.length,1);assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,1);});
+
+for (const model of ['bytedance/seedance-2.5','bytedance/seedance-2.5-standard']) {
+  for(const resolution of (model.endsWith('standard')?['720p']:['720p','1080p'])) test(`Standard ${model} ${resolution} uses source-aware debit, success and provider failure`,async()=>{
+    for(const providerFailure of [false,true]){
+      const r=await runStart({subscriptionPlan:'standard',dance:false,resolution,providerFailure,bodyOverrides:{model}});
+      assert.equal(r.rpcCalls.filter(c=>c.name==='deduct_standard_generation_credits_atomic').length,1,JSON.stringify(r.res.body));
+      assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);
+      assert.equal(r.providerCalls.length,1);
+      assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,providerFailure?1:0);
+      const settings=r.updates.find(u=>u.value.settings).value.settings;
+      assert.equal(settings.standard_subscription_access,true);assert.equal(settings.purchase_access_required,false);
+      if(!providerFailure) assert.equal(r.res.code,202);
+    }
+  });
+}
+test('Standard public Kling preserves monthly entitlement in both settings writes',async()=>{
+  const r=await runStart({subscriptionPlan:'standard',role:'user',row:motionRow(10000),bodyOverrides:motionBody(10000)});
+  assert.equal(r.res.code,202,JSON.stringify(r.res.body));
+  assert.equal(r.rpcCalls.filter(c=>c.name==='deduct_standard_generation_credits_atomic').length,1);
+  for(const update of r.updates.filter(u=>u.value.settings)){
+    assert.equal(update.value.settings.standard_subscription_access,true);assert.equal(update.value.settings.purchase_access_required,false);
+  }
+});
+test('missing Standard RPC fails closed without fallback or provider call',async()=>{
+  const r=await runStart({subscriptionPlan:'standard',dance:false,debitError:'RPC not installed'});
+  assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(c=>c.name==='deduct_generation_credits_atomic'),false);
+  assert.equal(r.rpcCalls.filter(c=>c.name==='refund_generation_task_atomic').length,1);
+  assert.notEqual(r.res.code,202);
+});
+
+for(const dance of [true,false]) test(`free public start selects dedicated atomic debit; dance=${dance}`,async()=>{
+ const r=await runStart({subscription:false,freeAccess:true,dance});
+ assert.equal(r.res.code,202);assert.equal(r.rpcCalls.filter(x=>x.name==='deduct_free_generation_credits_atomic').length,1);
+ assert.equal(r.rpcCalls.some(x=>x.name==='deduct_generation_credits_atomic'),false);
+ const policy=r.updates.find(x=>x.value.settings?.free_credit_access);assert.equal(policy.value.settings.watermark_required,true);assert.equal(policy.value.settings.purchase_access_required,false);
+});
+test('missing free RPC fails closed before provider without old-RPC fallback',async()=>{
+ const r=await runStart({subscription:false,freeAccess:true,debitError:'function does not exist'});
+ assert.notEqual(r.res.code,200);assert.equal(r.providerCalls.length,0);assert.equal(r.rpcCalls.some(x=>x.name==='deduct_generation_credits_atomic'),false);
+});
+
+for(const model of ['bytedance/seedance-2.0','bytedance/seedance-2.0-fast','bytedance/seedance-2.5-standard','bytedance/seedance-2.5']) test(`free ${model} keeps 720p and rejects 1080p before spend`,async()=>{
+ const r=await runStart({subscription:false,freeAccess:true,dance:false,bodyOverrides:{model}});assert.equal(r.res.code,202);assert.equal(r.rpcCalls.filter(x=>x.name==='deduct_free_generation_credits_atomic').length,1);
+ const denied=await runStart({subscription:false,freeAccess:true,dance:false,resolution:'1080p',bodyOverrides:{model}});const supported1080=['bytedance/seedance-2.0','bytedance/seedance-2.5'].includes(model);assert.equal(denied.res.code,supported1080?403:400);assert.equal(denied.res.body.error,supported1080?'resolution_subscription_required':'invalid_resolution');assert.equal(denied.rpcCalls.length,0);assert.equal(denied.providerCalls.length,0);
+});

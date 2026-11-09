@@ -191,33 +191,36 @@ this.ANNUAL_CAMPAIGN_CUTOFF_MS = ANNUAL_CAMPAIGN_CUTOFF_MS;
 this.shouldShowAnnualCampaignPrice = shouldShowAnnualCampaignPrice;
 this.shouldBlockAnnualCheckoutClick = shouldBlockAnnualCheckoutClick;
 this.setServerAnnualCampaignAvailable = (v) => { serverAnnualCampaignAvailable = v; };
+this.markDiscountShown = (cls) => { annualDiscountShown.add(cls); };
+this.clearDiscountShown = () => { annualDiscountShown = new Set(); };
 `, context);
   return context;
 }
 
-test('pricing.html: 描画時(JST 9/30 23:59)は割引表示OKだが、クリック時(JST 10/1 00:00)はブロックされる', () => {
-  const { shouldShowAnnualCampaignPrice, shouldBlockAnnualCheckoutClick } = loadPricingCampaignHelper();
+test('pricing.html: 割引価格を表示したまま期限を跨いだ場合だけブロックする。通常価格の表示では期限切れでも止めない', () => {
+  const { shouldShowAnnualCampaignPrice, shouldBlockAnnualCheckoutClick, markDiscountShown, clearDiscountShown } = loadPricingCampaignHelper();
   const standardPlan = { cls: 'standard', annual: '35,760', campaignAnnual: '32,184' };
+  const teamPlan = { cls: 'team', annual: '3,576,000', campaignAnnual: '3,218,400' };
 
   // 9/30 23:59時点で描画: 割引表示してよい。
   assert.equal(shouldShowAnnualCampaignPrice(JST_23_59_59_ON_930), true);
 
-  // 画面を開いたまま10/1 00:00になってからクリック: Checkoutをブロックする。
+  // 通常価格を表示している(割引を表示していない)プランは、期限が切れていても止めない。
+  clearDiscountShown();
+  assert.equal(shouldBlockAnnualCheckoutClick(standardPlan, JST_00_00_00_ON_1001), false);
+  assert.equal(shouldBlockAnnualCheckoutClick(teamPlan, JST_00_00_00_ON_1001), false);
+
+  // 割引価格を表示した後に10/1 00:00を跨いでクリック: そのプランだけブロックする。
+  markDiscountShown('standard');
   assert.equal(shouldBlockAnnualCheckoutClick(standardPlan, JST_00_00_00_ON_1001), true);
+  assert.equal(shouldBlockAnnualCheckoutClick(teamPlan, JST_00_00_00_ON_1001), false, '割引を表示していない別プランは止めない');
 
-  // campaignAnnualを持たないプラン(Free等)はそもそもブロック対象外。
-  // (Teamは今回の変更でcampaignAnnualを持つようになったため、以後は
-  // Standard/Premium/Ultimateと同様にブロック対象になる。下のテストで確認)
-  assert.equal(shouldBlockAnnualCheckoutClick({ cls: 'free' }, JST_00_00_00_ON_1001), false);
-
-  // Teamもcampaignキャンペーン対象になったため、期限を跨いだクリックは
-  // Standard/Premium/Ultimateと同様にブロックされる。
-  const teamPlan = { cls: 'team', annual: '3,576,000', campaignAnnual: '3,218,400' };
-  assert.equal(shouldBlockAnnualCheckoutClick(teamPlan, JST_00_00_00_ON_1001), true);
-  assert.equal(shouldBlockAnnualCheckoutClick(teamPlan, JST_23_59_59_ON_930), false);
-
-  // 期間内であれば通常通りブロックしない。
+  // 割引期間内なら、割引表示中でも従来どおり進む。
   assert.equal(shouldBlockAnnualCheckoutClick(standardPlan, JST_23_59_59_ON_930), false);
+
+  // campaignAnnualを持たないプラン(Free等)は対象外。
+  markDiscountShown('free');
+  assert.equal(shouldBlockAnnualCheckoutClick({ cls: 'free' }, JST_00_00_00_ON_1001), false);
 });
 
 test('pricing.html: attachPlanHandlersのクリックハンドラはshouldBlockAnnualCheckoutClickでcheckout()を止めてから再描画する', () => {
@@ -226,7 +229,7 @@ test('pricing.html: attachPlanHandlersのクリックハンドラはshouldBlockA
   const src = pricingHtml.slice(start, end);
 
   assert.match(src, /shouldBlockAnnualCheckoutClick\(plan\)/);
-  assert.match(src, /期間限定10%OFFは終了しました。通常価格をご確認ください。/);
+  assert.match(src, /期間限定10%OFFは終了しました。通常価格に更新しました。内容をご確認のうえ、もう一度「購入する」を押してください。/);
   // ブロック時はrenderPlans()で再描画してからreturnし、checkout()を呼ばない導線になっていること。
   const blockIndex = src.indexOf('shouldBlockAnnualCheckoutClick(plan)');
   const renderIndex = src.indexOf('renderPlans()', blockIndex);
@@ -320,4 +323,93 @@ test('pricing.html: campaignAnnualは年額プラン(Standard/Premium/Ultimate/T
   assert.match(pricingHtml, /2026年9月30日まで/);
   const monthlyBranchStart = pricingHtml.indexOf('}else{priceHtml=`<div class="price"><span class="yen">¥</span><strong class="amount">${p.monthly}</strong>');
   assert.ok(monthlyBranchStart > -1, '月額表示分岐が見つかりません');
+});
+
+// ---------------------------------------------------------------
+// 6. 本物のrenderPlans / attachPlanHandlersでクリックを通す(実決済はしない: checkout()は記録するだけ)
+// ---------------------------------------------------------------
+function loadPricingPage({ billing = 'annual', clock, serverAvailable = null } = {}) {
+  const plansStart = pricingHtml.indexOf('const plans=[');
+  const plansEnd = pricingHtml.indexOf('\n', pricingHtml.indexOf('];', plansStart)) + 1;
+  const helperStart = pricingHtml.indexOf('const ANNUAL_CAMPAIGN_CUTOFF_MS=');
+  const helperEnd = pricingHtml.indexOf('function renderPacks(', helperStart);
+  const src = pricingHtml.slice(plansStart, plansEnd) + pricingHtml.slice(helperStart, helperEnd);
+  const checkoutCalls = [], messages = [], buttons = [];
+  const plansEl = { innerHTML: '' };
+  const RealDate = Date;
+  const FakeDate = { now: () => clock.t, parse: (v) => RealDate.parse(v) };
+  const context = {
+    billing, plansEl, Date: FakeDate, REFERENCE_AUDIO_UI_ENABLED: false, location: { href: '' }, URL, console,
+    checkout: (...args) => { checkoutCalls.push(args); },
+    showMsg: (msg, bad) => { messages.push({ msg, bad: !!bad }); },
+    document: { querySelectorAll(sel) { assert.equal(sel, '#plans .btn'); return buttons; } }
+  };
+  vm.createContext(context);
+  vm.runInContext(`${src}\nserverAnnualCampaignAvailable = ${JSON.stringify(serverAvailable)};\nthis.plans = plans;\nthis.renderPlans = renderPlans;\nthis.attachPlanHandlers = attachPlanHandlers;\nthis.shown = () => JSON.stringify([...annualDiscountShown]);`, context);
+  // renderPlans() writes the HTML and then calls attachPlanHandlers() in the real file's callers; rebuild the buttons from the plans it rendered.
+  function render() {
+    context.renderPlans();
+    buttons.length = 0;
+    for (const p of context.plans) buttons.push({ dataset: { plan: p.cls }, onclick: null, set textContent(_v) {}, get textContent() { return ''; }, disabled: false });
+    context.attachPlanHandlers();
+  }
+  const click = (cls) => { const b = buttons.find((x) => x.dataset.plan === cls); b.onclick(); };
+  render();
+  return { context, render, click, checkoutCalls, messages, plansEl };
+}
+
+test('pricing.html(実際の描画とクリック): 通常の年額価格を表示中は、過去の割引期限が切れていても購入を止めない', () => {
+  // 期限後に最初に開いたページ: 通常価格が表示され、クリックはそのままCheckoutへ進む。
+  const clock = { t: JST_00_00_00_ON_1001 + 3600e3 };
+  const page = loadPricingPage({ clock });
+  assert.deepEqual(JSON.parse(page.context.shown()), [], '割引は表示していない');
+  assert.doesNotMatch(page.plansEl.innerHTML, /期間限定10%OFF/);
+  for (const cls of ['standard', 'premium', 'ultimate', 'team']) {
+    page.click(cls);
+  }
+  assert.deepEqual(page.checkoutCalls.map((c) => c.slice(0, 2).concat(c[3])), [
+    ['subscription', 'standard', 'year'], ['subscription', 'premium', 'year'], ['subscription', 'ultimate', 'year'], ['subscription', 'team', 'year']
+  ]);
+  assert.equal(page.messages.length, 0);
+});
+
+test('pricing.html(実際の描画とクリック): 割引期間中は従来どおり割引価格で進む', () => {
+  const clock = { t: JST_23_59_59_ON_930 - 3600e3 };
+  const page = loadPricingPage({ clock });
+  assert.match(page.plansEl.innerHTML, /期間限定10%OFF/);
+  assert.deepEqual(JSON.parse(page.context.shown()).sort(), ['premium', 'standard', 'team', 'ultimate']);
+  page.click('standard');
+  assert.deepEqual(page.checkoutCalls.map((c) => [c[0], c[1], c[3]]), [['subscription', 'standard', 'year']]);
+  assert.equal(page.messages.length, 0);
+});
+
+test('pricing.html(実際の描画とクリック): 割引表示のまま期限を跨ぐと、最初のクリックは決済を開始せず通常価格へ更新し、再クリックで進む', () => {
+  const clock = { t: JST_23_59_59_ON_930 - 1000 };
+  const page = loadPricingPage({ clock });
+  assert.match(page.plansEl.innerHTML, /期間限定10%OFF/);
+  clock.t = JST_00_00_00_ON_1001 + 1000; // 画面を開いたまま日付を跨ぐ
+  page.click('standard');
+  assert.equal(page.checkoutCalls.length, 0, '最初のクリックでは決済を開始しない');
+  assert.equal(page.messages.length, 1); assert.equal(page.messages[0].bad, true);
+  assert.match(page.messages[0].msg, /通常価格に更新しました/); assert.match(page.messages[0].msg, /もう一度/);
+  assert.doesNotMatch(page.plansEl.innerHTML, /期間限定10%OFF/, '通常価格へ再描画された');
+  assert.match(page.plansEl.innerHTML, /35,760/);
+  // ページはクリック内の再描画(renderPlans)の後、ボタンへハンドラを付け直す。ここでも同じように付け直してから再クリックする。
+  page.render();
+  page.click('standard');
+  assert.deepEqual(page.checkoutCalls.map((c) => [c[0], c[1], c[3]]), [['subscription', 'standard', 'year']], '再クリックで決済へ進む');
+  assert.equal(page.messages.length, 1, '2回目はメッセージも出さない');
+});
+
+test('pricing.html(実際の描画とクリック): サーバーが割引利用不可と返して通常価格を表示している場合も止めない / 月額は期限と無関係', () => {
+  const clock = { t: JST_23_59_59_ON_930 - 3600e3 };
+  const noCoupon = loadPricingPage({ clock, serverAvailable: false });
+  assert.doesNotMatch(noCoupon.plansEl.innerHTML, /期間限定10%OFF/);
+  noCoupon.click('standard');
+  assert.deepEqual(noCoupon.checkoutCalls.map((c) => [c[0], c[1], c[3]]), [['subscription', 'standard', 'year']]);
+  // 月額: 期限を跨いでも、割引表示の有無に関係なく、常にmonthで進む
+  const after = loadPricingPage({ billing: 'monthly', clock: { t: JST_00_00_00_ON_1001 + 1e6 } });
+  after.click('standard'); after.click('team');
+  assert.deepEqual(after.checkoutCalls.map((c) => [c[0], c[1], c[3]]), [['subscription', 'standard', 'month'], ['subscription', 'team', 'month']]);
+  assert.equal(after.messages.length, 0);
 });

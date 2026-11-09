@@ -219,7 +219,8 @@ test('retryable inspection failures keep the uploaded object and expose only a s
   const source = read('api/reference-dance-confirm-upload.js');
   const migration = read('supabase/migrations/20261016000000_add_reference_dance_inspection_error.sql');
   const ui = read('generate-prod.html');
-  assert.match(source, /status: 'uploading'[\s\S]*?inspection_error: reason/);
+  // The stored reason is the safe code; a failed motion length change only prefixes it with a fixed marker.
+  assert.match(source, /status: 'uploading'[\s\S]*?inspection_error: (?:recut \? `\$\{MOTION_RECUT_FAILURE_PREFIX\}\$\{reason\}` : )?reason/);
   assert.match(source, /retryable: true/);
   assert.match(source, /\^\(HTTP_\\d\{3\}/);
   assert.match(source, /inspectionCode \|\| error\?\.message \|\| error\?\.name/);

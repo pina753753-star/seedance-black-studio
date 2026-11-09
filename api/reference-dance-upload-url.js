@@ -10,7 +10,7 @@ const {
   REFERENCE_DANCE_MAX_PER_HOUR,
   REFERENCE_DANCE_MAX_PER_DAY,
   stagingPath,
-  authorizeReferenceDanceAdmin
+  authorizeReferenceMotion
 } = require('./_lib/reference-dance.js');
 
 async function countSince(db, userId, iso) {
@@ -30,8 +30,8 @@ module.exports = async function handler(req, res) {
   if (!auth.ok) return res.status(auth.status).json(auth.body);
 
   try {
-    const access = await authorizeReferenceDanceAdmin(auth);
-    if (!access.ok) return res.status(403).json({ ok: false, error: 'reference_dance_beta_forbidden' });
+    const access = await authorizeReferenceMotion(auth);
+    if (!access.ok) return res.status(403).json({ ok: false, error: 'reference_motion_access_required' });
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const contentType = String(body.contentType || '').toLowerCase();

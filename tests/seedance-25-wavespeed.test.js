@@ -66,7 +66,8 @@ test('generation UI exposes standard and Turbo separately without migrating save
   assert.match(source, /\[SEEDANCE_25_STANDARD_MODEL\]:\{maxCredits:990,creditsPerSecond:\{'480p':495\/30,'720p':990\/30\}\}/);
   assert.match(source, /\[SEEDANCE_25_TURBO_MODEL\]:\{maxCredits:600,creditsPerSecond:\{'720p':550\/30,'1080p':20\}\}/);
   assert.match(source, /const relevant=\$\('model'\)\?\.value===SEEDANCE_25_TURBO_MODEL/);
-  assert.match(source, /Seedance 2\.5 Turbo・1080p：15秒 300クレジット／30秒 600クレジット/);
+  // 公開記念価格の案内は削除済み。実際の価格(上のSEEDANCE_25_PRICINGの1080p=20cr/秒)は維持。
+  assert.doesNotMatch(source, /Seedance 2\.5 Turbo・1080p：15秒 300クレジット／30秒 600クレジット/);
   assert.doesNotMatch(source, /value="bytedance\/seedance-2\.5">Seedance 2\.5<\/option>/);
 });
 

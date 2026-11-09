@@ -10,7 +10,7 @@ const {
 } = require('../api/_lib/video-plan-entitlements.js');
 const { calculateVideoCreditCost } = require('../api/_lib/video-pricing.js');
 
-test('Seedance 2.5は有効期限内のPremium以上だけを許可する', () => {
+test('Seedance 2.5の曲・絵コンテは有効期限内のPremium以上だけを許可する', () => {
   const now = Date.parse('2026-08-21T00:00:00Z');
   const future = '2026-09-21T00:00:00Z';
   const past = '2026-07-21T00:00:00Z';
@@ -85,10 +85,12 @@ test('料金ページはPremium以上の特典と年額合計・毎月付与を�
   const generationPage = fs.readFileSync(path.join(__dirname, '..', 'generate-prod.html'), 'utf8');
   assert.match(source, /Seedance 2\.5・1080p・曲アップロード/);
   assert.doesNotMatch(source, /Seedance 2\.5の消費クレジット5%オフ/);
+  // 公開記念価格の案内は料金ページ・生成画面とも削除済み(消費クレジット自体は変更なし)。
+  assert.match(source, /動画の長さ・解像度・生成方式により消費クレジットは異なります。/);
   for (const page of [source, generationPage]) {
-    assert.match(page, /公開記念価格（期間限定）/);
-    assert.match(page, /15秒 300クレジット／30秒 600クレジット/);
-    assert.match(page, /終了前にサイト内でお知らせします/);
+    assert.doesNotMatch(page, /公開記念価格/);
+    assert.doesNotMatch(page, /終了前にサイト内でお知らせします/);
+    assert.doesNotMatch(page, /seedance25Promo/);
     // 1080p公開記念価格の文脈で古い「通常価格」表記が復活していないことを
     // 確認する。年額10%OFFキャンペーン(1080p公開記念価格とは無関係)の
     // 「期間限定10%OFFは終了しました。通常価格をご確認ください。」という

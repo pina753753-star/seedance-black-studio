@@ -12,13 +12,14 @@ module.exports = async function handler(req, res) {
   const auth = await requireConfirmedAuth(req);
   if (!auth.ok) return res.status(auth.status).json(auth.body);
   try {
-    const access = await getCreditAccess(auth.supabase, auth.user.id, { paidPlans: MODEL_PAID_PLANS });
+    const access = await getCreditAccess(auth.supabase, auth.user.id);
     if (!access?.ok) return res.status(503).json({ ok: false, error: 'entitlement_unavailable' });
     if (access.accountStatus !== 'active') return res.status(403).json({ ok: false, error: 'account_restricted' });
     const subscriptionExtras = access.hasActiveSubscription === true && MODEL_PAID_PLANS.includes(access.plan);
     return res.status(200).json({
       ok: true,
       seedance25: access.allowed === true,
+      resolution1080: access.hasActiveSubscription === true,
       referenceAudio: subscriptionExtras,
       storyboard25: subscriptionExtras,
       watermarkRequired: access.watermarkRequired !== false

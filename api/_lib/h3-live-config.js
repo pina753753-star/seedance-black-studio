@@ -38,6 +38,14 @@ function currentCreditCost(at = Date.now()) {
 // cannot keep a stale price across the switch instant. The DB is authoritative.
 const CREDIT_COST = currentCreditCost();
 
+// Normal 768p text API cost: 15 * $0.08 = $1.20.
+// Match the existing 5-credit rounding policy; 1.055 is a pricing buffer here,
+// NOT a verified fal fee. Reference modes retain their price pending token metering.
+const CREDIT_COST_TEXT = 120;
+function creditCostForMode(mode = 'text') {
+  return mode === 'text' ? CREDIT_COST_TEXT : currentCreditCost();
+}
+
 const INSTRUCTION_MIN_CHARS = 1;
 const INSTRUCTION_MAX_CHARS = 2000;
 
@@ -167,6 +175,8 @@ module.exports = {
   CREDIT_COST_STANDARD,
   CREDIT_COST,
   currentCreditCost,
+  CREDIT_COST_TEXT,
+  creditCostForMode,
   INSTRUCTION_MIN_CHARS,
   INSTRUCTION_MAX_CHARS,
   ALLOWED_PLANS,

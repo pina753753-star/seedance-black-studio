@@ -90,6 +90,17 @@ async function authorizeReferenceDanceAdmin(auth) {
   return { ok: true, admin: data };
 }
 
+// Public motion BETA uses the shared free-credit/settled-purchase/subscription policy.
+// Owning an existing upload still permits reading/removing it after credits expire;
+// those handlers enforce user_id and never inspect, generate or charge.
+async function authorizeReferenceMotion(auth, { existingOnly = false } = {}) {
+  if (!auth?.user?.id || !auth.supabase) return { ok: false };
+  if (existingOnly) return { ok: true };
+  const { getCreditAccess } = require('./credit-access');
+  const access = await getCreditAccess(auth.supabase, auth.user.id);
+  return { ...access, ok: access.ok === true && access.allowed === true };
+}
+
 function providerCostCents(referenceBillableSeconds, resolution = REFERENCE_DANCE_RESOLUTION) {
   if (!Object.hasOwn(REFERENCE_DANCE_RATES, resolution)) throw error('reference_dance_variant_not_allowed');
   if (!Number.isInteger(referenceBillableSeconds)
@@ -110,9 +121,17 @@ function referenceDanceCredits(referenceBillableSeconds, resolution = REFERENCE_
   return Math.ceil(((cents * 11) / 12) / 5) * 5;
 }
 
-function validateReadyReferenceDance(row, userId) {
+// Server-written provenance; never accept a client-supplied moderation result.
+const MOTION_PROVIDER_REVIEW_MARKER = 'MOTION_PROVIDER_REVIEW';
+function isMotionOnlyReference(row) {
+  const marker = String(row?.inspection_error || '');
+  return marker === MOTION_PROVIDER_REVIEW_MARKER || marker.startsWith('MOTION_RECUT:');
+}
+
+function validateReadyReferenceDance(row, userId, { maxDurationMs = MAX_REFERENCE_DANCE_DURATION_MS, allowMotionOnly = false } = {}) {
   if (!row || row.user_id !== userId || !isUuid(row.id)) throw error('reference_video_not_found');
   if (row.status !== 'ready') throw error('reference_video_not_ready');
+  if (isMotionOnlyReference(row) && !allowMotionOnly) throw error('reference_video_motion_only');
   const expiresMs = Date.parse(String(row.expires_at || ''));
   if (!Number.isFinite(expiresMs) || expiresMs <= Date.now()) throw error('reference_video_expired');
   if (!Number.isFinite(Date.parse(String(row.rights_confirmed_at || '')))) throw error('reference_video_rights_unconfirmed');
@@ -124,7 +143,7 @@ function validateReadyReferenceDance(row, userId) {
   const billable = Number(row.billable_seconds);
   if (!Number.isSafeInteger(durationMs)
       || durationMs < MIN_REFERENCE_DANCE_DURATION_MS
-      || durationMs > MAX_REFERENCE_DANCE_DURATION_MS
+      || durationMs > maxDurationMs
       || !Number.isInteger(billable)
       || billable !== Math.max(4, Math.ceil(durationMs / 1000))) {
     throw error('invalid_reference_video_duration');
@@ -175,7 +194,146 @@ Keep the @Image 1 character consistent throughout. Perform the motion at the nat
 Preserve normal anatomy, stable hands and feet, continuous movement, and the requested framing. Do not copy the source video's person's identity or audio.`;
 }
 
+// ---- Kling v3.0 Pro Motion Control dance (admin BETA) ----
+// A separate method from the Seedance 2.5 Motion Control dance above and from the
+// disabled Kling candidate in video-models.js. It never trims or converts a video
+// and never falls back to another method.
+const KLING_DANCE_METHOD = 'kling_v3_motion_control';
+const KLING_DANCE_PROVIDER_MODEL = 'kwaivgi/kling-v3.0-pro/motion-control';
+// WaveSpeed bills a 3 s minimum, but PinaStudio accepts 4-30 s: the existing
+// inspector already rejects anything under 4 s, and that rule is kept as-is.
+const KLING_DANCE_MIN_SECONDS = 4;
+// KLING_DANCE_MAX_SECONDS is the longest clip the proven `character_orientation:"image"` setting
+// accepts. Up to KLING_DANCE_SELECTABLE_MAX_SECONDS the `"video"` setting is used instead (chosen by
+// the server from the measured length, shown to the user, never silently). Which maximum is
+// accepted duration is config.maxUseSeconds; this release requires the DB and inspector updates.
+const KLING_DANCE_MAX_SECONDS = 10;
+const KLING_DANCE_SELECTABLE_MAX_SECONDS = 30;
+const KLING_DANCE_SOURCE_MAX_SECONDS = 60;
+// Two different limits, never to be confused:
+//  - config.maxUseSeconds is the FEATURE GATE: how long a motion generation may be right now (10 or 30).
+//    Closing it (back to 10) stops NEW 11-30 s acceptance only.
+//  - KLING_DANCE_STORED_MAX_MS is the longest asset the stored-data validation will still read (the DB
+//    constraint's 30 s). Assets of 16-30 s that already exist stay readable, restorable and deletable by
+//    the normal expiry whatever the gate says; the gate alone decides whether they may start a generation.
+const KLING_DANCE_STORED_MAX_MS = KLING_DANCE_SELECTABLE_MAX_SECONDS * 1000;
+const KLING_DANCE_IMAGE_ORIENTATION = 'image';
+const KLING_DANCE_VIDEO_ORIENTATION = 'video';
+
+// The motion tab takes no user prompt. The server owns both texts, so nothing typed on
+// another tab can leak in. TASK_PROMPT is what is stored (history) and moderated; the
+// provider prompt keeps the character image as the basis. It does not guarantee results.
+const KLING_DANCE_TASK_PROMPT = 'モーション（画像とお手本動画）';
+const KLING_DANCE_PROVIDER_PROMPT = 'Transfer the choreography, movement and timing from the reference video to the subject in the input image. Preserve that subject’s identity, anatomy, body proportions and existing limbs or appendages; adapt the motion to its anatomy without adding or replacing body parts. Use a fixed camera positioned in front of the subject, with its whole body clearly visible at a consistent, easy-to-see size and comfortable space around it throughout the dance. Allow natural body turns required by the choreography; keep the camera fixed rather than forcing the subject to face forward at every moment. Preserve the input image’s appearance and background. Do not copy other subjects or the background from the reference video, or transfer its camera movement, pullbacks, zooms or cuts.';
+
+// Kling-only credits per second (owner decision: 19 cr/s, i.e. 5 s = 95, 10 s = 190).
+// Never derived from Seedance pricing and never read from the request. If it is
+// ever null/invalid, the server refuses to start (kling_dance_price_undecided)
+// and the access endpoint reports no rate, so the UI disables sending.
+// Tests override it via config.
+// 30-second local candidate. Deploy only after the DB constraint and motion inspector.
+// Setting 10 is an emergency acceptance rollback, not this release default.
+const config = { creditsPerSecond: 19, maxUseSeconds: KLING_DANCE_SELECTABLE_MAX_SECONDS };
+
+function getKlingDanceMaxSeconds() {
+  const max = config.maxUseSeconds;
+  return Number.isInteger(max) && max >= KLING_DANCE_MAX_SECONDS && max <= KLING_DANCE_SELECTABLE_MAX_SECONDS
+    ? max : KLING_DANCE_MAX_SECONDS;
+}
+
+function isKlingDanceLengthSelectEnabled() {
+  return getKlingDanceMaxSeconds() > KLING_DANCE_MAX_SECONDS;
+}
+
+// From the measured length of the file actually sent: <= 10 s keeps the proven image setting.
+function klingDanceOrientation(durationMs) {
+  return Number(durationMs) <= KLING_DANCE_MAX_SECONDS * 1000 ? KLING_DANCE_IMAGE_ORIENTATION : KLING_DANCE_VIDEO_ORIENTATION;
+}
+
+function getKlingDanceCreditsPerSecond() {
+  const rate = config.creditsPerSecond;
+  return Number.isSafeInteger(rate) && rate > 0 ? rate : null;
+}
+
+function isKlingDanceRequested(body) {
+  return Boolean(body && String(body.dance_method || '').trim());
+}
+
+// Throws on an unknown method so a typo can never silently select another path.
+function parseKlingDanceMethod(body) {
+  const raw = String((body && body.dance_method) || '').trim();
+  if (!raw) return '';
+  if (raw !== KLING_DANCE_METHOD) throw error('invalid_dance_method');
+  return KLING_DANCE_METHOD;
+}
+
+// Measured length of the server-inspected video decides acceptance (no rounding
+// is applied before the range check): < 4000 ms or > 10000 ms is refused.
+// Billed seconds are the existing inspector value, ceil(durationMs / 1000), e.g.
+// 4000 ms -> 4, 4001 ms -> 5, 9500 ms -> 10, 10000 ms -> 10, 10001 ms -> refused.
+function validateKlingDanceDuration({ durationMs, billableSeconds }) {
+  if (!Number.isFinite(durationMs)
+      || durationMs < KLING_DANCE_MIN_SECONDS * 1000
+      || durationMs > getKlingDanceMaxSeconds() * 1000
+      || billableSeconds !== Math.ceil(durationMs / 1000)) {
+    throw error('kling_dance_duration_unsupported');
+  }
+  return billableSeconds;
+}
+
+// seconds: whole billable seconds of the inspected reference video.
+function validateKlingDanceSeconds(seconds) {
+  if (!Number.isInteger(seconds) || seconds < KLING_DANCE_MIN_SECONDS || seconds > getKlingDanceMaxSeconds()) {
+    throw error('kling_dance_duration_unsupported');
+  }
+  return seconds;
+}
+
+function klingDanceCredits(seconds, creditsPerSecond = getKlingDanceCreditsPerSecond()) {
+  validateKlingDanceSeconds(seconds);
+  if (!Number.isSafeInteger(creditsPerSecond) || creditsPerSecond < 1) throw error('kling_dance_price_undecided');
+  return seconds * creditsPerSecond;
+}
+
+// Server owns orientation and sound. Nothing from the browser body is spread in.
+function buildKlingDancePayload({ prompt, imageUrl, videoUrl, orientation = KLING_DANCE_IMAGE_ORIENTATION }) {
+  if (orientation !== KLING_DANCE_IMAGE_ORIENTATION && orientation !== KLING_DANCE_VIDEO_ORIENTATION) throw error('invalid_kling_orientation');
+  return {
+    image: String(imageUrl || '').trim(),
+    video: String(videoUrl || '').trim(),
+    prompt: String(prompt || '').trim(),
+    character_orientation: orientation,
+    keep_original_sound: false
+  };
+}
+
+const klingDance = Object.freeze({
+  KLING_DANCE_METHOD,
+  KLING_DANCE_PROVIDER_MODEL,
+  KLING_DANCE_MIN_SECONDS,
+  KLING_DANCE_MAX_SECONDS,
+  KLING_DANCE_SELECTABLE_MAX_SECONDS,
+  KLING_DANCE_SOURCE_MAX_SECONDS,
+  KLING_DANCE_STORED_MAX_MS,
+  KLING_DANCE_TASK_PROMPT,
+  KLING_DANCE_PROVIDER_PROMPT,
+  config,
+  getKlingDanceCreditsPerSecond,
+  getKlingDanceMaxSeconds,
+  isKlingDanceLengthSelectEnabled,
+  klingDanceOrientation,
+  isKlingDanceRequested,
+  parseKlingDanceMethod,
+  validateKlingDanceSeconds,
+  validateKlingDanceDuration,
+  klingDanceCredits,
+  buildKlingDancePayload
+});
+
 module.exports = {
+  MOTION_PROVIDER_REVIEW_MARKER,
+  isMotionOnlyReference,
+  klingDance,
   REFERENCE_DANCE_BUCKET,
   REFERENCE_DANCE_TABLE,
   REFERENCE_DANCE_MODEL,
@@ -198,6 +356,7 @@ module.exports = {
   reviewFramePath,
   validateOwnedPath,
   authorizeReferenceDanceAdmin,
+  authorizeReferenceMotion,
   providerCostCents,
   referenceDanceCredits,
   validateReadyReferenceDance,

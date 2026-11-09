@@ -231,7 +231,7 @@ function makeReserveRpc({ jobId = uuid(50), jobsRows = null, counters = null } =
       }
       return { data: [{ job_id: jobId, code: null, retry_after_seconds: 0, existing: false }], error: null };
     }
-    if (name === 'deduct_h3_live_credits_atomic') {
+    if (name === 'deduct_h3_live_credits_quoted_atomic') {
       if (counters) counters.deductCalls++;
       return { data: { ok: true, code: 'deducted', deducted: 60, new_balance: 940, from_subscription: 0, from_free: 60, from_purchased: 0 }, error: null };
     }
@@ -345,3 +345,55 @@ test('image mode + 画像依存表現でも、mode!==\'text\'なので新しい�
     assert.equal(counters.entitlementCalls, 1, 'image mode with an attached image must proceed normally');
   } finally { restore(); }
 });
+
+test('H3 quote mismatch stops before provider submission and never refunds a concurrent charge', async () => {
+  const { handler, counters, restore } = installMocks();
+  try {
+    const jobsRows = [];
+    const reserve = makeReserveRpc({ jobsRows, counters });
+    let refunds = 0;
+    const db = makeFakeDb({ jobsRows, rpcImpl: async (name, args) => {
+      if (name === 'deduct_h3_live_credits_quoted_atomic') {
+        assert.equal(args.p_expected_credit_cost, 130);
+        return { data: { ok: false, code: 'price_changed', required: 120 } };
+      }
+      if (name === 'refund_h3_live_job_atomic') refunds++;
+      return reserve(name, args);
+    }});
+    const request = req({ mode: 'text' });
+    request.body = JSON.stringify({ instruction: '夕暮れの街', expectedCreditCost: 130 });
+    const response = res();
+    await handler(attachDb(request, db), response);
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.payload.error, 'price_changed');
+    assert.equal(counters.submitTextCalls, 0);
+    assert.equal(refunds, 0);
+  } finally { restore(); }
+});
+
+for (const amount of [60, 110, 120, 130]) {
+  test(`H3 provider rejection reports stored deduction ${amount}, never the current price`, async () => {
+    const { handler, counters, restore } = installMocks();
+    try {
+      require.cache[falPath].exports.submitTextJob = async () => ({ ok: false, category: 'invalid_input' });
+      delete require.cache[startPath];
+      const rejectHandler = require(startPath);
+      const jobsRows = [];
+      const reserve = makeReserveRpc({ jobsRows, counters });
+      const db = makeFakeDb({ jobsRows, rpcImpl: async (name, args) => {
+        if (name === 'deduct_h3_live_credits_quoted_atomic') {
+          assert.equal(args.p_expected_credit_cost, amount);
+          return { data: { ok: true, code: 'deducted', deducted: amount, new_balance: 1000 - amount } };
+        }
+        if (name === 'refund_h3_live_job_atomic') return { data: { code: 'refunded' } };
+        return reserve(name, args);
+      }});
+      const request = req({ mode: 'text' });
+      request.body = JSON.stringify({ instruction: '夕暮れの街', expectedCreditCost: amount });
+      const response = res();
+      await rejectHandler(attachDb(request, db), response);
+      assert.equal(response.statusCode, 422);
+      assert.equal(response.payload.creditRefunded, amount);
+    } finally { restore(); }
+  });
+}
