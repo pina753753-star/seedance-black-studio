@@ -25,7 +25,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
 :root{--line:rgba(255,255,255,.12);--muted:rgba(255,255,255,.55);--gold:#d7b86a;--violet:#7c3aed;--cyan:#6ee7f9;--pink:#fb7185}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#000;color:#fff;font-family:'Noto Sans JP',sans-serif;overflow-x:hidden}body.video-open{overflow:hidden}.wrap{max-width:600px;margin:0 auto;padding:16px 14px 48px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:32px}.brand{display:flex;align-items:center;color:#fff;text-decoration:none}.brand img{height:auto;width:120px;display:block}.menuBtn{color:#fff;border:1px solid var(--line);background:rgba(255,255,255,.06);border-radius:999px;width:42px;height:42px;padding:0;font-size:20px;display:grid;place-items:center;cursor:pointer}.hero{margin-bottom:32px;text-align:center}.hero h1{font-size:36px;line-height:1.15;letter-spacing:-.04em;margin:0 0 24px;font-weight:900;color:#fff}.cta-btn{display:inline-block;text-align:center;text-decoration:none;border-radius:16px;padding:15px 36px;font-weight:700;font-size:16px;background:linear-gradient(90deg,#fff,#e2c978,var(--violet));color:#050506}.galleryTitle{margin:0 0 16px}.galleryTitle h2{margin:0 0 4px;font-size:20px;font-weight:700;letter-spacing:-.03em}.tabs{display:flex;gap:20px;overflow:auto;margin:0 -14px 16px;padding:0 14px 10px;border-bottom:1px solid var(--line);scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tabs button{border:0;background:transparent;color:rgba(255,255,255,.45);font-weight:500;font-size:14px;padding:0 0 8px;white-space:nowrap;cursor:pointer;font-family:'Noto Sans JP',sans-serif}.tabs .active{color:#fff;border-bottom:2px solid #fff}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sample{aspect-ratio:9/16;border:1px solid rgba(255,255,255,.1);border-radius:16px;overflow:hidden;position:relative;background:#111}.sample:before{content:"";position:absolute;inset:0;background:linear-gradient(160deg,var(--c1),rgba(0,0,0,.2) 45%,var(--c2))}.sample:after{content:attr(data-title);position:absolute;left:10px;right:10px;bottom:10px;font-weight:700;font-size:12px;text-shadow:0 2px 8px #000}.realVideo{aspect-ratio:9/16;background:#111;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:0;text-align:left;font:inherit;-webkit-appearance:none;appearance:none;cursor:pointer;overflow:hidden;position:relative}.realVideo video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;background:#000}.note{color:rgba(255,255,255,.32);font-size:12px;line-height:1.7;text-align:center;margin-top:20px}.drawer{position:fixed;inset:0;z-index:20;display:none}.drawer.open{display:block}.shade{position:absolute;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(10px)}.menu{position:absolute;right:12px;top:12px;width:min(340px,calc(100vw - 24px));border:1px solid var(--line);border-radius:28px;background:#000;padding:18px}.menuHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.menuHead b{font-size:18px;font-weight:700}.close{border:0;background:rgba(255,255,255,.08);color:#fff;border-radius:50%;width:38px;height:38px;font-size:24px;cursor:pointer}.menu a{display:flex;justify-content:space-between;color:#fff;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:16px;padding:14px 16px;margin-top:8px;font-weight:500;font-size:14px}.menuLabel{display:inline-flex;align-items:center;gap:7px}.menuBeta{display:inline-flex;align-items:center;padding:2px 7px;border:1px solid rgba(245,158,11,.65);border-radius:999px;color:#f59e0b;font-size:9px;font-weight:700;line-height:1.35;letter-spacing:.08em}.menu .logout{border-color:rgba(251,113,133,.28)!important;background:rgba(251,113,133,.08)!important}.videoOverlay{position:fixed;inset:0;z-index:40;display:none;background:#000}.videoOverlay.open{display:block}.overlayBox{position:fixed;inset:0;width:100vw;height:100dvh;background:#000;overflow:hidden}.overlayBox video{display:block;width:100vw;height:100dvh;background:#000;object-fit:contain}.overlayClose{position:fixed;left:14px;top:calc(12px + env(safe-area-inset-top,0px));z-index:45;width:34px;height:34px;border:0;border-radius:50%;background:rgba(60,60,60,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:rgba(255,255,255,.9);font-size:18px;font-weight:400;line-height:1;display:grid;place-items:center;cursor:pointer;opacity:0;transition:opacity .2s;pointer-events:none;-webkit-tap-highlight-color:transparent}.overlayClose.on{opacity:1;pointer-events:auto}@media(min-width:600px){.wrap{padding:20px 20px 60px}.hero h1{font-size:48px}}@media(max-width:430px){.hero h1{font-size:30px}}
-.hero-description{max-width:440px;margin:-8px auto 24px;color:rgba(255,255,255,.7);font-size:14px;line-height:1.8}.about-studio{margin-top:32px;padding-top:24px;border-top:1px solid var(--line)}.about-studio h2{margin:0 0 12px;font-size:22px;line-height:1.5}.about-studio h3{margin:24px 0 8px;font-size:17px}.about-studio p,.about-studio ol{color:rgba(255,255,255,.7);font-size:14px;line-height:1.9}.about-studio ol{padding-left:22px}.about-studio a{color:#e2c978;text-underline-offset:3px}.about-studio li+li{margin-top:6px}
 </style>
 </head>
 <body>
@@ -37,7 +36,6 @@
 
 <section class="hero">
   <h1>アイデアをカタチに。</h1>
-  <p class="hero-description">Seedance・H3 Maxで、テキストや画像から動画を。<br>Pina Studioは、ブラウザで使えるAI動画生成サイトです。</p>
   <a class="cta-btn" href="./generate-prod.html">生成をはじめる</a>
 </section>
 
@@ -45,21 +43,6 @@
   <div class="grid" id="sampleGrid"></div>
 </section>
 
-<section class="about-studio" aria-labelledby="about-studio-title">
-  <h2 id="about-studio-title">Seedance・H3 MaxでAI動画を作る</h2>
-  <p>Pina Studioでは、作りたい動画の内容をテキストで伝えたり、画像をもとにしたりして、AI動画を生成できます。モデルや入力方法を選んで、アイデアを動画にしてみましょう。</p>
-  <h3>Seedanceで動画を生成</h3>
-  <p><a href="./generate-prod.html">動画生成画面</a>から、モデルや入力方法を選んで作成できます。生成前に、選んだ条件と必要なクレジットを確認してください。</p>
-  <h3>H3 Maxを使う</h3>
-  <p><a href="./h3-live.html">H3 MaxはBETAとして提供中</a>です。利用にはPremium以上の有効なプランが必要です。プランの内容は<a href="./pricing.html">サブスクリプション</a>で確認できます。</p>
-  <h3>AI動画生成のはじめ方</h3>
-  <ol>
-    <li><a href="./login.html">ログインまたは新規登録</a>をします。</li>
-    <li>生成画面でモデルと入力方法を選び、テキストや画像を用意します。</li>
-    <li>設定と必要なクレジットを確認して、動画を生成します。</li>
-  </ol>
-  <p>利用前に<a href="./credits-info.html">クレジット・料金</a>と<a href="./content-policy.html">コンテンツポリシー</a>をご確認ください。操作で迷ったときは<a href="./help.html">ヘルプセンター</a>をご覧ください。</p>
-</section>
 
 <footer style="position:relative;text-align:center;padding:24px 14px 32px;border-top:1px solid rgba(255,255,255,.08);margin-top:32px;">
   <nav style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px 16px;margin-bottom:12px;">
@@ -179,4 +162,3 @@ loadRealSamples();
 </script>
 </body>
 </html>
-
