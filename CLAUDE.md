@@ -1,9 +1,18 @@
-# FlowVid Studio AI作業ルール
+# Pina Studio（旧 FlowVid Studio）AI作業ルール
 
 このリポジトリでAIが作業する場合は、作業開始前に必ず以下を読むこと。
 
 1. `ai-rules/00_master_rule.md`
 2. 作業内容に応じて、`ai-rules/` 配下の該当ルールファイル
+
+## 資料の入口
+
+既存の安全制約・承認条件は本書、[AGENTS.md](AGENTS.md)、[ai-rules](ai-rules/00_master_rule.md)に従う。下記の目次・進捗記録は実行許可を与えるものではない。
+
+- [資料マップ](docs/PROJECT-MAP.md)：各資料の責任、読む順序、仕様と状態の区別。
+- [現在の状態と履歴](STATUS.md)：本番・Preview・ローカル・保留を区別した確認記録。
+- [運営ロードマップ](OPERATIONS-ROADMAP.md)：目的・優先順位・未完了の運営課題。
+- [README](README.md)：コード構成・ローカルセットアップ。
 
 特に、以下を守ること。
 
