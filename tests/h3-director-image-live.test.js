@@ -102,11 +102,11 @@ test('regular H3 rejects a Director-bound upload before its reservation path', (
   );
 });
 
-test('provider prompt keeps text-only input unchanged and prefixes image sessions', () => {
+test('provider prompt keeps text-only input unchanged and puts the live action before the image anchor', () => {
   assert.equal(buildDirectorProviderPrompt('  次は右へ走る  '), '次は右へ走る');
   assert.equal(
     buildDirectorProviderPrompt('次は右へ走る', IMAGE_IDENTITY_ANCHOR_PROMPT),
-    `${IMAGE_IDENTITY_ANCHOR_PROMPT}\n次は右へ走る`
+    `次は右へ走る\n${IMAGE_IDENTITY_ANCHOR_PROMPT}`
   );
 });
 
