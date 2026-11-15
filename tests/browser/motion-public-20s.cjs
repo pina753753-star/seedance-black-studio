@@ -122,7 +122,7 @@ async function openDance(p) { await p.locator('#danceTab').waitFor({ state: 'vis
 async function fill(p, { seconds } = {}) {
   await p.locator('#kdImageFile').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
   await p.waitForFunction(() => window.flowvidDanceKling.state.image.status === 'completed');
-  await p.locator('#kdRights').check();
+  assert.equal(await p.locator('#kdRights').count(), 0);
   await p.locator('#kdVideoFile').setInputFiles({ name: 'dance.mp4', mimeType: 'video/mp4', buffer: Buffer.from('00') });
   await p.waitForFunction(() => ['ready', 'failed'].includes(window.flowvidDanceKling.state.video.status));
 }
@@ -132,7 +132,7 @@ const browser=await chromium.launch({executablePath:chromePath,headless:true,arg
 try{
 for(const [ms,cr] of [[11507,228],[16000,304],[16200,323],[17000,323],[20000,380],[30000,570]])await run(`purchase-only ${ms}ms => ${cr}cr, no generation click`,async()=>{
  const f=await fixture(browser,{lengthSelect:true,sourceMs:ms});try{const p=f.page;await openDance(p);
- await p.locator('#kdRights').check();await p.locator('#kdVideoFile').setInputFiles({name:'dance.mp4',mimeType:'video/mp4',buffer:Buffer.from('00')});await p.waitForFunction(()=>window.flowvidDanceKling.state.video.status==='ready');
+ assert.equal(await p.locator('#kdRights').count(), 0);await p.locator('#kdVideoFile').setInputFiles({name:'dance.mp4',mimeType:'video/mp4',buffer:Buffer.from('00')});await p.waitForFunction(()=>window.flowvidDanceKling.state.video.status==='ready');
  assert.equal(await p.locator('#kdCreate').isDisabled(),true);assert.match(await p.locator('#kdReason').textContent(),/キャラクター画像/);
  await p.locator('#kdImageFile').setInputFiles({name:'me.png',mimeType:'image/png',buffer:PNG});await p.waitForFunction(()=>window.flowvidDanceKling.state.image.status==='completed');
  assert.equal(await p.locator('#kdCreate').isDisabled(),false);assert.match(await p.locator('#kdCreate').textContent(),new RegExp(String(cr)));assert.equal(await p.locator('#kdOrientationNote').isVisible(),true);assert.equal(f.calls.starts.length,0);assert.deepEqual(f.pageErrors,[]);

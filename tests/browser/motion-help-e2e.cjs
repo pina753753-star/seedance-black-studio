@@ -122,7 +122,7 @@ async function openDance(p) { await p.locator('#danceTab').waitFor({ state: 'vis
 async function fill(p, { seconds } = {}) {
   await p.locator('#kdImageFile').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
   await p.waitForFunction(() => window.flowvidDanceKling.state.image.status === 'completed');
-  await p.locator('#kdRights').check();
+  assert.equal(await p.locator('#kdRights').count(), 0);
   await p.locator('#kdVideoFile').setInputFiles({ name: 'dance.mp4', mimeType: 'video/mp4', buffer: Buffer.from('00') });
   await p.waitForFunction(() => ['ready', 'failed'].includes(window.flowvidDanceKling.state.video.status));
 }

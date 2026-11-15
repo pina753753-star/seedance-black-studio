@@ -74,7 +74,7 @@ async function fixture(browser, o = {}) {
     if (p === '/api/reference-dance-latest') return json({ ok: true, asset: null });
     if (p === '/api/reference-image-upload-url') { calls.imageUploads++; return json({ ok: true, signedUrl: 'x', token: 't', path: 'q/img.png', bucket: 'reference-image-quarantine' }); }
     if (p === '/api/reference-image-confirm-upload') return json({ ok: true, publicUrl: origin + '/identity.png' });
-    if (p === '/api/reference-dance-upload-url') { calls.videoUploads++; return json({ ok: true, assetId: 'asset-' + calls.videoUploads, path: 'v.mp4', token: 't', bucket: 'seedance-reference-video' }); }
+    if (p === '/api/reference-dance-upload-url') { assert.equal(Object.hasOwn(request.postDataJSON(), 'rightsConfirmed'), false); calls.videoUploads++; return json({ ok: true, assetId: 'asset-' + calls.videoUploads, path: 'v.mp4', token: 't', bucket: 'seedance-reference-video' }); }
     if (p === '/api/reference-dance-confirm-upload') {
       const body = request.postDataJSON(); calls.confirms.push(body);
       if (o.confirmFail) return json({ ok: false, error: 'VIDEO_DURATION_INVALID', message: '動画の長さが対応外です' }, 400);
@@ -96,6 +96,7 @@ async function fixture(browser, o = {}) {
     }
     if (p === '/api/reference-dance-delete') { calls.deletes.push(request.postDataJSON()); return json({ ok: true }); }
     if (p === '/api/seedance-start') {
+      assert.equal(Object.hasOwn(request.postDataJSON(), 'reference_video_rights_confirmed'), false);
       calls.starts.push({ headers: request.headers(), body: request.postDataJSON() });
       if (o.startDelay) await new Promise(r => setTimeout(r, o.startDelay));
       if (o.start409) return json({ ok: false, error: 'credit_cost_changed', credits: 999, estimatedCredits: request.postDataJSON().estimated_credits }, 409);
@@ -122,7 +123,7 @@ async function openDance(p) { await p.locator('#danceTab').waitFor({ state: 'vis
 async function fill(p, { seconds } = {}) {
   await p.locator('#kdImageFile').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
   await p.waitForFunction(() => window.flowvidDanceKling.state.image.status === 'completed');
-  await p.locator('#kdRights').check();
+  assert.equal(await p.locator('#kdRights').count(), 0);
   await p.locator('#kdVideoFile').setInputFiles({ name: 'dance.mp4', mimeType: 'video/mp4', buffer: Buffer.from('00') });
   await p.waitForFunction(() => ['ready', 'failed'].includes(window.flowvidDanceKling.state.video.status));
 }
@@ -131,6 +132,34 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
   let browser;
   try {
     browser = await chromium.launch({ executablePath: chromePath, headless: true, args: ['--no-sandbox', '--host-resolver-rules=MAP * ~NOTFOUND'] });
+    await run(`[${width}] checkbox-free upload: remove, reselect and recover after inspection failure`, async () => {
+      const options = {};
+      const f = await fixture(browser, options);
+      try {
+        const p = f.page; await openDance(p);
+        assert.equal(await p.locator('#referencePolicyNotice').isVisible(), true);
+        assert.equal(await p.locator('#referencePolicyNotice input, #referencePolicyNotice button').count(), 0);
+        assert.equal(await p.locator('#referencePolicyNotice a').count(), 2);
+        assert.equal(await p.locator('#kdRights').count(), 0);
+        assert.equal(await p.locator('#kdVideoFile').isDisabled(), false);
+        await fill(p);
+        await p.locator('#kdVideoRemove').click();
+        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'idle');
+        assert.equal(await p.locator('#kdVideoFile').isDisabled(), false);
+        options.confirmFail = true;
+        await fill(p);
+        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'failed');
+        assert.equal(await p.locator('#kdCreate').isDisabled(), true);
+        assert.equal(await p.locator('#kdVideoFile').isDisabled(), false);
+        options.confirmFail = false;
+        await fill(p);
+        assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'ready');
+        assert.equal(await noHScroll(p), true);
+        assert.equal(f.calls.videoUploads, 3);
+        assert.equal(f.calls.starts.length, 0);
+        assert.deepEqual(f.pageErrors, []);
+      } finally { await f.context.close(); }
+    });
     await run(`[${width}] tab hidden for non-admin; existing tabs unchanged`, async () => {
       const f = await fixture(browser, { allowed: false });
       try {
@@ -264,7 +293,7 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         await openDance(p);
         assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.video.status), 'ready');
         assert.equal(await p.evaluate(() => window.flowvidDanceKling.state.image.status), 'completed');
-        assert.equal(await p.locator('#kdRights').isChecked(), true);
+        assert.equal(await p.locator('#kdRights').count(), 0);
         await p.evaluate(() => { updateCreditUi(); persistDraft(); });
         assert.notEqual(await p.evaluate(() => JSON.parse(localStorage.getItem('flowvidGenerateDraft') || '{}').mode), 'dance');
         assert.equal(await p.evaluate(() => 'prompt_dance' in JSON.parse(localStorage.getItem('flowvidGenerateDraft') || '{}')), false);

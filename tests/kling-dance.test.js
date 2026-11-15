@@ -240,7 +240,7 @@ test('unknown dance_method and missing video are refused', async () => {
   assert.equal(noVideo.rpcCalls.length, 0);
 });
 
-test('public BETA accepts eligible non-admin; ready rights-checked asset and one identity image remain required', async () => {
+test('public BETA accepts eligible non-admin; ready inspected asset and one identity image remain required', async () => {
   const nonAdmin = await runStart({ rate: 19, role: 'user' });
   assert.equal(nonAdmin.res.code, 202);
   assert.equal(nonAdmin.rpcCalls.filter(c => c.name === 'deduct_generation_credits_atomic').length, 1);
@@ -254,9 +254,13 @@ test('public BETA accepts eligible non-admin; ready rights-checked asset and one
   const notReady = await runStart({ rate: 19, row: readyRow({ status: 'pending' }) });
   assert.equal(notReady.res.code, 400);
   assert.equal(notReady.rpcCalls.length, 0);
-  const noRights = await runStart({ rate: 19, row: readyRow({ rights_confirmed_at: null }) });
-  assert.equal(noRights.res.code, 400);
-  assert.equal(noRights.providerCalls.length, 0);
+  for (const legacyFlag of [undefined, false, true]) {
+    const bodyOverrides = legacyFlag === undefined ? {} : { reference_video_rights_confirmed: legacyFlag };
+    const noRights = await runStart({ rate: 19, row: readyRow({ rights_confirmed_at: null }), bodyOverrides });
+    assert.equal(noRights.res.code, 202);
+    assert.equal(noRights.providerCalls.length, 1);
+    assert.equal(noRights.rpcCalls.filter(c => c.name === 'deduct_generation_credits_atomic').length, 1);
+  }
 });
 
 test('provider rejection refunds the task once and returns refunded', async () => {
@@ -501,9 +505,9 @@ test('length choice on: the confirmed estimate still guards the price (lower => 
   assert.equal(missing.res.body.error, 'invalid_estimated_credits');
 });
 
-test('length choice on: admin-BETA, rights, single image and moderation gates are unchanged for 16-20 s', async () => {
+test('length choice on: entitlement, single image and moderation gates are unchanged for 16-20 s', async () => {
   assert.equal((await runStart({ maxUse: 20, role: 'user', subscription:false, row: motionRow(16000), bodyOverrides: motionBody(16000) })).res.code, 202);
-  assert.equal((await runStart({ maxUse: 20, row: readyRow({ ...motionRow(16000), rights_confirmed_at: null }), bodyOverrides: motionBody(16000) })).res.code, 400);
+  assert.equal((await runStart({ maxUse: 20, row: readyRow({ ...motionRow(16000), rights_confirmed_at: null }), bodyOverrides: motionBody(16000) })).res.code, 202);
   const two = await runStart({ maxUse: 20, row: motionRow(16000), bodyOverrides: motionBody(16000, { input_references: ['https://example.test/a.png', 'https://example.test/b.png'] }) });
   assert.equal(two.res.body.error, 'kling_dance_single_image_required');
   const blocked = await runStart({ maxUse: 20, row: motionRow(16000), moderationBlock: true, bodyOverrides: motionBody(16000) });

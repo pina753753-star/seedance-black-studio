@@ -134,7 +134,8 @@ function validateReadyReferenceDance(row, userId, { maxDurationMs = MAX_REFERENC
   if (isMotionOnlyReference(row) && !allowMotionOnly) throw error('reference_video_motion_only');
   const expiresMs = Date.parse(String(row.expires_at || ''));
   if (!Number.isFinite(expiresMs) || expiresMs <= Date.now()) throw error('reference_video_expired');
-  if (!Number.isFinite(Date.parse(String(row.rights_confirmed_at || '')))) throw error('reference_video_rights_unconfirmed');
+  // Legacy self-attestation is historical metadata, not technical inspection.
+  // New uploads have no per-upload checkbox and may have a NULL timestamp.
   if (!validateOwnedPath('approved', userId, row.id, row.approved_path)) throw error('invalid_reference_video_path');
   if (!Number.isSafeInteger(Number(row.size_bytes)) || Number(row.size_bytes) < 1 || Number(row.size_bytes) > MAX_REFERENCE_DANCE_BYTES) {
     throw error('invalid_reference_video_size');

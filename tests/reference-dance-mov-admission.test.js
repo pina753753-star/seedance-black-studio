@@ -29,7 +29,7 @@ function server({ allowed = true, authenticated = true } = {}) {
       if (name.includes('confirmed-auth')) return { requireConfirmedAuth: async () => authenticated
         ? { ok: true, user: { id: USER, email: 'admin@example.com' }, supabase: db }
         : { ok: false, status: 401, body: { error: 'unauthorized' } } };
-      if (name.includes('reference-dance')) return { ...lib, authorizeReferenceDanceAdmin: async auth => ({ ok: authenticated && allowed && !!auth.user.id }) };
+      if (name.includes('reference-dance')) return { ...lib, authorizeReferenceMotion: async auth => ({ ok: authenticated && allowed && !!auth.user.id }) };
       throw new Error('Unexpected import ' + name);
     }, fetch() { throw new Error('No network permitted'); }
   });
@@ -70,10 +70,10 @@ test('unrelated containers and extension spoof suffixes are rejected before stor
     assert.equal(res.code, 415); assert.equal(h.writes.length, 0);
   }
 });
-test('MOV keeps existing authentication, admin, rights and byte-limit barriers', async () => {
+test('MOV keeps authentication, entitlement and byte-limit barriers', async () => {
   for (const [options, fields, status] of [
     [{ authenticated: false }, {}, 401], [{ allowed: false }, {}, 403],
-    [{}, { rightsConfirmed: false }, 400], [{}, { byteSize: 0 }, 413],
+    [{}, { byteSize: 0 }, 413],
     [{}, { byteSize: 50 * 1024 * 1024 + 1 }, 413]
   ]) {
     const h = server(options); const res = await h.call({ ...admitted[1], ...fields });
@@ -101,7 +101,7 @@ test('browser accepts MOV metadata, uploads original bytes and requires inspecti
     assert.equal(b.uploaded[0][2], file);
     assert.equal(b.uploaded[0][3].contentType, 'video/mp4');
     assert.equal(b.ctx.referenceDanceAsset.status, 'uploading');
-    assert.equal(b.requests[0].body.rightsConfirmed, true);
+    assert.equal(b.requests[0].body.rightsConfirmed, undefined);
   }
 });
 test('browser refuses unsupported or oversized input without a request', async () => {

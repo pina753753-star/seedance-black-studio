@@ -43,6 +43,8 @@
 <main class="wrap">
 <header class="top"><a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a><button class="home" id="menuBtn">☰</button></header>
 
+<aside id="referencePolicyNotice" aria-label="利用規約改定のお知らせ" style="margin:0 0 14px;padding:12px 14px;border:1px solid rgba(196,181,253,.3);border-radius:12px;color:#c8cad6;font-size:12px;line-height:1.7">2026年11月15日：素材の権利・本人同意・外部AIへの送信について、利用規約とプライバシーポリシーを改定しました。<a href="./terms.html#revision-20261115" style="color:#c4b5fd">変更内容</a>・<a href="./help.html#reference-materials" style="color:#c4b5fd">参考素材のガイド</a>をご確認ください。</aside>
+
 <!-- 絵コンテ・動画編集は入口のみ非表示(DOM/ID/data-modeは他処理が参照するため残す)。機能本体・保存済みデータ・直URL/保存状態からの復帰は従来どおり -->
 <div class="tabs">
   <button data-mode="reference_to_video" id="referenceTab">リファレンス</button>
@@ -73,7 +75,7 @@
 <div class="assets" id="assets"><label class="add"><input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple><div><b>＋</b><span id="assetsLabel">画像追加</span></div></label></div>
 <div id="uploadProgress" style="display:none"></div>
 <div class="audioRef" id="audioReference"><div class="audioRefTop"><label class="audioPick"><input id="audioFile" type="file" accept="audio/mpeg,.mp3"><span class="betaLabel">♪ 曲を添付 <span class="featureBeta">BETA</span></span></label><div class="audioInfo"><div class="audioName" id="audioName">MP3・最大15MB</div><div class="audioNote" id="audioNote">Seedance 2.5・1080pで@audio1として使用します</div></div><button class="audioRemove" id="audioRemove" type="button" aria-label="音源を削除">×</button></div><div class="audioSyncChoice" id="audioSyncChoice" role="radiogroup" aria-label="音源の合わせ方"><div class="audioSyncOption"><label><input type="radio" name="audioSyncMode" value="singing" checked>歌唱に合わせる</label><button class="audioSyncInfoButton" type="button" aria-label="歌唱に合わせるの説明" aria-controls="audioSyncInfo" aria-expanded="false" onclick="toggleAudioSyncInfo('singing',this)">ⓘ</button></div><div class="audioSyncOption"><label><input type="radio" name="audioSyncMode" value="rhythm">リズム・雰囲気に合わせる</label><button class="audioSyncInfoButton" type="button" aria-label="リズム・雰囲気に合わせるの説明" aria-controls="audioSyncInfo" aria-expanded="false" onclick="toggleAudioSyncInfo('rhythm',this)">ⓘ</button></div><div class="audioSyncInfo" id="audioSyncInfo" role="status" aria-live="polite"></div></div><div class="audioHelp">曲を添付しただけではクレジットは消費されません。動画と同じ長さに切り出したMP3がおすすめです。長い曲を添付して「何秒から」と指定すると、使用位置がずれる場合があります。</div></div>
-<div class="danceRef" id="danceReference"><div class="danceRefTop"><label class="dancePick"><input id="danceFile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov"><span>♬ ダンス動画</span></label><div class="danceInfo"><div class="danceName" id="danceName">MP4／MOV・4〜15秒・最大50MB</div><div class="danceNote" id="danceNote">運営専用BETA</div></div><button class="danceRetry" id="danceRetry" type="button">再検査</button><button class="danceRemove" id="danceRemove" type="button" aria-label="参考動画を削除">×</button></div><label class="danceRights"><input type="checkbox" id="danceTrim">15秒を超える場合は先頭15秒を使う（元動画は変更しません・最大60秒）</label><label class="danceRights"><input id="danceRights" type="checkbox"><span>自分で作成した動画、または使用許可のある動画です。実在人物へのなりすましには使用しません。</span></label><div class="danceHelp">動画の音声は削除し、動き・テンポ・カメラをMotion Controlで参照します。生成尺と縦横比は参考動画に従い、結果は無音です。人物画像を1枚以上追加してください。</div></div>
+<div class="danceRef" id="danceReference"><div class="danceRefTop"><label class="dancePick"><input id="danceFile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov"><span>♬ ダンス動画</span></label><div class="danceInfo"><div class="danceName" id="danceName">MP4／MOV・4〜15秒・最大50MB</div><div class="danceNote" id="danceNote">運営専用BETA</div></div><button class="danceRetry" id="danceRetry" type="button">再検査</button><button class="danceRemove" id="danceRemove" type="button" aria-label="参考動画を削除">×</button></div><label class="danceRights"><input type="checkbox" id="danceTrim">15秒を超える場合は先頭15秒を使う（元動画は変更しません・最大60秒）</label><div class="danceHelp">動画の音声は削除し、動き・テンポ・カメラをMotion Controlで参照します。生成尺と縦横比は参考動画に従い、結果は無音です。人物画像を1枚以上追加してください。</div></div>
 <div class="prompt"><textarea id="prompt" placeholder="キャラクター、商品、シーン、動きを入力してください。"></textarea></div>
 <details class="settings"><summary>設定</summary><div class="settingsBody"><div class="field"><label>モデル</label><select id="model"><option value="bytedance/seedance-2.0">Seedance 2.0</option><option value="bytedance/seedance-2.0-fast">Seedance 2.0 Fast</option><option value="bytedance/seedance-2.5-standard">Seedance 2.5</option><option value="bytedance/seedance-2.5">Seedance 2.5 Turbo</option></select></div><div class="field"><label>アスペクト比</label><select id="aspect"><option value="9:16">9:16 スマホ縦</option><option value="16:9">16:9 横動画</option><option value="1:1">1:1 正方形</option></select></div><div class="field"><label>長さ</label><select id="duration"><option value="5">5秒</option><option value="8">8秒</option><option value="10">10秒</option><option value="15">15秒</option></select></div><div class="field"><label>解像度（非サブスクは最大720p）</label><select id="resolution"><option value="720p">720p</option><option value="480p">480p</option><option value="1080p">1080p</option></select></div></div></details>
 <button class="create" id="create">作成する ✦ 80</button>
@@ -110,7 +112,6 @@
       <div id="kdVideoNote" style="margin-top:3px;color:#9f96b5;font-size:11px;line-height:1.6">使用できるのは最大30秒です。未選択なら元動画の長さに合わせ、30秒超は自動で先頭30秒を使用します。</div>
       <button id="kdVideoRetry" type="button" style="display:none;margin-top:8px" class="danceRetry">再検査</button>
       <button id="kdVideoRemove" type="button" style="display:none;margin-top:8px" class="danceRemove" aria-label="お手本動画を削除">×</button>
-      <label class="danceRights" style="display:flex"><input id="kdRights" type="checkbox"><span>自分で作成した動画、または使用許可のある動画です。実在人物へのなりすましには使用しません。</span></label>
     </div>
   </div>
   <div id="kdLengthBox" class="kdBox" style="display:none;margin-top:12px;background:#101319;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:12px">
@@ -286,8 +287,8 @@ function getReferenceAudioSyncMode(){return document.querySelector('input[name="
 const AUDIO_SYNC_INFO={singing:'歌ってるキャラクターが映る動画向けです。曲の歌詞・メロディ・歌声をできるだけそのまま保ち、キャラクターの口の動きや表情を曲に同期させます。',rhythm:'歌ってる人が映らない、ダンスやアクション動画向けです。歌詞の再現よりも、曲のビート・強拍・展開に合わせて、動き・カメラワーク・カット割りを合わせます。'};
 function toggleAudioSyncInfo(kind,button){const panel=$('audioSyncInfo');if(!panel)return;const alreadyOpen=panel.style.display==='block'&&panel.dataset.kind===kind;document.querySelectorAll('.audioSyncInfoButton').forEach(el=>el.setAttribute('aria-expanded','false'));if(alreadyOpen){panel.style.display='none';panel.textContent='';panel.dataset.kind='';return}panel.textContent=AUDIO_SYNC_INFO[kind]||'';panel.dataset.kind=kind;panel.style.display=panel.textContent?'block':'none';if(panel.textContent)button?.setAttribute('aria-expanded','true')}
 function syncReferenceAudioUi(){const panel=$('audioReference');if(!panel)return;const relevant=$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode!=='image_to_video'&&mode!=='video_edit';panel.style.display=REFERENCE_AUDIO_UI_ENABLED&&(relevant||audioAsset)?'block':'none';const usable=canUseReferenceAudio();$('audioFile').disabled=!usable||audioAsset?.status==='uploading'||generationRequestInFlight;$('audioRemove').style.display=audioAsset&&audioAsset.status!=='uploading'&&!generationRequestInFlight?'block':'none';$('audioName').textContent=audioAsset?.name||'MP3・最大15MB';const syncChoice=$('audioSyncChoice');if(syncChoice)syncChoice.style.display=audioAsset?.status==='completed'?'grid':'none';document.querySelectorAll('input[name="audioSyncMode"]').forEach(input=>{input.disabled=generationRequestInFlight});if(audioAsset?.status==='uploading')$('audioNote').textContent='音源を安全にアップロード中…';else if(audioAsset?.status==='completed')$('audioNote').textContent=generationRequestInFlight?'生成受付中・音源を安全に保持しています':'添付完了・プロンプトでは @audio1 として指定できます';else if(audioAsset?.status==='failed')$('audioNote').textContent=audioAsset.error||'アップロードに失敗しました';else if(!referenceAudioAccess)$('audioNote').textContent='曲アップロードは有効なPremium以上のサブスクで利用できます';else $('audioNote').textContent=usable?'Seedance 2.5 Turbo・1080pで@audio1として使用します':'音源を使うには解像度を1080pにしてください';if(typeof syncReferenceDanceUi==='function')syncReferenceDanceUi()}
-function canUseReferenceDance(){return LEGACY_REFERENCE_DANCE_ENABLED&&referenceDanceAccess&&$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode==='reference_to_video'&&['480p','720p'].includes($('resolution')?.value)&&!sbLocked&&!!$('danceRights')?.checked}
-function syncReferenceDanceUi(){if($('danceTrim'))$('danceTrim').disabled=generationRequestInFlight||['uploading','checking','ready'].includes(referenceDanceAsset?.status);const panel=$('danceReference');if(!panel)return;const relevant=referenceDanceAccess&&$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode==='reference_to_video';panel.style.display=(relevant||referenceDanceAsset)?'block':'none';const busy=['uploading','checking'].includes(referenceDanceAsset?.status)||generationRequestInFlight;const usable=canUseReferenceDance();$('danceFile').disabled=!usable||busy;$('danceRights').disabled=busy||!!referenceDanceAsset;$('danceRetry').style.display=referenceDanceAsset?.status==='failed'&&referenceDanceAsset?.retryable&&referenceDanceAsset?.id&&!generationRequestInFlight?'block':'none';$('danceRemove').style.display=referenceDanceAsset&&!busy?'block':'none';$('danceName').textContent=referenceDanceAsset?.name||'MP4／MOV・4〜15秒・最大50MB';if(referenceDanceAsset?.status==='uploading')$('danceNote').textContent='非公開領域へアップロード中…';else if(referenceDanceAsset?.status==='checking')$('danceNote').textContent='形式・長さ・安全性を検査中…';else if(referenceDanceAsset?.status==='ready')$('danceNote').textContent=generationRequestInFlight?'生成受付中・参考動画を保持しています':`検査完了・${(Number(referenceDanceAsset.durationMs||0)/1000).toFixed(3)}秒${referenceDanceAsset.trimApplied?'（先頭15秒を使用）':''}・Motion Controlで動きを参照します`;else if(referenceDanceAsset?.status==='failed')$('danceNote').textContent=referenceDanceAsset.error||'参考動画を利用できません';else if(!referenceDanceAccess)$('danceNote').textContent='運営専用BETA';else if(!$('danceRights')?.checked)$('danceNote').textContent='権利確認にチェックすると選択できます';else if(!['480p','720p'].includes($('resolution')?.value))$('danceNote').textContent='参考動画BETAは480p・720pに対応しています';else $('danceNote').textContent=usable?'人物画像を追加してから生成してください':'Seedance 2.5 Turboのリファレンスタブで利用できます'}
+function canUseReferenceDance(){return LEGACY_REFERENCE_DANCE_ENABLED&&referenceDanceAccess&&$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode==='reference_to_video'&&['480p','720p'].includes($('resolution')?.value)&&!sbLocked}
+function syncReferenceDanceUi(){if($('danceTrim'))$('danceTrim').disabled=generationRequestInFlight||['uploading','checking','ready'].includes(referenceDanceAsset?.status);const panel=$('danceReference');if(!panel)return;const relevant=referenceDanceAccess&&$('model')?.value===SEEDANCE_25_TURBO_MODEL&&mode==='reference_to_video';panel.style.display=(relevant||referenceDanceAsset)?'block':'none';const busy=['uploading','checking'].includes(referenceDanceAsset?.status)||generationRequestInFlight;const usable=canUseReferenceDance();$('danceFile').disabled=!usable||busy;$('danceRetry').style.display=referenceDanceAsset?.status==='failed'&&referenceDanceAsset?.retryable&&referenceDanceAsset?.id&&!generationRequestInFlight?'block':'none';$('danceRemove').style.display=referenceDanceAsset&&!busy?'block':'none';$('danceName').textContent=referenceDanceAsset?.name||'MP4／MOV・4〜15秒・最大50MB';if(referenceDanceAsset?.status==='uploading')$('danceNote').textContent='非公開領域へアップロード中…';else if(referenceDanceAsset?.status==='checking')$('danceNote').textContent='形式・長さ・安全性を検査中…';else if(referenceDanceAsset?.status==='ready')$('danceNote').textContent=generationRequestInFlight?'生成受付中・参考動画を保持しています':`検査完了・${(Number(referenceDanceAsset.durationMs||0)/1000).toFixed(3)}秒${referenceDanceAsset.trimApplied?'（先頭15秒を使用）':''}・Motion Controlで動きを参照します`;else if(referenceDanceAsset?.status==='failed')$('danceNote').textContent=referenceDanceAsset.error||'参考動画を利用できません';else if(!referenceDanceAccess)$('danceNote').textContent='運営専用BETA';else if(!['480p','720p'].includes($('resolution')?.value))$('danceNote').textContent='参考動画BETAは480p・720pに対応しています';else $('danceNote').textContent=usable?'人物画像を追加してから生成してください':'Seedance 2.5 Turboのリファレンスタブで利用できます'}
 let sbFile=null;
 let sbResizedBase64='';
 let sbLocked=false;
@@ -369,7 +370,7 @@ function clearAcceptedGenerationInputs(submission){
   localStorage.setItem(DRAFT_KEY,JSON.stringify(draftAfterSubmit));
   if(imagesCleared&&$('file'))$('file').value='';
   if(submission.audioId&&typeof audioAsset!=='undefined'&&audioAsset?.id===submission.audioId){audioAsset=null;if($('audioFile'))$('audioFile').value='';syncReferenceAudioUi()}
-  if(submission.referenceDanceId&&typeof referenceDanceAsset!=='undefined'&&referenceDanceAsset?.id===submission.referenceDanceId){referenceDanceAsset=null;if($('danceFile'))$('danceFile').value='';if($('danceRights'))$('danceRights').checked=false;syncReferenceDanceUi()}
+  if(submission.referenceDanceId&&typeof referenceDanceAsset!=='undefined'&&referenceDanceAsset?.id===submission.referenceDanceId){referenceDanceAsset=null;if($('danceFile'))$('danceFile').value='';syncReferenceDanceUi()}
   if(imagesCleared||submission.mode==='text_to_video')renderAssets();
 }
 const SEEDANCE_25_TURBO_MODEL='bytedance/seedance-2.5';
@@ -882,7 +883,6 @@ async function restoreLatestReferenceDance(){
     if(!response.ok||!data?.asset?.id||referenceDanceAsset)return;
     const ready=data.asset.status==='ready';
     referenceDanceAsset={id:data.asset.id,status:ready?'ready':'failed',name:data.asset.name||'前回の参考動画',durationMs:Number(data.asset.durationMs||0),billableSeconds:Number(data.asset.billableSeconds||0),retryable:!ready,error:ready?'':'前回の参考動画を保持しています。15秒を超える場合は「先頭15秒を使う」にチェックしてから再検査してください。'};
-    if($('danceRights'))$('danceRights').checked=true;
     syncReferenceDanceUi();updateCreditUi();
   }catch(_){}
 }
@@ -934,7 +934,7 @@ async function uploadReferenceDance(file){
   referenceDanceAsset={id:'',status:'uploading',name:file.name||'参考動画',billableSeconds:0,error:''};syncReferenceDanceUi();updateCreditUi();
   try{
     const token=await getToken();if(!token){location.href='./login.html';return}
-    const urlResponse=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({filename:file.name,contentType:type||'video/mp4',byteSize:file.size,rightsConfirmed:true})});
+    const urlResponse=await fetch('/api/reference-dance-upload-url',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({filename:file.name,contentType:type||'video/mp4',byteSize:file.size})});
     const urlData=await urlResponse.json().catch(()=>({}));
     if(!urlResponse.ok||!urlData.ok||!urlData.assetId||!urlData.path||!urlData.token)throw new Error(urlData.message||urlData.error||'参考動画のアップロードを開始できませんでした');
     referenceDanceAsset.id=urlData.assetId;
@@ -945,7 +945,7 @@ async function uploadReferenceDance(file){
   }catch(error){const failedId=referenceDanceAsset?.id||'';if(previous)referenceDanceAsset=previous;else{referenceDanceAsset.status='failed';referenceDanceAsset.retryable=false;referenceDanceAsset.error=error?.message||'参考動画を利用できません'}if(failedId&&failedId!==previous?.id)deleteReferenceDanceAsset(failedId)}
   syncReferenceDanceUi();updateCreditUi();
 }
-function removeReferenceDance(){if(['uploading','checking'].includes(referenceDanceAsset?.status)||generationRequestInFlight)return;const assetId=referenceDanceAsset?.id||'';referenceDanceAsset=null;if($('danceFile'))$('danceFile').value='';if($('danceRights'))$('danceRights').checked=false;syncReferenceDanceUi();updateCreditUi();if(assetId)deleteReferenceDanceAsset(assetId)}
+function removeReferenceDance(){if(['uploading','checking'].includes(referenceDanceAsset?.status)||generationRequestInFlight)return;const assetId=referenceDanceAsset?.id||'';referenceDanceAsset=null;if($('danceFile'))$('danceFile').value='';syncReferenceDanceUi();updateCreditUi();if(assetId)deleteReferenceDanceAsset(assetId)}
 
 async function getBalance(){try{const cfg=window.FLOWVID_AUTH||{};if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return null;if(!window.__flowvidUserClient){window.__flowvidUserClient=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey)}const{data:sd}=await window.__flowvidUserClient.auth.getSession();const user=sd?.session?.user;if(!user)return null;const{data}=await window.__flowvidUserClient.from('credit_balances').select('free_credits,subscription_credits,purchased_credits').eq('user_id',user.id).maybeSingle();return Number(data?.free_credits||0)+Number(data?.subscription_credits||0)+Number(data?.purchased_credits||0)}catch(_){return null}}
 
@@ -970,7 +970,7 @@ async function start(){
   const body={model:$('model').value,prompt,duration:$('duration').value,resolution:$('resolution').value,aspect_ratio:$('aspect').value,generate_audio:true,mode,estimated_credits:c};
   if(sbLocked)body.ui_origin='storyboard';
   if(REFERENCE_AUDIO_UI_ENABLED&&audioAsset?.status==='completed'){body.reference_audio_paths=[audioAsset.path];body.reference_audio_sync_mode=getReferenceAudioSyncMode()}
-  if(LEGACY_REFERENCE_DANCE_ENABLED&&referenceDanceAsset?.status==='ready'){body.reference_video_asset_id=referenceDanceAsset.id;body.reference_video_rights_confirmed=true}
+  if(LEGACY_REFERENCE_DANCE_ENABLED&&referenceDanceAsset?.status==='ready'){body.reference_video_asset_id=referenceDanceAsset.id}
   if(mode==='image_to_video')body.first_frame_url=(imgAsset&&imgAsset.url)||'';
   if(mode==='reference_to_video'){const refUrl=sbLocked?sbGenerationImageUrl:urls[0];const refUrls=sbLocked?[sbGenerationImageUrl]:urls;body.reference_url=refUrl;body.reference_urls=refUrls}
   const submission={mode,rawPrompt,storyboardLocked:sbLocked,storyboardImageUrl:sbLocked?sbGenerationImageUrl:'',assetIds:sbLocked?[]:currentModeAssetList().map(a=>a.id),audioId:REFERENCE_AUDIO_UI_ENABLED?(audioAsset?.id||''):'',referenceDanceId:LEGACY_REFERENCE_DANCE_ENABLED?(referenceDanceAsset?.id||''):''};
@@ -1437,7 +1437,6 @@ $('audioRemove').onclick=removeReferenceAudio;
 $('danceFile').onchange=e=>uploadReferenceDance(e.target.files?.[0]);
 $('danceRemove').onclick=removeReferenceDance;
 $('danceRetry').onclick=confirmReferenceDanceAsset;
-$('danceRights').onchange=()=>{syncReferenceDanceUi();updateCreditUi()};
 let generationStartGuard=false;
 async function guardedStart(){
   if(generationStartGuard)return;
@@ -1802,6 +1801,6 @@ function resetStoryboardInputs(){
 $('sbRedoBtn').onclick=resetStoryboardInputs;
 // ========== END STORYBOARD ==========
 </script>
-<script src="./dance-kling.js?v=public-beta-30s-local-1"></script>
+<script src="./dance-kling.js?v=reference-rights-policy-20261115-1"></script>
 </body>
 </html>

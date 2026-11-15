@@ -132,7 +132,6 @@ test('browser sends chosen consent and disables editing before async authenticat
     const b = browser(checked);
     const pending = b.ctx.confirmReferenceDanceAsset();
     assert.equal(b.$('danceTrim').disabled, true);
-    assert.equal(b.$('danceRights').disabled, true);
     b.release(); await pending;
     assert.equal(b.requests[0].allowBoundaryTrim, checked);
     assert.equal(b.ctx.referenceDanceAsset.billableSeconds, 15);
@@ -252,7 +251,6 @@ test('cancelled picker and remove while busy preserve the active upload, then fa
   b.ctx.removeReferenceDance();
   assert.equal(b.ctx.referenceDanceAsset, null);
   assert.equal(b.$('danceFile').value, '');
-  assert.equal(b.$('danceRights').checked, false);
   assert.deepEqual(removed, [ASSET]);
 });
 test('fresh page restores server checking state as retryable and busy response leaves retry unlocked', async () => {

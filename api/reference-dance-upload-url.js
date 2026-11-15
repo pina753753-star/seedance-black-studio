@@ -37,9 +37,6 @@ module.exports = async function handler(req, res) {
     const contentType = String(body.contentType || '').toLowerCase();
     const byteSize = Number(body.byteSize || 0);
     const filename = String(body.filename || '').trim().slice(0, 200);
-    if (body.rightsConfirmed !== true) {
-      return res.status(400).json({ ok: false, error: 'reference_video_rights_required', message: '使用権限と、実在人物のなりすましではないことを確認してください。' });
-    }
     // Filename/MIME admission is only an upload hint. The worker probes the
     // bytes and seals H.264 MP4 before moderation or generation.
     if (!['video/mp4', 'video/quicktime'].includes(contentType) && !/[.](mp4|mov)$/.test(filename.toLowerCase())) {
@@ -71,7 +68,8 @@ module.exports = async function handler(req, res) {
       status: 'uploading',
       staging_path: path,
       original_filename: filename || null,
-      rights_confirmed_at: new Date().toISOString(),
+      // Preserve explicit legacy self-attestation only; omission is not consent.
+      rights_confirmed_at: body.rightsConfirmed === true ? new Date(now).toISOString() : null,
       declared_size_bytes: byteSize,
       expires_at: expiresAt
     });
