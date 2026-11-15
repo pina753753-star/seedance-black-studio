@@ -6,3 +6,6 @@ Allow: /assets/brand/pina-icon-v2-favicon.png$
 Allow: /assets/brand/pina-logo-header-full.png$
 Allow: /assets/brand/pina-ogp-share.png$
 Allow: /credits-info.html$
+Allow: /sitemap.xml$
+
+Sitemap: https://www.pinastudio.jp/sitemap.xml
