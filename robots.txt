@@ -8,4 +8,4 @@ Allow: /assets/brand/pina-ogp-share.png$
 Allow: /credits-info.html$
 Allow: /sitemap.xml$
 
-Sitemap: https://pinastudio.jp/sitemap.xml
+Sitemap: https://www.pinastudio.jp/sitemap.xml
