@@ -8,7 +8,7 @@
 
 ユーザーの公開承認に基づき、Supabase migration APIで `20261115142749_allow_reference_video_without_per_upload_attestation` を適用。CLIは環境の書込み制限で利用できなかったため、APIが記録した正式versionを使ってローカル履歴を保存した。
 
-事前→読み戻し: nullable NO→YES、行数7→7、null0→0。既存日時ハッシュ `429b4b20ce8f6efd3a0480528a1d576d`、他制約ハッシュ `1395c4fa00e0895335c4cbf013beaac1` は一致。RLS true、ACL postgres/service_roleのみで不変。既存記録の補完・更新、実課金・有料生成は行っていない。
+適用後の読み戻し確認は完了。検証の詳細は非公開の作業記録に保存し、この文書には含めない。
 
 本番コード反映は最終Preview確認後。公開URLの実表示・Production Readyは別ブラウザ担当者が確認する。旧デプロイ丸ごとの巻戻しは行わず、nullableと互換バリデータを維持する。
 
@@ -28,12 +28,9 @@
 
 必要なのは、既存 `flowvid-studio` が参照できるVercel接続の復旧（正しいチーム/プロジェクトとアクセス範囲の確認）および本番/Preview URLを取得できる経路。新プロジェクトの作成や認証情報のチャット貼付は不要。承認を取り直すことでは解決しない。
 
-## 確認できたDBの現状
+## DBの確認記録
 
-Supabase `jflpjsdjmlkmkqfahxwy` はコードのsupabaseUrlと一致、ACTIVE_HEALTHY、PostgreSQL17。
-`public.seedance_reference_video_uploads.rights_confirmed_at` はtimestamptz、NOT NULL、defaultなし。記録7行、null0件。RLS=true、ACLはpostgres/service_roleのみ。本人用パス・ready完全性・SHA・FK・一意制約を確認。現在の尺制約は最大30000ms/課金30秒。public関数に当該日時列の参照は見つからなかった。
-
-DBは変更していない。権利情報以外の利用者個別データは取得していない。
+本番環境の個別メタデータ・集計・照合値は非公開の作業記録で管理する。実行済み変更は正式なマイグレーションファイルを参照。
 
 ## 告知・説明文
 
