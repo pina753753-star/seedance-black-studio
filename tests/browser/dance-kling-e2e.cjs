@@ -132,14 +132,31 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
   let browser;
   try {
     browser = await chromium.launch({ executablePath: chromePath, headless: true, args: ['--no-sandbox', '--host-resolver-rules=MAP * ~NOTFOUND'] });
+    await run(`[${width}] policy notice is absent from all generation tabs`, async () => {
+      const f = await fixture(browser);
+      try {
+        const p = f.page;
+        for (const m of ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard', 'dance']) {
+          // Storyboard is a hidden entry but remains reachable through existing state.
+          await p.evaluate(m => setMode(m), m);
+          assert.equal(await p.locator('#referencePolicyNotice').count(), 0);
+          assert.equal(await p.locator('#kdSection').isVisible(), m === 'dance');
+          assert.equal(await p.locator('#sbSection').isVisible(), m === 'storyboard');
+          assert.equal(await noHScroll(p), true);
+        }
+        await p.evaluate(() => onVideoEditTab().catch(() => {}));
+        assert.equal(await p.locator('#referencePolicyNotice').count(), 0);
+        assert.equal(await p.locator('#kdSection').isVisible(), false);
+        assert.equal(f.calls.starts.length, 0);
+        assert.deepEqual(f.pageErrors, []);
+      } finally { await f.context.close(); }
+    });
     await run(`[${width}] checkbox-free upload: remove, reselect and recover after inspection failure`, async () => {
       const options = {};
       const f = await fixture(browser, options);
       try {
         const p = f.page; await openDance(p);
-        assert.equal(await p.locator('#referencePolicyNotice').isVisible(), true);
-        assert.equal(await p.locator('#referencePolicyNotice input, #referencePolicyNotice button').count(), 0);
-        assert.equal(await p.locator('#referencePolicyNotice a').count(), 2);
+        assert.equal(await p.locator('#referencePolicyNotice').count(), 0);
         assert.equal(await p.locator('#kdRights').count(), 0);
         assert.equal(await p.locator('#kdVideoFile').isDisabled(), false);
         await fill(p);
