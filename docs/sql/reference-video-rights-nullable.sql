@@ -1,4 +1,5 @@
--- DRAFT ONLY. Review and apply before deploying the checkbox-free API/UI.
+-- Historical draft; applied 2026-11-15 as migration 20261115142749.
+-- Canonical SQL: supabase/migrations/20261115142749_allow_reference_video_without_per_upload_attestation.sql
 -- Do not backfill consent or rewrite historical confirmations.
 BEGIN;
 SET LOCAL lock_timeout = '3s';

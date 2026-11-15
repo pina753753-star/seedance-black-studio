@@ -2,7 +2,17 @@
 
 2026-11-15。規約方針と公開についてユーザー承認済み。基準main `d1d9a848a89288fa0f099d2b690c80641fb642c8`。同日のgit ls-remoteでもmain一致。
 
-## 現在の状態
+## 最新の実行記録（以下の過去状態を更新）
+
+2026-11-15。別ブラウザ担当者がProduction Ready、main d1d9a848、対象プロジェクト・ドメインを確認し、Preview 73eec243の規約/privacy/ヘルプ表示も確認済み。ログイン必須の生成画面は実アカウントでは未検証で、通信モックによるPC/390px操作試験で補完。ヘルプFAQはopen属性で直接リンク時にも本文を表示するよう修正した。
+
+ユーザーの公開承認に基づき、Supabase migration APIで `20261115142749_allow_reference_video_without_per_upload_attestation` を適用。CLIは環境の書込み制限で利用できなかったため、APIが記録した正式versionを使ってローカル履歴を保存した。
+
+事前→読み戻し: nullable NO→YES、行数7→7、null0→0。既存日時ハッシュ `429b4b20ce8f6efd3a0480528a1d576d`、他制約ハッシュ `1395c4fa00e0895335c4cbf013beaac1` は一致。RLS true、ACL postgres/service_roleのみで不変。既存記録の補完・更新、実課金・有料生成は行っていない。
+
+本番コード反映は最終Preview確認後。公開URLの実表示・Production Readyは別ブラウザ担当者が確認する。旧デプロイ丸ごとの巻戻しは行わず、nullableと互換バリデータを維持する。
+
+## 過去の準備時点の状態
 
 ローカル変更・テストのみ。push/PR/merge/deploy、本番DDL、実決済、有料生成は行っていない。Supabaseへの操作は列定義、制約、権限、集計件数の読み取りだけ。
 

@@ -107,7 +107,7 @@ test('SQL draft permits NULL without rewriting history or changing private table
     const insert=`insert into seedance_reference_video_uploads(id,user_id,staging_path,rights_confirmed_at,expires_at) values ($1,$2,$3,$4,now()+interval '1 hour')`;
     await assert.rejects(db.query(insert,[ASSET,USER,lib.stagingPath(USER,ASSET),null]), /null value/);
     await db.query(insert,[ASSET,USER,lib.stagingPath(USER,ASSET),'2026-01-01T00:00:00Z']);
-    await db.exec(read('docs/sql/reference-video-rights-nullable.sql'));
+    await db.exec(read('supabase/migrations/20261115142749_allow_reference_video_without_per_upload_attestation.sql'));
     const next='33333333-3333-4333-8333-333333333333';
     await db.query(insert,[next,USER,lib.stagingPath(USER,next),null]);
     // New 30-second data and an old-client timestamp both survive the expanded schema.
