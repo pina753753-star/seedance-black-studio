@@ -37,13 +37,15 @@
 .featureBeta{display:inline-flex;align-items:center;padding:2px 7px;border:1px solid rgba(245,158,11,.65);border-radius:999px;color:#f59e0b;font-size:9px;font-weight:700;line-height:1.35;letter-spacing:.08em;white-space:nowrap;flex-shrink:0}.betaLabel{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
 #danceReference{display:none!important}
 #danceTab .betaLabel{gap:3px}#danceTab .featureBeta{padding:2px 4px;font-size:8px}
+/* 非表示中も絵コンテのDOMと保存データは維持する。 */
+#sbSection[hidden]{display:none!important}
 </style>
 </head>
 <body>
 <main class="wrap">
 <header class="top"><a class="brand" href="./index.html"><img src="/assets/brand/pina-logo-header-full.png" alt="Pina Studio" style="height:auto;width:120px;display:block"></a><button class="home" id="menuBtn">☰</button></header>
 
-<!-- 絵コンテ・動画編集は入口のみ非表示(DOM/ID/data-modeは他処理が参照するため残す)。機能本体・保存済みデータ・直URL/保存状態からの復帰は従来どおり -->
+<!-- 絵コンテは入力・復元を含め非表示。DOM・機能本体・保存済みデータは残す。動画編集は従来どおり入口のみ非表示。 -->
 <div class="tabs">
   <button data-mode="reference_to_video" id="referenceTab">リファレンス</button>
   <button data-mode="image_to_video">画像から動画</button>
@@ -131,7 +133,7 @@
 
 <!-- 絵コンテセクション: 絵コンテ画像1枚→Claudeが単一の統合プロンプトを生成→
      既存のreference_to_video生成フロー(mainCard/start())へそのまま引き継ぐ -->
-<section id="sbSection" style="display:none">
+<section id="sbSection" hidden style="display:none">
   <div id="sbHint" style="margin-bottom:12px;background:rgba(142,216,255,.07);border:1px solid rgba(142,216,255,.28);border-radius:14px;padding:12px 14px;color:#c8cad6;font-size:12px;line-height:1.8">
     複数のカットを1枚にまとめた絵コンテ画像から、AIが動画用プロンプトを作ります。<br>
     ①画像を選ぶ → ②プロンプトを作る（無料） → ③内容を確認して動画を作る
@@ -236,6 +238,7 @@ function writeDraft(patch){const d={...readDraft(),...patch,updatedAt:new Date()
 // 絵コンテ確定内容(prompt/imageUrl/model/aspect/duration/resolution/prepared)専用の下書き。
 // 通常タブが使うDRAFT_KEY(referenceUrls/prompt_<mode>)とは完全に分離し、絵コンテ内容が
 // 通常のリファレンスタブ下書きへ混入しないようにする。
+const STORYBOARD_UI_ENABLED=false;
 const SB_DRAFT_KEY='flowvidStoryboardDraft';
 function sbReadDraft(){try{return JSON.parse(localStorage.getItem(SB_DRAFT_KEY)||'{}')}catch(_){return {}}}
 function sbWriteDraft(patch){const d={...sbReadDraft(),...patch,updatedAt:new Date().toISOString()};localStorage.setItem(SB_DRAFT_KEY,JSON.stringify(d));return d}
@@ -465,6 +468,7 @@ function isComboBlocked(){const m=$('model')?.value||'';const r=$('resolution')?
 function syncComboWarning(){const mo=$('model')?.value||'';syncSelectModelCapabilities(mo,'duration','resolution','aspect');const isFastLite=mo==='bytedance/seedance-2.0-fast'||mo==='bytedance/seedance-2.0-lite';const isStandard=mo===SEEDANCE_25_STANDARD_MODEL;const isRefMode=mode==='reference_to_video';const resEl=$('resolution');if(resEl){const opt1080=Array.from(resEl.options).find(o=>o.value==='1080p');if(opt1080)opt1080.disabled=!resolution1080Access||isStandard||mo==='bytedance/seedance-2.0-fast'||(isFastLite&&isRefMode);}const el=$('comboWarning');if(!el)return;const blocked=isComboBlocked();if(blocked){el.textContent='このモデルとリファレンスモードでは1080pを利用できません。';el.style.display='block';}else el.style.display='none';}
 
 function setMode(m){
+  if(!STORYBOARD_UI_ENABLED&&m==='storyboard')m='text_to_video';
   const wasSbLocked=sbLocked;
   mode=m;
   window.flowvidGenerationMode=m;
@@ -1550,6 +1554,7 @@ function sbCleanupLeakedSharedDraft(sd){
 }
 
 function sbTryRestorePrepared(){
+  if(!STORYBOARD_UI_ENABLED)return false;
   const sd=sbReadDraft();
   if(!sd.prepared||!sd.imageUrl)return false;
   sbCleanupLeakedSharedDraft(sd);
@@ -1728,6 +1733,7 @@ $('sbAnalyzeBtn').onclick=async()=>{
 // (mainCard / #create / start())へそのまま引き継ぐ。start()・creditEstimate()・
 // updateCreditUi()・renderAssets()・モデレーション・料金計算には一切手を加えない。
 function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution,detectedCuts}){
+  if(!STORYBOARD_UI_ENABLED)return;
   mode='reference_to_video';
   // flowvid-open-inline.jsのcalculateCredits()はwindow.flowvidGenerationModeを
   // 最優先で参照するため、ここでreference_to_videoへ設定する。タブの表示(.on)は
@@ -1770,6 +1776,7 @@ function sbProceedToCreate({prompt,imageUrl,model,aspect,duration,resolution,det
 // 「作り直す」: プロンプト・画像・ロックをすべてリセットし、絵コンテタブの
 // 初期状態(画像選択前)へ戻して、再度「プロンプトを作る」を押せるようにする。
 function resetStoryboardInputs(){
+  if(!STORYBOARD_UI_ENABLED)return;
   sbApplyLock(false);
   sbFile=null;
   sbResizedBase64='';
