@@ -91,8 +91,8 @@
     $('kdImageRemove').style.display=img.status!=='idle'&&!busy()?'block':'none';
     $('kdImageFile').disabled=busy()||!access.allowed;
     $('kdVideoFile').disabled=busy()||!access.allowed||!access.rate;
-    $('kdVideoName').textContent=vid.name||(access.lengthSelect?`お手本動画: MP4／MOV・${access.min}〜${access.sourceMax}秒・最大50MB`:`お手本動画: MP4／MOV・${access.min}〜${access.max}秒・最大50MB`);
-    let note=access.lengthSelect?`自動でお手本の長さに合わせます（${access.max}秒超は先頭${access.max}秒）。`:`${access.max}秒を超える動画は使えません。自動では短くしません。`;
+    $('kdVideoName').textContent=vid.name||(access.lengthSelect?`アップロード：MP4／MOV・${access.min}〜${access.sourceMax}秒・最大50MB`:`お手本動画: MP4／MOV・${access.min}〜${access.max}秒・最大50MB`);
+    let note=access.lengthSelect?`生成：最大${access.max}秒。${access.max}秒を超えるお手本動画は先頭${access.max}秒を使用します。`:`${access.max}秒を超える動画は使えません。自動では短くしません。`;
     if(vid.status==='uploading')note='非公開領域へアップロード中…';
     else if(vid.status==='checking')note='形式・長さ・安全性を検査中…';
     else if(vid.status==='ready')note=inRange(vid)?`検査完了・${(vid.durationMs/1000).toFixed(3)}秒（課金${vid.billableSeconds}秒）`:`検査完了・${(vid.durationMs/1000).toFixed(3)}秒。ただしモーションは${access.min}〜${access.max}秒の動画が必要です。この動画では生成できません。`;
