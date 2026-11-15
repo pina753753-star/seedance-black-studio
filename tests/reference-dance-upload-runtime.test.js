@@ -163,7 +163,7 @@ test('reload restores ready or pending assets without automatic reinspection or 
     assert.deepEqual(requests, ['/api/reference-dance-latest']);
     assert.equal(ctx.referenceDanceAsset.status, status === 'ready' ? 'ready' : 'failed');
     assert.equal(ctx.referenceDanceAsset.retryable, status !== 'ready');
-    assert.equal(rights.checked, true);
+    assert.equal(rights.checked, undefined);
   }
 });
 test('late restore response does not overwrite a new local upload', async () => {

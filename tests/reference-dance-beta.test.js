@@ -261,10 +261,10 @@ test('cleanup cron is registered and reference assets are isolated from audio cl
   );
 });
 
-test('admin BETA UI keeps the browser on asset IDs and requires rights confirmation', () => {
+test('admin BETA UI keeps asset IDs without per-upload rights assertion', () => {
   const ui = read('generate-prod.html');
-  assert.match(ui, /id="danceRights" type="checkbox"/);
-  assert.match(ui, /rightsConfirmed:true/);
+  assert.doesNotMatch(ui, /id="danceRights"/);
+  assert.doesNotMatch(ui, /rightsConfirmed:true/);
   assert.match(ui, /body\.reference_video_asset_id=referenceDanceAsset\.id/);
   assert.doesNotMatch(ui, /body\.reference_videos=/);
   assert.match(ui, /blockedByDance/);
