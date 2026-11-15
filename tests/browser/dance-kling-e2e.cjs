@@ -137,11 +137,11 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
       try {
         const p = f.page;
         for (const m of ['text_to_video', 'image_to_video', 'reference_to_video', 'storyboard', 'dance']) {
-          // Storyboard is a hidden entry but remains reachable through existing state.
+          // Hidden storyboard requests fall back to the regular text tab.
           await p.evaluate(m => setMode(m), m);
           assert.equal(await p.locator('#referencePolicyNotice').count(), 0);
           assert.equal(await p.locator('#kdSection').isVisible(), m === 'dance');
-          assert.equal(await p.locator('#sbSection').isVisible(), m === 'storyboard');
+          assert.equal(await p.locator('#sbSection').isVisible(), false);
           assert.equal(await noHScroll(p), true);
         }
         await p.evaluate(() => onVideoEditTab().catch(() => {}));
@@ -149,6 +149,38 @@ async function noHScroll(p) { return p.evaluate(() => document.documentElement.s
         assert.equal(await p.locator('#kdSection').isVisible(), false);
         assert.equal(f.calls.starts.length, 0);
         assert.deepEqual(f.pageErrors, []);
+      } finally { await f.context.close(); }
+    });
+    await run(`[${width}] storyboard stays hidden on URL, saved state and prepared draft reload`, async () => {
+      const f = await fixture(browser);
+      try {
+        const p = f.page;
+        const saved = JSON.stringify({prepared:true,imageUrl:origin+'/saved.png',prompt:'saved storyboard',model:'bytedance/seedance-2.0-fast',duration:'5',resolution:'720p',aspect:'9:16'});
+        for (const source of ['mode', 'draft', 'prepared', 'url']) {
+          await p.evaluate(({source,saved}) => {
+            localStorage.setItem('flowvidGenerateMode', 'storyboard');
+            localStorage.setItem('flowvidGenerateDraft', JSON.stringify({mode:source==='draft'?'storyboard':'text_to_video',prompt_text_to_video:'keep text',prompt_reference_to_video:'keep reference'}));
+            if(source==='mode')localStorage.removeItem('flowvidGenerateDraft');
+            if(source==='prepared')localStorage.setItem('flowvidStoryboardDraft',saved);
+          }, {source,saved});
+          await p.goto(origin+'/generate-prod.html'+(source==='url'?'?mode=storyboard':''), {waitUntil:'networkidle'});
+          assert.equal(await p.locator('[data-mode="storyboard"]').isVisible(), false);
+          assert.equal(await p.locator('#sbSection').isVisible(), false);
+          assert.equal(await p.locator('#mainCard').isVisible(), true);
+          assert.equal(await p.evaluate(()=>mode), 'text_to_video');
+          assert.equal(await p.evaluate(()=>sbLocked), false);
+          if(source==='prepared'||source==='url')assert.equal(await p.evaluate(()=>localStorage.getItem('flowvidStoryboardDraft')),saved);
+          if(source!=='mode')assert.equal(await p.locator('#prompt').inputValue(),'keep text');
+          for(const m of ['reference_to_video','image_to_video','text_to_video']) {
+            await p.locator('[data-mode="'+m+'"]').click();
+            assert.equal(await p.locator('#mainCard').isVisible(),true);
+            assert.equal(await p.locator('#sbSection').isVisible(),false);
+          }
+          await openDance(p);
+          assert.equal(await noHScroll(p),true);
+        }
+        assert.equal(f.calls.starts.length,0);
+        assert.deepEqual(f.pageErrors,[]);
       } finally { await f.context.close(); }
     });
     await run(`[${width}] checkbox-free upload: remove, reselect and recover after inspection failure`, async () => {
