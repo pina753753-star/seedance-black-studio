@@ -2,6 +2,87 @@
 
 > このファイルは、リポジトリ・git履歴・Supabase(本番DB実測)・Vercel設定・ai-rules/READMEを一次調査した結果に基づく。確認できなかった点は「確認できません」と明記している。今後のセッションはまずこのファイルを読むこと。
 
+## 2026年11月16日 記録補完（2026年10月29日〜11月15日）
+
+### 記録範囲と確認の区別
+- 原因: 作業完了後のSTATUS.md追記が継続されず、コードの履歴と作業記録が一致していなかった。
+- 今回はGitHubのmain向けマージ済みPR一覧と各PR本文を照合し、既記録の#277/#278/#279を除く34件を追記した。照合時main: `a1b3fc46a3d789ecae75eb514050d85694bc8e15`。
+- **完了（コード反映）**: 下表のPRはGitHubのmerged_atとmerge_commit_shaによりmainへの反映を確認した。
+- **本番反映**: mainへのマージだけでは本番配信・DB・Railwayの反映証拠としない。下の個別記録で確認範囲を分ける。
+- **検証**: 過去PR本文のテスト結果は当時の実施報告であり、今回再実行した結果ではない。今回の作業は記録の照合・編集のみで、実決済・生成・DB/設定変更は行っていない。
+- 元の記録は削除せず保持した。旧見出しの日付・未確認事項は当時の状態であり、後続PRによる変更は本追記を参照する。
+- この補完は上記期間のmain向けマージ済みPRが対象。全期間の作業、未マージ/ローカル作業、Git外の運用操作をすべて網羅したという意味ではない。
+
+### main反映済みの作業一覧
+日時はGitHubのマージ時刻（UTC）。詳細・過去のテスト結果はリンク先のPR本文を参照。
+
+| PR | マージ日時（UTC） | 変更内容 | マージコミット |
+|---|---|---|---|
+| [#313](https://github.com/pina753753-star/seedance-black-studio/pull/313) | 2026-11-15 15:06:49 | アップロード4〜60秒・最大50MBと、生成最大30秒・先頭30秒使用を分離表示。 | `a1b3fc46a3d789ecae75eb514050d85694bc8e15` |
+| [#312](https://github.com/pina753753-star/seedance-black-studio/pull/312) | 2026-11-15 14:52:29 | 絵コンテの入力画面・URL/保存状態/確定下書きからの復元も非表示。DOM・専用下書き・APIは保持。 | `53c6112704f8b5a6f7c4bdad60ce01da05e6df88` |
+| [#311](https://github.com/pina753753-star/seedance-black-studio/pull/311) | 2026-11-15 14:38:07 | 生成画面の改定告知バナーを全タブで非表示。規約本文等は変更なし。 | `293de77a30f38ef411cee351230e9c83585c073b` |
+| [#310](https://github.com/pina753753-star/seedance-black-studio/pull/310) | 2026-11-15 14:31:14 | 参考動画の自己申告チェックを除去し、権利・同意・外部AI送信の説明を規約等に追加。 | `63bb903c5880bf829fb16dbd6c19a12044fc5876` |
+| [#309](https://github.com/pina753753-star/seedance-black-studio/pull/309) | 2026-11-15 06:30:18 | www正規URL、共有画像URL、既存2ページのサイトマップを整備。画面本文は維持。 | `d1d9a848a89288fa0f099d2b690c80641fb642c8` |
+| [#308](https://github.com/pina753753-star/seedance-black-studio/pull/308) | 2026-11-13 13:39:57 | 既存credits-info.htmlのクロールだけを許可。説明文追加なし。 | `3f927a177e781c0e6a7d94c9664931cf221a1cf1` |
+| [#305](https://github.com/pina753753-star/seedance-black-studio/pull/305) | 2026-11-12 02:06:23 | 検索用meta descriptionだけを本人指定文に変更。 | `f72fedc3c5bba69ed41b45eed78ce762ebde1501` |
+| [#304](https://github.com/pina753753-star/seedance-black-studio/pull/304) | 2026-11-07 04:31:36 | 専用管理キーでOpenRouterの購入総額−使用総額を取得する残高表示を追加。 | `c55e5227e0c1dbc6b5b38cd34449f2fb19a97684` |
+| [#303](https://github.com/pina753753-star/seedance-black-studio/pull/303) | 2026-11-07 02:22:15 | fal残高は専用FAL_BILLING_KEYを優先。拒否時に生成用キーへ再試行しない。 | `cceac47950567c4cb93cee6926224eec333ff893` |
+| [#302](https://github.com/pina753753-star/seedance-black-studio/pull/302) | 2026-11-06 23:32:36 | 管理者向けの読取専用API提供元残高一覧を追加。 | `c45ca35df1ab1015169557bfa9ac323e3ae7c252` |
+| [#301](https://github.com/pina753753-star/seedance-black-studio/pull/301) | 2026-11-06 12:27:22 | トップの検索・共有用メタ情報を更新。descriptionは後続#305で更新。 | `4a57955b6065b5b8f0e31363b3302efdfb63a37b` |
+| [#300](https://github.com/pina753753-star/seedance-black-studio/pull/300) | 2026-11-06 11:44:01 | トップとブランド画像に限ってクロール許可。その他の遮断は維持。 | `a2c6359faf58cd60ffbc17b38ca82ee1c0c5b676` |
+| [#299](https://github.com/pina753753-star/seedance-black-studio/pull/299) | 2026-11-06 02:22:16 | 無料クレジットで通常Seedance/公開モーションを利用可能に。非サブスク720p・透かし等は維持。 | `1af18d59ff802c0b772dbb580543d73e0dca6d6d` |
+| [#298](https://github.com/pina753753-star/seedance-black-studio/pull/298) | 2026-11-05 21:32:10 | Standard月額で通常Seedance 2.5/Turbo・Klingモーションを利用可能に。 | `cb68e384a86fabceb62989f8678f4e35a6521ed6` |
+| [#297](https://github.com/pina753753-star/seedance-black-studio/pull/297) | 2026-11-05 10:51:14 | クレジット補完APIの本人確認と既存残高の競合時保護。 | `c1b2c43ccd2d8ecaba1aba0467a191d3d929ca08` |
+| [#296](https://github.com/pina753753-star/seedance-black-studio/pull/296) | 2026-11-05 07:14:12 | H3 Maxの独立絵コンテモードを非表示。リファレンスは維持。 | `281f74364cb88069120f912206d2e4e8f4bd497b` |
+| [#295](https://github.com/pina753753-star/seedance-black-studio/pull/295) | 2026-11-05 06:13:17 | 通常価格の年額購入が割引期限で止まる問題を修正。H3ヘルプ料金も訂正。 | `ab75fe13b6fc17267998b04b1ece4b27c9502b9a` |
+| [#294](https://github.com/pina753753-star/seedance-black-studio/pull/294) | 2026-11-01 14:36:51 | 検証可能な提供元メタ情報に基づくKling履歴ラベルと、小さいヘルプアイコン。 | `503f60210b73983093ef9a9d005fc51ec24f558d` |
+| [#293](https://github.com/pina753753-star/seedance-black-studio/pull/293) | 2026-11-01 13:49:41 | モーションの重複説明・見積を整理し、キーボード対応ヘルプを追加。 | `bdfc611f9066d0accb60aa6a4aa2b211194f6dbb` |
+| [#292](https://github.com/pina753753-star/seedance-black-studio/pull/292) | 2026-11-01 13:11:58 | モーション専用固定プロンプトで体の構造と正面全身構図を指示。品質保証ではない。 | `aa9b93b219e8a2673edf3f1591c0cdf53b92e843` |
+| [#291](https://github.com/pina753753-star/seedance-black-studio/pull/291) | 2026-11-01 11:41:25 | SDR動画の色レンジ・表示アスペクト比を正規化するworker修正。 | `a11be56ce2b9babf48feee6b154f994afdfb11ed` |
+| [#290](https://github.com/pina753753-star/seedance-black-studio/pull/290) | 2026-11-01 09:15:15 | 可変フレームレートの画面録画をCFR30変換前に不当に拒否しないworker修正。 | `e2f285cbc8d0740c505309e9f284078691d92eae` |
+| [#289](https://github.com/pina753753-star/seedance-black-studio/pull/289) | 2026-11-01 07:37:19 | モーション動画の独自OpenAI 5フレーム審査を除外。素材分離・画像審査・提供元拒否等は維持。 | `12bf5682b4f8ac9d432de6b821da7e81bc01a442` |
+| [#288](https://github.com/pina753753-star/seedance-black-studio/pull/288) | 2026-11-01 07:00:03 | 単体購入モーションBETA、最大30秒・先頭カット・実測秒数見積を追加。 | `2dd35e950ab069018d787dc92309f12f68f876e2` |
+| [#287](https://github.com/pina753753-star/seedance-black-studio/pull/287) | 2026-11-01 05:09:44 | H3料金説明をテキスト120・画像等130クレジットに訂正。 | `721a43a543b9f1e301817774c3b82e66cbbf60f5` |
+| [#286](https://github.com/pina753753-star/seedance-black-studio/pull/286) | 2026-11-01 03:57:49 | H3テキスト15秒768pを120クレジットに適正化。保存予約額と提示額の照合。 | `298a759859b73ca1de89248ec5a70a9cfdf37298` |
+| [#285](https://github.com/pina753753-star/seedance-black-studio/pull/285) | 2026-11-01 00:56:17 | 本番ホストの曲添付UIを一時非表示。既存素材・APIは維持。 | `41fc3108cec0398876d4ea96bac9da0ceaa6b4b1` |
+| [#284](https://github.com/pina753753-star/seedance-black-studio/pull/284) | 2026-11-01 00:35:25 | BETA表示整理と通常生成に重複した旧ダンス入口の非表示。 | `753779f4d1f4125de7eab658336316d5f02eb8b8` |
+| [#283](https://github.com/pina753753-star/seedance-black-studio/pull/283) | 2026-10-30 01:06:30 | プロンプト不要のKlingモーションタブと一時ポーリング障害の扱いを追加。 | `29303dd71ad6ab0938bf3178fc3ccf9d7e7557ee` |
+| [#282](https://github.com/pina753753-star/seedance-black-studio/pull/282) | 2026-10-29 08:23:07 | 生成画面の公開記念価格案内だけを削除。実価格は維持。 | `96d150baab6dc708a89aed2c3c0e204981dc194a` |
+| [#281](https://github.com/pina753753-star/seedance-black-studio/pull/281) | 2026-10-29 08:09:29 | 料金ページの公開記念価格案内だけを削除。実価格は維持。 | `6da58df42c1fff70221b1b092b98e2dd09f1f308` |
+| [#280](https://github.com/pina753753-star/seedance-black-studio/pull/280) | 2026-10-29 07:52:51 | 480p引き下げ完了告知だけを料金ページから削除。引き下げと履歴は維持。 | `d7aba2d7e2c52fd4efbf3aa3b1b20b03008c7ea8` |
+| [#276](https://github.com/pina753753-star/seedance-black-studio/pull/276) | 2026-10-29 01:10:41 | 絵コンテ/動画編集の入口のみを非表示。絵コンテ復元は後続#312で非表示化。 | `f741e96645cf41d6107efd4aa07788102194d535` |
+| [#275](https://github.com/pina753753-star/seedance-black-studio/pull/275) | 2026-10-29 00:06:01 | 通常Webで送信された見積を超える控除を課金前に停止。未送信旧クライアントは対象外。 | `ac59400fd783b1ef990155da3847278c3503b46a` |
+
+### 2026年11月15日: 絵コンテ非表示（PR #312）
+- 完了: `generate-prod.html`と`tests/browser/dance-kling-e2e.cjs`の2ファイル。入口だけでなくURL、保存モード、確定済み下書きからの絵コンテ画面の復元を止める。
+- コード確認: `STORYBOARD_UI_ENABLED=false`、`setMode('storyboard')`を通常テキスト生成へ正規化。`sbTryRestorePrepared`・`sbProceedToCreate`・`resetStoryboardInputs`を停止し、`sbSection`をhiddenで非表示にする。専用下書き・DOM・APIは削除しない。
+- 過去の検証報告（PR本文）: 通信モックの1280px/390pxで各5件成功。URL・保存状態・確定下書き・再読み込み・通常タブ・モーション素材の保持/再選択、構文・差分チェック。実課金・有料生成なし。
+- 本番反映: 11月15日14:54 UTCのソラの会話報告では反映済み。ただし当時ログイン後の実画面を開けず、非表示の目視確認は未実施だった。今回も本番ログイン後の実画面を再検証していない。
+- 残確認: ログイン後の実画面で、旧URL/保存状態から戻っても絵コンテが表示されないこと。新規生成は不要。
+
+### 2026年11月15日: お手本の長さと生成尺の案内（PR #313）
+- 完了: `dance-kling.js`と`generate-prod.html`の2ファイル。初期HTMLとJavaScript描画を一致させ、キャッシュ更新用のスクリプトURLを変更。
+- 表示: 「アップロード：MP4／MOV・4〜60秒・最大50MB」「生成：最大30秒。30秒を超えるお手本動画は先頭30秒を使用します。」
+- 処理上限・価格・生成処理は変更していない。ファイル選択後の検査状態表示も既存どおり。
+- 過去の検証報告（PR本文）: 通信モックの390px/1280pxで文言・横はみ出しなし、構文・差分チェック成功。実課金・有料生成なし。
+- 本番反映: 11月15日15:08 UTCのソラの会話報告では反映済み。ただしログイン後の実画面は未確認と報告。ユーザーは15:15 UTCに「おけ」と返答したが、これは詳細な実画面検証の証拠とは扱わない。
+- 残確認: 本番ログイン後、初期表示とJavaScript更新後で案内が揃っていること。
+
+### 関連する本番反映・残確認
+- #305: PR本文に、指定descriptionの本番ブラウザ確認と画面内説明追加なしの確認が記録されている。Google側の採用・検索結果更新は別で、保証しない。
+- #308: PR本文に、本番robots.txtの一行追加、料金説明HTMLの反映前との一致、既存の取得禁止維持を確認した記録がある。Google再クロール・掲載・順位は未確認。
+- #309: 正規URL/サイトマップ整備はmain反映済み。本追記では本番デプロイの正確な証拠を新規照合していないため、本番実配信の確認済みとは追加認定しない。
+- #310: 権利確認チェックの変更はmain反映済み。PR本文では対象94件成功、独立レビュー・Preview確認・モック試験・ビルド成功。認証済み生成画面の実連携は未検証。#311は告知バナーの非表示であり、絵コンテ画面の非表示は#312と区別する。
+- #302/#303/#304: 残高一覧・fal専用キー対応・OpenRouter対応はmain反映済み。#304本文では専用管理キー未設定であり、コード反映と実残高取得完了は別。現在の設定値・残高は今回取得していない。
+- #298/#299: PR本文は本番SQLの先行適用と定義・権限の確認を報告している。今回DBには接続していないため「PR本文の適用報告」として扱う。実ユーザーの生成・控除・非会員出力の検証完了とはしない。
+- #288/#290/#291: mainマージとRailway workerの稼働版は別。各PRの公開時手順・過去の待ち状態を現在の稼働状態と混同せず、現在のworker SHA/health・DB整合は今回未確認。
+- #292: プロンプト修正のマージは、体型・背景・構図の再現品質を保証しない。
+- #295: 年額購入UIの修正とStripe実決済の確認は別。PR本文では実決済・実請求額は未確認。
+- 各PRにある既存テスト失敗・未実施の実機/実API検証は、mainへ入ったという理由で解決扱いにしない。
+- 今回の変更対象は本作業記録のみ。HTML/JS/API/DB/料金/鍵/環境変数/設定は変更しない。STATUS.mdは作業者向け資料で、package.jsonの静的ビルド対象（HTML/JS/robots/assets）に含まれないため、生成・認証・決済の実行経路への変更はない。
+
+---
+
 ## 2026年10月28日 作業ログ(PR #270でmain反映済み)
 
 ### pricing.html 単体購入タブの解約案内の誤解を修正【完了: 説明文修正1件。本番HTML配信とソラ側の本番ブラウザ検証まで】
