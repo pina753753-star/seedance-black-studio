@@ -11,6 +11,10 @@
 const { requireConfirmedAuth } = require('../_lib/confirmed-auth.js');
 const { serviceClient, isUuid, sanitizeJob } = require('../_lib/h3-live-store.js');
 const { getJobStatus } = require('../_lib/h3-live-fal.js');
+const {
+  withoutProviderDiagnostics,
+  isMissingProviderDiagnosticsSchema
+} = require('../_lib/h3-provider-diagnostics.js');
 const { STATUS_POLL_MS, STATUS_UPSTREAM_MIN_INTERVAL_MS } = require('../_lib/h3-live-config.js');
 const {
   UPLOADS_TABLE,
@@ -133,19 +137,33 @@ module.exports = async function handler(req, res) {
 
   if (upstream.state === 'completed') {
     const doneIso = new Date().toISOString();
-    const { data: claimed, error: completeError } = await db
+    const diagnostics = upstream.providerDiagnostics || {};
+    const completedUpdate = {
+      status: 'completed',
+      output_url: upstream.outputUrl,
+      provider_status: 'COMPLETED',
+      provider_expanded_prompt: diagnostics.expandedPrompt || null,
+      provider_seed: diagnostics.seed ?? null,
+      provider_timings: diagnostics.timings || null,
+      completed_at: doneIso,
+      finished_at: doneIso,
+      updated_at: doneIso
+    };
+    let completionResult = await db
       .from('h3_live_jobs')
-      .update({
-        status: 'completed',
-        output_url: upstream.outputUrl,
-        provider_status: 'COMPLETED',
-        completed_at: doneIso,
-        finished_at: doneIso,
-        updated_at: doneIso
-      })
+      .update(completedUpdate)
       .eq('id', jobId)
       .in('status', ACTIVE)
       .select('*');
+    if (isMissingProviderDiagnosticsSchema(completionResult.error)) {
+      completionResult = await db
+        .from('h3_live_jobs')
+        .update(withoutProviderDiagnostics(completedUpdate))
+        .eq('id', jobId)
+        .in('status', ACTIVE)
+        .select('*');
+    }
+    const { data: claimed, error: completeError } = completionResult;
 
     if (completeError) {
       console.error('[h3-live/status] completed persist error:', completeError.message, 'jobId:', jobId);

@@ -36,7 +36,7 @@ const IMAGE_IDENTITY_ANCHOR_PROMPT =
 function buildDirectorProviderPrompt(prompt, anchorPrompt = '') {
   const instruction = String(prompt || '').trim();
   const anchor = String(anchorPrompt || '').trim();
-  return anchor ? `${anchor}\n${instruction}` : instruction;
+  return anchor ? `${instruction}\n${anchor}` : instruction;
 }
 const HEARTBEAT_INTERVAL_MS = 5000;
 const SESSION_CREATE_TIMEOUT_MS = 45000;

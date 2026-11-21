@@ -237,10 +237,18 @@
     }
     function directorPrompt(text){
       var prompt=String(text||'').trim();
-      if(
-        /ゆっくり|ゆるやか|スロー|slowly|slow[\s-]?motion|高速|倍速|fast[\s-]?motion|普通の速度|通常速度|実時間/i.test(prompt)
-      ){
+      if(!prompt)return '';
+      var hasSlow=/ゆっくり|ゆるやか|スロー(?:モーション)?|slowly|slow[\s-]?motion/i.test(prompt);
+      var rejectsSlow=/(?:ゆっくり|ゆるやか|スロー(?:モーション)?)(?:に|は|を)?(?:しない|しません|ではない|ではなく|禁止|不要|なし)|(?:no|without|avoid|do not use)\s+slow[\s-]?motion/i.test(prompt);
+      var hasRealtime=/普通の速度|通常速度|実時間|normal[\s-]?speed|real[\s-]?time/i.test(prompt);
+      var hasFast=/高速|素早|速く|急加速|全速|疾走|激しく|連続|戦|攻撃|斬|薙刀|敵|走|回避|ジャンプ|fast|rapid|quick|high[\s-]?speed|action|fight|attack|slash|run|dodge|jump/i.test(prompt);
+      if(hasSlow&&!rejectsSlow){
+        if(hasFast||hasRealtime)return prompt+' スローモーションは明示した区間だけに限定し、その直後から指定どおり実時間または高速動作へ戻す。指定区間以外をスローにしない。';
         return prompt;
+      }
+      if(hasRealtime)return prompt;
+      if(hasFast){
+        return prompt+' 開始直後から実時間の高速動作。静止、溜め、長いポーズ、全編スローモーションを入れず、連続動作を即座に実行する。';
       }
       return prompt+' 動きは自然な実時間の速度。スローモーションにしない。';
     }
