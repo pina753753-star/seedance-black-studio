@@ -1,7 +1,7 @@
-# FlowVid Studio — Codex作業ルール
+# Pina Studio（旧 FlowVid Studio）— Codex作業ルール
 
 このリポジトリでCodexが作業する場合、作業開始前に必ず本ファイルを読むこと。
-本ファイルは `CLAUDE.md`(Claude Code向けの作業ルール)の内容をCodex向けに書き写したものであり、両エージェントで同じ制約を守ることを目的とする。
+本ファイルはCodex向けの作業ルール。共通の入口は [CLAUDE.md](CLAUDE.md)、詳細ルールは [ai-rules/00_master_rule.md](ai-rules/00_master_rule.md)。両者の制約を維持する。資料の所在と現在状態は [資料マップ](docs/PROJECT-MAP.md) と [STATUS.md](STATUS.md) を参照する。本文の重複は自動同期されていないため、変更時は相互に照合する。
 
 ## プロジェクトの技術構成
 
@@ -9,8 +9,8 @@
 - バックエンド: Vercel Serverless Functions(`api/` 配下)
 - DB/認証/ストレージ: Supabase(Postgres + Auth + Storage)
 - 決済: Stripe
-- 動画生成API: OpenRouter(Seedance)
-- 透かし(watermark)処理: Railway上の別サービス(`watermark-server/`, Node/Express/ffmpeg)。無料プランのみ透かしを付与し、有料プランは透かしなしの動画を利用する
+- 通常動画生成API: Seedance 2.0/FastはOpenRouter、2.5/2.5 TurboはWaveSpeed。モデル別仕様は `api/_lib/video-models.js`、送信分岐は `api/_lib/seedance-start.js` を確認する。
+- 透かし(watermark)処理: Railway上の別サービス(`watermark-server/`, Node/Express/ffmpeg)。単体購入のみは透かしあり、有効なサブスクリプションは透かしなし。実際の適用判定はコードと現在の仕様を照合する
 
 **生成フローの中心的なファイル**は以下であり、変更時は特に慎重に扱うこと。
 
