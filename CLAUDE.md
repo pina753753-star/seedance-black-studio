@@ -15,6 +15,16 @@
 - 修正前に「原因・修正箇所・確認方法」を出す
 - 修正後に「変更内容・確認方法・次の確認箇所」を出す
 
+## Vercel環境変数のType選択（恒久ルール）
+
+- 環境変数の**名前**はルール・運用文書へ記載してよい。ただし、APIキー、署名シークレット、トークン、パスワード、service role keyなどの**秘密値**は、リポジトリ、会話、ログ、スクリーンショットへ記載しない。
+- Vercelへ環境変数を追加・変更する前に、既存項目のアイコンやTypeをそのまま真似せず、値の性質から`Secret`か`Config`かを判定する。
+- `Secret`にするもの：`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、各種`*_API_KEY`、`*_SECRET`、アクセストークン、DBパスワード、Supabase service role keyなど。
+- `Config`にするもの：Stripe Price ID（`price_`）、Coupon ID、Product ID（`prod_`）、公開URL、機能フラグ、その他漏れても認証・署名に使えない識別子や設定値。
+- Price ID・Coupon ID等の実値は秘密情報ではないが、環境変更で古くなるため、恒久ルールには原則として実値を固定記載せず、環境変数名・Type・対象環境を記録する。
+- 現行のTeam関連は次のTypeを使う：`STRIPE_PRICE_TEAM_MONTHLY`=`Config`、`STRIPE_PRICE_TEAM_YEARLY`=`Config`、`STRIPE_COUPON_ANNUAL_10_OFF_202609`=`Config`。
+- Production・Previewの両方で必要な変数は、保存前に両環境が選択されていることを確認する。既存変数と重複する場合は新規追加せず、既存項目の名前・Type・対象環境を確認する。
+
 ## CodexとClaude Codeの役割分担
 
 - 実装は基本的にCodexが行う。
